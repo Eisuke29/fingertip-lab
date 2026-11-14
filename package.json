@@ -1,0 +1,31 @@
+{
+  "name": "fingertip-product-lab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.mjs",
+    "start": "node server.mjs --production",
+    "build": "tsc --noEmit && vite build",
+    "build:pages": "tsc --noEmit && vite build --mode pages --outDir dist-pages",
+    "preview:pages": "vite preview --mode pages --outDir dist-pages --host 127.0.0.1 --port 4173 --strictPort",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:browser": "playwright test",
+    "test:pages": "playwright test --config playwright.pages.config.ts",
+    "simulate": "node scripts/simulate.mjs"
+  },
+  "dependencies": {
+    "three": "^0.183.0",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.0",
+    "@types/node": "^24.0.0",
+    "@types/three": "^0.183.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.0",
+    "vitest": "^4.0.0"
+  },
+  "engines": { "node": ">=22.12.0" }
+}
