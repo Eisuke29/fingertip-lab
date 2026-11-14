@@ -97,7 +97,7 @@ test('four colored points travel through video, calibration and WebSocket to the
   });
   const room = 'markers-' + Date.now();
   const viewer = await context.newPage(); await ready(viewer, '/?dev=1&room=' + room); await viewer.locator('#dev-advanced summary').click(); await viewer.selectOption('#contact-mode', 'camera');
-  await page.goto('/tracker?room=' + room); await page.selectOption('#tracking-source', 'markers'); await page.locator('#start-camera').click();
+  await page.goto('/tracker?room=' + room); await page.locator('[data-source="markers"]').click(); await page.locator('#start-camera').click();
   await expect.poll(() => page.evaluate(() => (window as any).__pivotTracker.snapshot().points)).toBeTruthy();
   const recordStable = async (kind: string) => expect(async () => { await page.locator(`[data-record="${kind}"]`).click(); await expect(page.locator(`[data-record="${kind}"]`)).toHaveAttribute('aria-pressed', 'true', { timeout: 200 }); }).toPass({ timeout: 15000, intervals: [250, 400] });
   await recordStable('neutral');

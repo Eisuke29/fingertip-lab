@@ -12,7 +12,8 @@ test('published path runs the same pivot renderer and exposes simulation only in
   await expect.poll(() => page.evaluate(() => (window as any).__pivot?.snapshot().depth)).toBeGreaterThan(5);
   await expect(page.locator('#simulation-badge')).toBeVisible();
   await page.screenshot({ path: 'artifacts/pivot-pages.png' });
-  await page.locator('#tracker-link').click(); await expect(page).toHaveURL(/view=tracker/);
-  await expect(page.locator('.static-info')).toContainText('PC'); await expect(page.locator('video')).toHaveCount(0);
+  const [tracker] = await Promise.all([page.context().waitForEvent('page'), page.locator('#tracker-link').click()]);
+  tracker.on('websocket', s => sockets.push(s.url())); await expect(tracker).toHaveURL(/view=tracker/);
+  await expect(tracker.locator('.static-info')).toContainText('PC'); await expect(tracker.locator('video')).toHaveCount(0);
   expect(sockets.filter(url => url.includes('/input'))).toEqual([]);
 });

@@ -6,12 +6,18 @@ import { PivotScene } from './scene';
 import { PoseSocket } from './socket';
 import { isStaticDemo } from './deployment';
 import { neutralPose, type Ball, type FingerConfig, type Pose, type SceneKind, type Side } from './types';
-import { $, href, isDeveloper, renderPipeline, renderReadouts, roomName, rotation, slider } from './ui';
+import { $, href, icon, isDeveloper, renderPipeline, renderReadouts, roomName, rotation, setData, setText, slider, toggle } from './ui';
 
 type Setup = {
   side: Side; radius: number; middleLength: number; distalLength: number; yaw: number; pitch: number; dipRest: number;
   offsetX: number; offsetY: number; ballRadius: number; ballDepth: number; ballX: number; ballY: number;
   skin: string; rootGap: number; viewYaw: number; viewPitch: number; contactMode: 'touch' | 'camera';
+};
+const sceneNames: Record<SceneKind, string> = { press: '押す', release: '離す', stroke: 'なぞる' };
+const sceneInfo: Record<SceneKind, string> = {
+  press: '指先をゆっくり曲げて、球を押し込む',
+  release: '押したあと指先を戻すと、糸が伸びて切れる',
+  stroke: '触れたまま手側を左右へ倒して、表面をなぞる',
 };
 const defaults = (): Setup => ({ ...defaultFinger(), side: 'front', yaw: 11, pitch: 23, dipRest: -35, offsetX: 0, offsetY: 0,
   ballRadius: 70, ballDepth: 200, ballX: 0, ballY: 0, skin: '#d9aa91', rootGap: 0, viewYaw: 0, viewPitch: 0, contactMode: 'touch' });
@@ -20,12 +26,19 @@ export function startExperience() {
   const developer = isDeveloper();
   let setup = defaults();
   try { const saved = JSON.parse(localStorage.getItem('pivot-finger.setup.v2') || 'null'); if (saved && typeof saved === 'object') setup = { ...setup, ...saved }; } catch {}
-  const stageHtml = `<div class="view-container" id="stage"><header class="experience-header"><p class="stage-condition"><span id="side-label">表側</span><span class="sep">/</span><span id="scene-label">押す</span></p><a class="adjust-link" href="${href(developer ? 'product' : 'dev')}">${developer ? '体験画面' : '調整'}</a></header>
-    <span class="simulation-badge" id="simulation-badge" hidden>入力シミュレーション</span>
-    <div class="pivot-guide" id="pivot-guide" aria-hidden="true"><span class="posture-mark"></span></div>
-    <p class="input-note" id="input-note"></p>
-    <nav class="scene-nav" aria-label="場面"><button data-scene="press" aria-pressed="true">押す</button><button data-scene="release" aria-pressed="false">離す</button><button data-scene="stroke" aria-pressed="false">なぞる</button></nav></div>`;
-  $('app').innerHTML = `<main class="experience-layout ${developer ? 'dev-layout' : ''}">${developer ? '<div class="dev-stage-wrap">' : ''}${stageHtml}${developer ? '</div>' + developerPanel(setup) : ''}</main>`;
+  const stageHtml = `<div class="view-container" id="stage">
+    <header class="experience-header">
+      <div class="status-pill" id="status-pill" data-tone="off"><span class="dot"></span><span id="status-text">接続中</span></div>
+      <a class="adjust-link" href="${href(developer ? 'product' : 'dev')}">${developer ? icon('phone', 16) + '体験画面' : icon('gear', 16) + '調整'}</a>
+    </header>
+    <span class="simulation-badge" id="simulation-badge" hidden>実指の入力ではありません</span>
+    <div class="pivot-guide" id="pivot-guide" aria-hidden="true"><span class="ring"></span><span class="core"></span><span class="guide-label" id="guide-label">第2関節をここに</span></div>
+    <p class="input-note" id="input-note" data-tone="info"></p>
+    <div class="dock">
+      <p class="scene-hint"><span class="side-chip" id="side-label">表側</span><strong id="scene-label">押す</strong><span id="scene-desc">${sceneInfo.press}</span></p>
+      <nav class="scene-nav" aria-label="場面">${(['press', 'release', 'stroke'] as const).map(k => `<button data-scene="${k}" aria-pressed="${k === 'press'}">${icon(k, 20)}<span>${sceneNames[k]}</span></button>`).join('')}</nav>
+    </div></div>`;
+  $('app').innerHTML = `<main class="experience-layout ${developer ? 'dev-layout' : ''}">${developer ? '<div class="dev-stage-wrap"><div class="device">' : ''}${stageHtml}${developer ? '</div></div>' + developerPanel(setup) : ''}</main>`;
   const scene = new PivotScene($('stage'));
   const receiver = new PoseReceiver();
   const socket = new PoseSocket('viewer', roomName());
@@ -60,6 +73,7 @@ export function startExperience() {
     ball = { center: add(guide, v(setup.ballX, setup.ballY, setup.side === 'front' ? -setup.ballDepth : setup.ballDepth - 8)), radius: setup.ballRadius };
     engine.reset(); material.reset(); positionGuide();
     $('side-label').textContent = setup.side === 'front' ? '表側' : '裏側';
+    $('guide-label').textContent = setup.side === 'front' ? '第2関節をここに' : '背面の印に第2関節';
   }
   function suspend() { endTouch(); receiver.invalidate(); rearAligned = false; cameraOffSeen = false; simulationContact = false; if (developer) $<HTMLInputElement>('sim-contact').checked = false; }
   function resetAfterLoss() { receiver.invalidate(); if (touch) touchNeedsFresh = true; rearAligned = false; cameraOffSeen = false; }
@@ -80,7 +94,7 @@ export function startExperience() {
   scene.canvas.addEventListener('lostpointercapture', event => { if (event.pointerId === pointerId) endTouch(); });
   scene.canvas.addEventListener('contextmenu', event => event.preventDefault());
   document.querySelectorAll<HTMLButtonElement>('[data-scene]').forEach(button => button.addEventListener('click', () => {
-    kind = button.dataset.scene as SceneKind; material.reset(); $('scene-label').textContent = button.textContent || '';
+    kind = button.dataset.scene as SceneKind; material.reset(); $('scene-label').textContent = sceneNames[kind]; $('scene-desc').textContent = sceneInfo[kind];
     document.querySelectorAll('[data-scene]').forEach(b => b.setAttribute('aria-pressed', String((b as HTMLElement).dataset.scene === kind)));
     if (developer) updateSceneControls();
   }));
@@ -190,15 +204,25 @@ export function startExperience() {
       lastUi = now;
       $('pivot-guide').hidden = visible;
       $('simulation-badge').hidden = !(simulation || remote.source === 'simulation');
-      // One short status statement; empty while the finger is shown and tracking normally.
-      const note = simulation ? '' :
-        remote.status === 'rotation' ? '画面の向きが変化 — PCで再校正' :
-        remote.status === 'lost' ? '追跡途絶 — 指を離して当て直す' :
-        touchNeedsFresh ? '指を離して当て直す' :
-        visible && remote.valid ? '' : remote.status === 'hold' ? '追跡待ち' :
-        remote.status === 'waiting' ? (isStaticDemo ? `公開版：実指入力なし · <a href="${href('dev')}">開発画面</a>` : `PC未接続 · <a href="${href('tracker')}">計測画面</a>で校正`) :
-        setup.side === 'back' ? 'PCで接触を確認' : '第2関節を ○ に当てる';
+      // Status pill = what the input is doing; note = the one thing the user should do next (empty when nothing).
+      const simulated = simulation || remote.source === 'simulation';
+      const [tone, statusText] = simulation ? ['sim', 'シミュレーション'] :
+        remote.status === 'ready' ? [simulated ? 'sim' : 'ok', simulated ? 'PCからシミュレーション受信' : 'PCで計測中'] :
+        remote.status === 'hold' ? ['wait', '追跡を待っています'] :
+        remote.status === 'lost' ? ['err', '追跡が途切れました'] :
+        remote.status === 'rotation' ? ['err', '画面の向きが変わりました'] :
+        isStaticDemo ? ['off', '公開デモ'] : socket.connected ? ['wait', 'PCの計測を待っています'] : ['off', '中継に接続中'];
+      setData($('status-pill'), 'tone', tone); setText($('status-text'), statusText);
+      const [noteTone, note] = simulation ? ['info', ''] :
+        remote.status === 'rotation' ? ['err', '画面の向きが変わりました。PCの「端末の向き」を合わせて校正し直してください'] :
+        remote.status === 'lost' ? ['err', '追跡が途切れました。指を一度離して、もう一度当ててください'] :
+        touchNeedsFresh ? ['warn', '指を一度離して、もう一度当ててください'] :
+        visible && remote.valid ? ['info', ''] :
+        remote.status === 'hold' ? ['warn', 'PCのカメラに人差し指が映っているか確認してください'] :
+        remote.status === 'waiting' ? (isStaticDemo ? ['info', `公開版：実指入力なし · <a href="${href('dev')}">開発画面で動きを試す</a>`] : ['info', `PCの<a href="${href('tracker')}">計測画面</a>でカメラを開始し、校正してください`]) :
+        setup.side === 'back' || setup.contactMode === 'camera' ? ['info', '第2関節を印に合わせると、PCが接触を判定します'] : ['info', '第2関節を ○ に当てると、指の続きが現れます'];
       if ($('input-note').innerHTML !== note) $('input-note').innerHTML = note;
+      setData($('input-note'), 'tone', noteTone);
       $('stage').dataset.contact = String(!!engine.contact); $('stage').dataset.depth = material.depth.toFixed(2);
       $('stage').dataset.source = simulation ? 'simulation' : remote.source || 'none';
       if (developer) {
@@ -207,7 +231,7 @@ export function startExperience() {
         const receiving = simulation || remote.status === 'ready';
         const statusName = ({ waiting: '未接続', ready: '受信中', hold: '保持', lost: '途絶', rotation: '向き変更' } as Record<string, string>)[remote.status];
         renderPipeline($('pipeline'), [
-          ['入力', simulation ? 'SIM' : statusName, receiving ? 'ok' : remote.status === 'hold' ? 'wait' : 'off'],
+          ['入力', simulation ? 'シミュ' : statusName, receiving ? 'ok' : remote.status === 'hold' ? 'wait' : 'off'],
           ['接点', active ? '登録済' : '未登録', active ? 'ok' : 'off'],
           ['接触', engine.contact ? 'あり' : 'なし', engine.contact ? 'ok' : 'off'],
           ['変形', material.depth > 0.05 ? material.depth.toFixed(1) + ' px' : '0', material.depth > 0.05 ? 'ok' : 'off'],
@@ -225,25 +249,61 @@ export function startExperience() {
 }
 
 function developerPanel(s: Setup) {
-  return `<aside class="developer-panel"><header class="topbar"><h1>開発画面</h1><p class="meta"><span id="connection">接続待ち</span> · <a id="tracker-link" href="#">計測画面 ↗</a></p></header>
-  <ol class="pipeline" id="pipeline"></ol><div class="readouts" id="diagnostics"></div>
-  <section><h2><span class="num">1</span>入力</h2>
-    <div class="control-row"><input type="checkbox" id="use-simulation"/><label for="use-simulation">シミュレーション</label><button id="play-pose">自動再生</button></div>
-    <div id="simulation-controls" hidden>${slider('hand-x', '手側 θx　左 − / 右 +', -25, 25, 0)}${slider('hand-y', '手側 θy　下 − / 上 +', -25, 25, 0)}${slider('dip', 'DIP θd', -15, 75, 0)}
-      <div class="control-row"><input type="checkbox" id="sim-contact" checked/><label for="sim-contact">接点あり</label><button id="neutral-pose">基準姿勢</button></div></div></section>
-  <section><h2><span class="num">2</span>条件</h2>
-    <div class="field-grid"><label for="side">面</label><select id="side"><option value="front">表側（奥へ）</option><option value="back">裏側（手前へ）</option></select>
-    <span class="label-cell">表示倍率 g</span><div class="button-row segmented"><button data-gain="0.8">0.8</button><button data-gain="1" aria-pressed="true">1.0</button><button data-gain="1.2">1.2</button></div></div>
-    <div id="release-controls" hidden>${slider('break-distance', '糸の破断距離', 12, 50, 26, 1, ' px')}</div><div id="stroke-controls" hidden>${slider('stroke-gain', '表面模様の追従率', 0.25, 1.35, 0.65, 0.05, '')}</div></section>
-  <details id="dev-advanced"><summary>詳細設定</summary>
-    <div class="field-grid"><label for="contact-mode">接触検出</label><select id="contact-mode"><option value="touch">タッチ</option><option value="camera">カメラ固定点</option></select></div>
-    <button class="full-width" id="realign">接点を再登録</button>
-    <h3>指</h3>${slider('offset-x', '継ぎ目 X', -60, 60, s.offsetX, 1, ' px')}${slider('offset-y', '継ぎ目 Y', -60, 60, s.offsetY, 1, ' px')}
-    ${slider('width', '指の半径', 10, 36, s.radius, 1, ' px')}${slider('middle-length', '中節長', 70, 165, s.middleLength, 1, ' px')}${slider('distal-length', '末節長', 45, 115, s.distalLength, 1, ' px')}
-    ${slider('yaw', '基準方向 左右', -40, 40, s.yaw)}${slider('pitch', '基準方向 上下', 5, 55, s.pitch)}${slider('dip-rest', 'DIP 基準角', -60, -10, s.dipRest)}
-    ${slider('root-gap', '根元の隙間', 0, 18, s.rootGap, 1, ' px')}<div class="control-row"><label for="skin-color">根元の色</label><input type="color" id="skin-color" value="${s.skin}"/></div>
-    <h3>球</h3>${slider('ball-radius', '半径', 45, 105, s.ballRadius, 1, ' px')}${slider('ball-depth', '奥行き', 135, 255, s.ballDepth, 1, ' px')}${slider('ball-x', '中心 X', -55, 55, s.ballX, 1, ' px')}${slider('ball-y', '中心 Y', -55, 55, s.ballY, 1, ' px')}
-    ${slider('spread', 'へこみの広がり', 0.3, 0.65, 0.43, 0.01, '')}
-    <h3>観察点</h3>${slider('view-yaw', '左右', -14, 14, s.viewYaw)}${slider('view-pitch', '上下', -14, 14, s.viewPitch)}
-    <button class="quiet" id="reset-setup">設定を初期値に戻す</button></details></aside>`;
+  return `<aside class="developer-panel">
+  <header class="panel-head">
+    <div><p class="eyebrow">Pivot Finger Lab</p><h1>開発画面</h1></div>
+    <a class="pill-link" id="tracker-link" href="#" target="_blank" rel="noopener">${icon('camera', 16)}計測画面${icon('external', 13)}</a>
+  </header>
+  <p class="conn-line">${icon('info', 14)}<span id="connection">接続待ち</span></p>
+  <ol class="pipeline" id="pipeline"></ol>
+  <div class="readouts" id="diagnostics"></div>
+
+  <section class="card">
+    <h2>入力</h2>
+    <p class="card-desc">PCのカメラがなくても、ここで角度を入れて同じ描画を確かめられます。</p>
+    ${toggle('use-simulation', 'シミュレーション入力', false, '実指の代わりにスライダーで動かす')}
+    <button class="secondary full-width" id="play-pose">${icon('play', 14)}自動再生（押す→戻す→なぞる）</button>
+    <div id="simulation-controls" class="sub" hidden>
+      ${slider('dip', 'DIP（指先の曲げ）', -15, 75, 0, 1, '°', '右へ動かすと球を押す')}
+      ${slider('hand-y', '手側 上下', -25, 25, 0, 1, '°', '− 下 / + 上')}
+      ${slider('hand-x', '手側 左右', -25, 25, 0, 1, '°', '− 左 / + 右')}
+      ${toggle('sim-contact', '接点あり', true)}
+      <button class="ghost" id="neutral-pose">${icon('reset', 14)}基準姿勢に戻す</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>表示条件</h2>
+    <div class="field-grid">
+      <label for="side">面</label><select id="side"><option value="front">表側（画面の奥へ）</option><option value="back">裏側（手前へ出る）</option></select>
+      <span class="label-cell">表示倍率 g<small>球に触れていない時だけ変更可</small></span>
+      <div class="segmented"><button data-gain="0.8">0.8</button><button data-gain="1" aria-pressed="true">1.0</button><button data-gain="1.2">1.2</button></div>
+    </div>
+    <div id="release-controls" hidden>${slider('break-distance', '糸が切れる距離', 12, 50, 26, 1, ' px')}</div>
+    <div id="stroke-controls" hidden>${slider('stroke-gain', '表面模様の追従率', 0.25, 1.35, 0.65, 0.05, '')}</div>
+  </section>
+
+  <details class="card" id="dev-advanced"><summary>接触の検出</summary>
+    <div class="field-grid"><label for="contact-mode">検出方法</label><select id="contact-mode"><option value="touch">タッチ（画面に当てる）</option><option value="camera">カメラ固定点（PCで判定）</option></select></div>
+    <p class="card-desc">タッチが反応しない端末や裏側では「カメラ固定点」を選び、PCの計測画面で接触判定を有効にします。</p>
+    <button class="secondary full-width" id="realign">${icon('reset', 14)}接点を登録し直す</button>
+  </details>
+  <details class="card"><summary>指の形と継ぎ目</summary>
+    <p class="card-desc">指を離した状態で変更できます。実指の見え方に合わせます。</p>
+    ${slider('offset-x', '継ぎ目 X', -60, 60, s.offsetX, 1, ' px')}${slider('offset-y', '継ぎ目 Y', -60, 60, s.offsetY, 1, ' px')}
+    ${slider('width', '指の半径', 10, 36, s.radius, 1, ' px')}${slider('middle-length', '中節の長さ', 70, 165, s.middleLength, 1, ' px')}${slider('distal-length', '末節の長さ', 45, 115, s.distalLength, 1, ' px')}
+    ${slider('yaw', '基準の向き 左右', -40, 40, s.yaw)}${slider('pitch', '基準の向き 上下', 5, 55, s.pitch)}${slider('dip-rest', 'DIP 基準角', -60, -10, s.dipRest)}
+    ${slider('root-gap', '根元の隙間', 0, 18, s.rootGap, 1, ' px', '描画だけを切り取る比較条件')}
+    <div class="switch-row"><label class="switch-text" for="skin-color">根元の色</label><input type="color" id="skin-color" value="${s.skin}"/></div>
+  </details>
+  <details class="card"><summary>球</summary>
+    ${slider('ball-radius', '半径', 45, 105, s.ballRadius, 1, ' px')}${slider('ball-depth', '奥行き', 135, 255, s.ballDepth, 1, ' px')}
+    ${slider('ball-x', '中心 X', -55, 55, s.ballX, 1, ' px')}${slider('ball-y', '中心 Y', -55, 55, s.ballY, 1, ' px')}
+    ${slider('spread', 'へこみの広がり', 0.3, 0.65, 0.43, 0.01, '', 'g=1.0 かつ非接触時のみ')}
+  </details>
+  <details class="card"><summary>観察点</summary>
+    ${slider('view-yaw', '左右', -14, 14, s.viewYaw)}${slider('view-pitch', '上下', -14, 14, s.viewPitch)}
+  </details>
+  <button class="ghost danger" id="reset-setup">${icon('reset', 14)}すべての設定を初期値に戻す</button>
+  </aside>`;
 }

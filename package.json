@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.2.3",
+    "qrcode-generator": "^2.0.4",
     "three": "^0.183.0",
     "ws": "^8.19.0"
   },
