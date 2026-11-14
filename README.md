@@ -2,7 +2,7 @@
 
 曲げた人差し指の**PIP（第2関節）付近をガラスの支点にして、その続きに見える仮想の中節・末節で、固定されたジェル球に触る**Webプロトタイプです。`pivot-finger-prototype-cli-prompt.md`と提供された手の図をもとに、以前の実装を置き換えました。
 
-**[公開表示](https://eisuke29.github.io/fingertip-lab/)** · **[描画確認・再生](https://eisuke29.github.io/fingertip-lab/?dev=1)** · [検証範囲](#ビルド検証公開)
+**[公開表示](https://eisuke29.github.io/fingertip-lab/)** · **[描画確認・再生](https://eisuke29.github.io/fingertip-lab/?dev=1)** · [検証範囲](#ビルド検証公開) · **[リンク集](リンク集.md)**
 
 公開URLは同じレンダラーで描画と入力シミュレーションを確認できます。実指の入力にはPCのカメラとWebSocket中継が必要です。**実際の手・iPhone Safariでの計測、継ぎ目、触感は未確認**です。
 
