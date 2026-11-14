@@ -22,7 +22,24 @@ export function measureHand(image: [ImagePoint, ImagePoint, ImagePoint, ImagePoi
   }
   return { image, world, handVector, handAngle, bend };
 }
-type Snapshot = { handVector: V3 | null; handAngle: number; bend: number; pip: ImagePoint };
+type Snapshot = { handVector: V3 | null; handAngle: number; bend: number; pip: ImagePoint; lengths: [number, number, number] };
+const segmentLengths = (image: HandSample['image']): [number, number, number] =>
+  [0, 1, 2].map(i => Math.hypot(image[i + 1].x - image[i].x, image[i + 1].y - image[i].y)) as [number, number, number];
+
+/** One Euro filter: strong smoothing when still, little lag when moving (Casiez et al. 2012). */
+export class OneEuro {
+  private x: number | null = null; private dx = 0;
+  constructor(private minCutoff = 1.2, private beta = 0.35, private dCutoff = 1) {}
+  private alpha(cutoff: number, dt: number) { const tau = 1 / (2 * Math.PI * cutoff); return 1 / (1 + tau / dt); }
+  reset() { this.x = null; this.dx = 0; }
+  filter(value: number, dt: number) {
+    if (this.x === null || dt <= 0) { this.x = value; return value; }
+    const rawDx = (value - this.x) / dt;
+    this.dx += (rawDx - this.dx) * this.alpha(this.dCutoff, dt);
+    this.x += (value - this.x) * this.alpha(this.minCutoff + this.beta * Math.abs(this.dx), dt);
+    return this.x;
+  }
+}
 export class HandCalibration {
   mode: 'plane-y' | 'estimated-xy' = 'plane-y';
   neutral: Snapshot | null = null;
@@ -31,9 +48,9 @@ export class HandCalibration {
   bent: Snapshot | null = null;
   message = '次：楽な姿勢で止めて記録';
   private history: HandSample[] = [];
-  private filtered: Pose = { tiltX: 0, tiltY: 0, dip: 0 };
+  private filters = { tiltX: new OneEuro(), tiltY: new OneEuro(), dip: new OneEuro() };
   get ready() { return !!(this.neutral && this.down && this.bent && (this.mode === 'plane-y' || this.left)); }
-  reset() { this.neutral = this.down = this.left = this.bent = null; this.history = []; this.filtered = { tiltX: 0, tiltY: 0, dip: 0 }; this.message = '次：楽な姿勢で止めて記録'; }
+  reset() { this.neutral = this.down = this.left = this.bent = null; this.history = []; Object.values(this.filters).forEach(f => f.reset()); this.message = '次：楽な姿勢で止めて記録'; }
   push(sample: HandSample | null) { if (!sample) { this.history = []; return; } this.history.push(sample); if (this.history.length > 12) this.history.shift(); }
   record(kind: 'neutral' | 'down' | 'left' | 'bent') {
     if (this.history.length < 8) { this.message = '4点が映る姿勢で0.5秒止めてください'; return false; }
@@ -41,7 +58,8 @@ export class HandCalibration {
     const latest = this.history.at(-1)!;
     const direction = latest.handVector ? norm(v(median(this.history.map(s => s.handVector!.x)), median(this.history.map(s => s.handVector!.y)), median(this.history.map(s => s.handVector!.z)))) : null;
     const snapshot: Snapshot = { handVector: direction, handAngle: latest.handAngle + median(this.history.map(s => wrapAngle(s.handAngle - latest.handAngle))),
-      bend: median(this.history.map(s => s.bend)), pip: { x: median(this.history.map(s => s.image[1].x)), y: median(this.history.map(s => s.image[1].y)) } };
+      bend: median(this.history.map(s => s.bend)), pip: { x: median(this.history.map(s => s.image[1].x)), y: median(this.history.map(s => s.image[1].y)) },
+      lengths: [0, 1, 2].map(i => median(this.history.map(s => segmentLengths(s.image)[i]))) as [number, number, number] };
     if (this.history.some(s => Math.abs(s.bend - snapshot.bend) > 0.12 || Math.abs(wrapAngle(s.handAngle - snapshot.handAngle)) > 0.12)) { this.message = '手が動いています — 止めてからもう一度'; return false; }
     if (kind === 'neutral') { this.neutral = snapshot; this.down = this.left = this.bent = null; this.message = '次：指先はそのまま、手を下へ傾けて記録'; return true; }
     if (!this.neutral) { this.message = '先に「楽な姿勢」を記録してください'; return false; }
@@ -56,7 +74,7 @@ export class HandCalibration {
       this.left = snapshot; this.message = '次：手を戻し、指先だけ曲げて記録';
     } else {
       if (Math.abs(snapshot.bend - this.neutral.bend) < 0.12) { this.message = '指先の曲げが小さすぎます（7°以上曲げてください）'; return false; }
-      this.bent = snapshot; this.message = '登録完了 — 楽な姿勢に戻してiPhoneに指を当てる';
+      this.bent = snapshot; this.message = '登録完了 — 楽な姿勢に戻してiPadに指を当てる';
     }
     return true;
   }
@@ -73,9 +91,17 @@ export class HandCalibration {
       tiltY = -sign * wrapAngle(sample.handAngle - this.neutral.handAngle);
     }
     const raw = { tiltX: clamp(tiltX, -0.75, 0.75), tiltY: clamp(tiltY, -0.75, 0.75), dip: clamp(sample.bend - this.neutral.bend, -0.5, 1.5) };
-    const blend = 1 - Math.exp(-Math.min(0.1, dt) / 0.018);
-    for (const key of ['tiltX', 'tiltY', 'dip'] as const) this.filtered[key] += (raw[key] - this.filtered[key]) * blend;
-    return { ...this.filtered };
+    const step = Math.min(0.1, dt);
+    return { tiltX: this.filters.tiltX.filter(raw.tiltX, step), tiltY: this.filters.tiltY.filter(raw.tiltY, step), dip: this.filters.dip.filter(raw.dip, step) };
+  }
+  /**
+   * In a side view the three bone lengths in the image stay nearly constant. A large change means the detector
+   * jumped (wrong joint, other hand) or the finger left the camera plane, so the frame is not trusted.
+   */
+  plausible(sample: HandSample) {
+    if (!this.neutral) return true;
+    const now = segmentLengths(sample.image);
+    return now.every((n, i) => { const r = n / this.neutral!.lengths[i]; return r > 0.6 && r < 1.6; });
   }
   nearContact(sample: HandSample, radius: number) { return !!this.neutral && Math.hypot(sample.image[1].x - this.neutral.pip.x, sample.image[1].y - this.neutral.pip.y) <= radius; }
 }

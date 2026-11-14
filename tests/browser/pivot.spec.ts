@@ -16,6 +16,9 @@ test('same renderer: fixed root, separate DIP, static hold, local contact, resto
   await ready(page); await page.locator('#use-simulation').check();
   await expect.poll(async () => (await snapshot(page))?.visible).toBe(true);
   const free = await snapshot(page); expect(free.contact).toBeNull(); expect(free.depth).toBe(0);
+  // Real size: a desktop previews at iPad density (132 CSS px per inch) and the 25 mm middle phalanx is 25 mm long.
+  expect(free.pxPerMm).toBeCloseTo(132 / 25.4, 3);
+  expect(Math.hypot(free.dip.x - free.pip.x, free.dip.y - free.pip.y, free.dip.z - free.pip.z) / free.pxPerMm).toBeCloseTo(25, 5);
   await page.screenshot({ path: 'artifacts/pivot-front-free.png' });
   await setRange(page, 'dip', 62);
   await expect.poll(async () => (await snapshot(page))?.depth).toBeGreaterThan(5);
@@ -38,7 +41,7 @@ test('same renderer: fixed root, separate DIP, static hold, local contact, resto
   expect((await snapshot(page)).ball).toEqual(free.ball);
   await setRange(page, 'dip', 0); await setRange(page, 'hand-x', 0); await page.selectOption('#side', 'back'); await page.locator('[data-scene="press"]').click();
   await setRange(page, 'dip', 62); await expect.poll(async () => (await snapshot(page))?.depth).toBeGreaterThan(5);
-  const back = await snapshot(page); expect(back.pip.z).toBe(-8); expect(back.pad.z).toBeGreaterThan(0); expect(back.ball.center.z).toBeGreaterThan(0);
+  const back = await snapshot(page); expect(back.pip.z).toBeLessThan(0); expect(back.pad.z).toBeGreaterThan(0); expect(back.ball.center.z).toBeGreaterThan(0);
   await page.screenshot({ path: 'artifacts/pivot-back-press.png' }); expect(errors).toEqual([]);
 });
 

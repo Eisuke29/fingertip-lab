@@ -32,7 +32,7 @@ const meter = (id: string, label: string) => `<div class="meter"><span class="me
 export function startTracker() {
   $('app').innerHTML = `<main class="tracker-shell">
   <header class="tracker-head">
-    <div class="brand"><p class="eyebrow">Pivot Finger Lab</p><h1>指の読み取り<span class="room-chip">接続名 ${roomName()}</span></h1><p class="subtitle">PCで開く画面 · カメラで指の動きを読み取り、iPhoneへ送ります</p></div>
+    <div class="brand"><p class="eyebrow">Pivot Finger Lab</p><h1>指の読み取り<span class="room-chip">接続名 ${roomName()}</span></h1><p class="subtitle">PCで開く画面 · カメラで指の動きを読み取り、iPadへ送ります</p></div>
     <ol class="pipeline" id="pipeline"></ol>
     <div class="head-links"><span class="conn" id="network-state">接続中</span><a class="pill-link" href="${href('dev')}" target="_blank" rel="noopener">調整・お試し${icon('external', 13)}</a></div>
   </header>
@@ -49,6 +49,19 @@ export function startTracker() {
         <div class="choice" role="radiogroup" aria-label="読み取り方法">${sources.map(src => `<button role="radio" data-source="${src.id}" aria-checked="${src.id === 'mediapipe'}"><strong>${src.title}</strong><small>${src.detail}</small></button>`).join('')}</div>
         <div class="button-row" id="camera-controls"><button class="primary" id="start-camera">${icon('camera', 16)}<span id="start-label">カメラを開始</span></button><button class="secondary" id="stop-camera" disabled>${icon('stop', 14)}停止</button></div>
         <div class="tracker-error" id="camera-error" hidden></div>
+        <details class="sub guide" id="setup-guide" open><summary>カメラの置き方（精度に一番効きます）</summary>
+          <svg class="setup-art" viewBox="0 0 300 150" aria-hidden="true">
+  <text x="8" y="14" class="cap">上から見た図</text>
+  <rect x="40" y="24" width="96" height="118" rx="9" class="pad"/><rect x="47" y="31" width="82" height="104" rx="4" class="screen"/>
+  <path d="M88 150 L88 86" class="finger"/><circle cx="88" cy="86" r="4.5" class="pivot"/>
+  <path d="M232 86 L98 86" class="ray"/>
+  <g transform="translate(232 74)"><rect width="30" height="24" rx="5" class="cam"/><circle cx="0" cy="12" r="6" class="lens"/></g>
+  <text x="196" y="118" class="note">指の真横</text><text x="196" y="132" class="note">25〜40cm</text>
+  <text x="8" y="146" class="note">指先は画面の奥へ</text>
+</svg>
+          <ol class="guide-list"><li><strong>iPadを机に平らに置き</strong>、動かないよう固定する</li><li>カメラは<strong>iPadの横</strong>に置き、レンズを<strong>指の真横</strong>（指の向きと直角）に向ける</li><li>高さは<strong>画面から3〜8cm上</strong>でレンズを水平に。距離は25〜40cm</li><li>付け根から指先までが<strong>画面の横幅の1/3以上</strong>に映るように。背景は無地、部屋は明るく</li></ol>
+        </details>
+        <div class="checks" id="setup-checks" hidden></div>
         <div id="sender-simulation" class="sub" hidden>${slider('send-dip', '指先の曲げ', -15, 75, 0)}${slider('send-y', '手の傾き 上下', -25, 25, 0)}${slider('send-x', '手の傾き 左右', -25, 25, 0)}${toggle('send-contact', '接触あり', false)}</div>
         <details id="markers-panel" class="sub markers" open hidden><summary>色の目印<span class="tag" id="marker-summary">0 / 4</span></summary><p class="card-desc">付け根・第2関節・第1関節・指先に異なる色の目印を付け、ボタンを押してから映像上の目印をクリックします。</p>${names.map((name, i) => `<div class="marker-row"><span class="marker-dot" id="marker-state-${i}"></span><input type="color" id="marker-color-${i}" value="${initialColors[i]}" aria-label="${name}の色"/><button class="secondary" data-pick="${i}">${name} の色を採取</button></div>`).join('')}<button class="ghost" id="reacquire">${icon('reset', 14)}再検出</button></details>
       </section>
@@ -56,7 +69,7 @@ export function startTracker() {
         <p class="card-desc">横から見たカメラで、各姿勢を約0.5秒止めて記録します。<kbd>Space</kbd> で次の姿勢を記録できます。</p>
         <div class="calibration-list">${poses.map(pose => `<button class="pose" data-record="${pose.kind}" ${pose.kind === 'left' ? 'id="record-left" hidden' : ''}>${poseSvg(pose.points, pose.kind !== 'neutral')}<span class="pose-text"><strong>${pose.title}</strong><small>${pose.detail}</small></span><span class="pose-state"></span></button>`).join('')}</div>
         <p class="status-text" id="calibration-message"></p></section>
-      <section class="step" id="step-phone"><header><span class="step-num">3</span><h2>iPhoneで表示を開く</h2></header>
+      <section class="step" id="step-phone"><header><span class="step-num">3</span><h2>iPadで表示を開く</h2></header>
         <div class="qr-area" id="network-links"><p class="card-desc">アドレスを取得中…</p></div>
         <div id="contact-panel" class="sub">${toggle('contact-armed', 'カメラで接触を判定', false, '裏側・タッチが効かない時。指を合わせてから有効に')}<div class="contact-line"><span>判定</span><span class="tag" id="contact-state">無効</span></div>${slider('contact-radius', '許容半径', 8, 40, 18, 1, ' px')}</div>
       </section>
@@ -70,7 +83,7 @@ export function startTracker() {
   const video = $<HTMLVideoElement>('camera-video');
   const preview = $<HTMLCanvasElement>('camera-preview');
   const ctx = preview.getContext('2d')!;
-  const raw = document.createElement('canvas'); raw.width = 640; raw.height = 480;
+  const raw = document.createElement('canvas'); raw.width = 960; raw.height = 540;
   const rawCtx = raw.getContext('2d', { willReadFrequently: true })!;
   const calibration = new HandCalibration(), markers = new MarkerTracker(), socket = new PoseSocket('tracker', roomName());
   let detector: HandLandmarker | null = null, stream: MediaStream | null = null;
@@ -78,6 +91,8 @@ export function startTracker() {
   let sample: HandSample | null = null, pose = neutralPose(), lastPixels: ImageData | null = null;
   let pick: number | null = null, lastPip: ImagePoint | null = null, lastSeen = 0, selectedHand = '';
   let reason = '停止中', modelState = 'idle', markersFolded = false;
+  // Setup quality, measured continuously while the camera runs.
+  let sideAngle: number | null = null, sizeRatio = 0, rejected = 0; const detections: boolean[] = [];
   let currentSource: PoseFrame['source'] = 'mediapipe';
   let recording: RecordKind | null = null;
   const source = () => currentSource;
@@ -112,8 +127,21 @@ export function startTracker() {
     $('start-label').textContent = starting ? '起動中…' : running ? '読み取り中' : 'カメラを開始';
     $<HTMLButtonElement>('stop-camera').disabled = !running;
   }
+  type Check = { label: string; state: 'ok' | 'warn' | 'bad'; detail: string };
+  function setupChecks(): Check[] {
+    const rate = detections.length ? detections.filter(Boolean).length / detections.length : 0;
+    const checks: Check[] = [{ label: '指が映り続けている', state: rate >= 0.9 ? 'ok' : rate >= 0.7 ? 'warn' : 'bad',
+      detail: rate >= 0.9 ? `検出率 ${Math.round(rate * 100)}%` : `検出率 ${Math.round(rate * 100)}% — 明るさ・背景・隠れを確認` }];
+    checks.push({ label: '十分大きく映っている', state: sizeRatio >= 0.28 ? 'ok' : sizeRatio >= 0.18 ? 'warn' : 'bad',
+      detail: sizeRatio ? `画面幅の ${Math.round(sizeRatio * 100)}%${sizeRatio < 0.28 ? ' — カメラを近づける（目標33%以上）' : ''}` : '—' });
+    if (source() === 'mediapipe') checks.push({ label: '真横から撮れている', state: sideAngle === null ? 'bad' : sideAngle <= 25 ? 'ok' : sideAngle <= 40 ? 'warn' : 'bad',
+      detail: sideAngle === null ? '—' : `ずれ ${Math.round(sideAngle)}°${sideAngle > 25 ? ' — カメラを指の真横へ回す（目標25°以内）' : ''}` });
+    return checks;
+  }
+  const setupReady = () => setupChecks().every(c => c.state !== 'bad');
   function recordPose(kind: RecordKind) {
     if (recording || !running) return;
+    if (!setupReady()) { calibration.message = '先に「撮影チェック」の × をなくしてください（カメラの位置・距離）'; updateUi(); return; }
     recording = kind; updateUi();
     const started = performance.now();
     const attempt = () => {
@@ -135,7 +163,7 @@ export function startTracker() {
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error('カメラはPCの http://localhost:5173/tracker で開いてください。LAN上のHTTPでは取得できません。');
       const device = $<HTMLSelectElement>('camera-device').value;
-      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 }, ...(device ? { deviceId: { exact: device } } : {}) } });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 60 }, ...(device ? { deviceId: { exact: device } } : {}) } });
       video.srcObject = stream; await video.play();
       raw.height = Math.round(raw.width * video.videoHeight / video.videoWidth);
       preview.width = raw.width; preview.height = raw.height;
@@ -153,7 +181,7 @@ export function startTracker() {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const select = $<HTMLSelectElement>('camera-device'); select.replaceChildren(new Option('既定', ''));
       devices.filter(d => d.kind === 'videoinput').forEach((d, i) => select.add(new Option(d.label || `カメラ ${i + 1}`, d.deviceId)));
-      select.value = device; running = true; markersFolded = false; $<HTMLDetailsElement>('markers-panel').open = true; lastVideo = -1; resetCalibration();
+      select.value = device; running = true; markersFolded = false; sideAngle = null; sizeRatio = 0; detections.length = 0; $<HTMLDetailsElement>('setup-guide').open = false; $<HTMLDetailsElement>('markers-panel').open = true; lastVideo = -1; resetCalibration();
       $('camera-empty').hidden = true;
     } catch (error) { modelState = detector ? 'ready' : 'error'; await stopCamera(); fail(`${error instanceof Error ? error.message : error}（読み取り方法を4色マーカーに変更して再試行可）`); }
     finally { starting = false; updateUi(); }
@@ -195,7 +223,7 @@ export function startTracker() {
     const box = $('network-links'); const url = urls[selected];
     const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
     box.innerHTML = `<div class="qr">${qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true })}</div>
-      <div class="qr-text"><p>iPhoneを<strong>このPCと同じWi-Fi</strong>につなぎ、カメラアプリでQRコードを読み取ります。</p>
+      <div class="qr-text"><p>iPadを<strong>このPCと同じWi-Fi</strong>につなぎ、カメラアプリでQRコードを読み取ります。</p>
       <a class="url" href="${url}" target="_blank" rel="noopener">${url.replace(/^http:\/\//, '')}</a>
       ${urls.length > 1 ? `<p class="alt">開けない時は別のアドレス：${urls.map((u, i) => i === selected ? '' : `<button class="link" data-address="${i}">${new URL(u).hostname}</button>`).join('')}</p>` : ''}</div>`;
     box.querySelectorAll<HTMLButtonElement>('[data-address]').forEach(b => b.addEventListener('click', () => showAddresses(urls, Number(b.dataset.address))));
@@ -204,7 +232,7 @@ export function startTracker() {
     const urls = (data.urls.length ? data.urls as string[] : [data.local as string]).map(address => { const url = new URL(address); url.searchParams.set('room', roomName()); return url.href; })
       .sort((a, b) => lanRank(a) - lanRank(b));
     showAddresses(urls);
-  }).catch(() => { $('network-links').innerHTML = '<p class="card-desc">起動したターミナルに表示されたLANアドレスをiPhoneで開きます。</p>'; });
+  }).catch(() => { $('network-links').innerHTML = '<p class="card-desc">起動したターミナルに表示されたLANアドレスをiPadで開きます。</p>'; });
 
   function processCamera(now: number, dt: number) {
     if (!running || video.readyState < 2 || video.currentTime === lastVideo) return;
@@ -234,11 +262,21 @@ export function startTracker() {
           const world = calibration.mode === 'estimated-xy' && worldHand ? [5, 6, 7, 8].map(i => v(worldHand[i].x, -worldHand[i].y, -worldHand[i].z)) as NonNullable<HandSample['world']> : null;
           if (!lastPip || Math.hypot(points[1]!.x - lastPip.x, points[1]!.y - lastPip.y) < raw.width * 0.18) {
             sample = measureHand(points as HandSample['image'], world); selectedHand = candidate.label;
+            // Side-view check: the knuckle line (index MCP -> pinky MCP) should point along the camera axis.
+            const w5 = worldHand?.[5], w17 = worldHand?.[17];
+            if (w5 && w17) {
+              const k = v(w17.x - w5.x, w17.y - w5.y, w17.z - w5.z), len = Math.hypot(k.x, k.y, k.z) || 1;
+              const off = Math.acos(Math.min(1, Math.abs(k.z) / len)) * 180 / Math.PI;
+              sideAngle = sideAngle === null ? off : sideAngle + (off - sideAngle) * 0.15;
+            }
           }
         }
         reason = sample ? '4点を読み取り中' : '人差し指の付け根から指先までが映っていません';
       }
     } catch (error) { sample = null; reason = `読み取りエラー：${error instanceof Error ? error.message : error}`; }
+    if (sample && !calibration.plausible(sample)) { sample = null; rejected++; reason = '検出が乱れたフレームを除外（指の長さが不自然）'; }
+    if (sample) sizeRatio = sample.image.slice(1).reduce((sum, p, i) => sum + Math.hypot(p.x - sample!.image[i].x, p.y - sample!.image[i].y), 0) / raw.width;
+    detections.push(!!sample); if (detections.length > 30) detections.shift();
     if (sample) { lastPip = sample.image[1]; lastSeen = now; pose = calibration.pose(sample, dt); }
     else if (now - lastSeen > 650) { lastPip = null; markers.reset(); }
     calibration.push(sample);
@@ -255,7 +293,7 @@ export function startTracker() {
   (window as unknown as { __pivotTracker: unknown }).__pivotTracker = { snapshot: () => ({ running, modelState, source: source(), calibrated: calibration.ready, frame: structuredClone(lastFrame), points: sample?.image || null, reason }) };
   function tick(now: number) {
     if (disposed) return;
-    if (now - lastProcess >= 45) {
+    if (now - lastProcess >= 30) {
       const dt = Math.min(0.1, (now - lastProcess) / 1000); lastProcess = now;
       const sim = source() === 'simulation'; if (!sim) processCamera(now, dt);
       const valid = sim || (running && !!sample && calibration.ready && now - lastSeen < 180);
@@ -272,8 +310,8 @@ export function startTracker() {
         ['カメラ', sim ? '使用しない' : running ? '取得中' : starting ? '起動中' : '停止', sim ? 'skip' : running ? 'ok' : starting ? 'wait' : 'off'],
         ['指の検出', sim ? '—' : sample ? '4点検出' : running ? '未検出' : '—', sim ? 'skip' : sample ? 'ok' : running ? 'wait' : 'off'],
         ['動きの登録', sim ? '—' : calibration.ready ? '完了' : `${steps.done}/${steps.total}`, sim ? 'skip' : calibration.ready ? 'ok' : running ? 'wait' : 'off'],
-        ['iPhoneへ送信', !socket.connected ? '未接続' : valid ? '送信中' : '無効値', !socket.connected ? 'off' : valid ? 'ok' : 'wait'],
-        ['iPhone', viewers === null ? '—' : viewers + '台', viewers ? 'ok' : 'off'],
+        ['iPadへ送信', !socket.connected ? '未接続' : valid ? '送信中' : '無効値', !socket.connected ? 'off' : valid ? 'ok' : 'wait'],
+        ['iPad', viewers === null ? '—' : viewers + '台', viewers ? 'ok' : 'off'],
       ]);
       for (const [id, value, range] of [['read-x', pose.tiltX, 30], ['read-y', pose.tiltY, 30], ['read-dip', pose.dip, 75]] as const) {
         const deg = degrees(value), share = Math.min(1, Math.abs(deg) / range) * 50;
@@ -288,13 +326,20 @@ export function startTracker() {
       const [tone, num, title, detail] =
         socket.replaced ? ['err', '!', '別のタブで「指の読み取り」が開かれたので、この画面は止まりました', 'このタブを使う場合は再読み込みしてください（新しく開いた方が優先されます）'] :
         !socket.connected ? ['err', '!', 'PCのサーバーに接続できません', 'PCで npm run dev が動いているか確認してください。自動で再接続します'] :
-        sim ? (phoneDone ? ['ok', '✓', '手動の値を送信中', 'スライダーを動かすと、iPhoneの指が動きます（実際の指ではありません）'] : ['info', '3', 'iPhoneで表示を開く', '右の ③ のQRコードを読み取ります']) :
+        sim ? (phoneDone ? ['ok', '✓', '手動の値を送信中', 'スライダーを動かすと、iPadの指が動きます（実際の指ではありません）'] : ['info', '3', 'iPadで表示を開く', '右の ③ のQRコードを読み取ります']) :
         starting ? ['info', '1', 'カメラを起動しています', modelState === 'loading' ? '手指検出モデルを読み込み中…' : 'ブラウザーのカメラ許可を確認してください'] :
         !running ? ['info', '1', '読み取り方法を選んで「カメラを開始」', 'まずは「自動検出」で試し、うまく映らない場合は「4色マーカー」にします'] :
         !sample ? ['warn', '1', '人差し指をカメラに映してください', source() === 'markers' ? '4つの色の目印がすべて映るようにし、必要なら各色を採取し直します' : '付け根（MCP）から指先までが横から見える位置に置きます'] :
+        !calibration.ready && !setupReady() ? ['warn', '1', 'カメラの位置を直してください', (setupChecks().find(c => c.state === 'bad')?.detail ?? '') + '。①の「カメラの置き方」を参照'] :
         !calibration.ready ? ['info', '2', recording ? 'そのまま静止してください…' : `動きの登録：「${nextPose?.title ?? ''}」で止めて記録`, recording ? '約0.5秒動かさずに保つと記録されます' : `${nextPose?.detail ?? ''}。止めたら Space キーか右のボタン`] :
-        !phoneDone ? ['info', '3', 'iPhoneで表示を開く', '右の ③ のQRコードを読み取ります。同じWi-Fiが必要です'] :
-        ['ok', '✓', '準備完了 — iPhoneの ○ に第2関節を当てる', `iPhone ${viewers}台に送信中。指先を曲げると球が押されます`];
+        !phoneDone ? ['info', '3', 'iPadで表示を開く', '右の ③ のQRコードを読み取ります。同じWi-Fiが必要です'] :
+        ['ok', '✓', '準備完了 — iPadの ○ に第2関節を当てる', `iPad ${viewers}台に送信中。指先を曲げると球が押されます`];
+      const checks = running && !sim ? setupChecks() : [];
+      $('setup-checks').hidden = !checks.length;
+      if (checks.length) {
+        const html = `<p class="checks-title">撮影チェック</p>` + checks.map(c => `<div class="check" data-state="${c.state}"><span class="mark">${c.state === 'ok' ? '✓' : c.state === 'warn' ? '!' : '×'}</span><span><strong>${c.label}</strong><small>${c.detail}</small></span></div>`).join('');
+        if ($('setup-checks').innerHTML !== html) $('setup-checks').innerHTML = html;
+      }
       setData($('next-banner'), 'tone', tone); setText($('next-num'), num); setText($('next-title'), title); setText($('next-detail'), detail);
     }
     requestAnimationFrame(tick);

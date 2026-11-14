@@ -64,6 +64,8 @@ export class PivotScene {
   private dirty = true;
   private environment: THREE.WebGLRenderTarget;
   private lastThread = '';
+  /** Thread tube radius in world units (CSS px). */
+  strandRadius = 1.25;
 
   constructor(private container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'low-power' });
@@ -175,7 +177,7 @@ export class PivotScene {
         const start = vector(response.thread.start), end = vector(response.thread.end), middle = start.clone().lerp(end, 0.5);
         middle.y -= start.distanceTo(end) * 0.09;
         const curve = new THREE.CatmullRomCurve3([start, middle, end]);
-        this.strand.geometry.dispose(); this.strand.geometry = new THREE.TubeGeometry(curve, 20, 1.25, 9, false);
+        this.strand.geometry.dispose(); this.strand.geometry = new THREE.TubeGeometry(curve, 20, this.strandRadius, 9, false);
       }
     }
     this.renderer.render(this.scene, this.camera);

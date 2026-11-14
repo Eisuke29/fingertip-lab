@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HandCalibration, measureHand, type HandSample } from '../src/calibration';
+import { HandCalibration, measureHand, OneEuro, type HandSample } from '../src/calibration';
 import { MarkerTracker } from '../src/marker-tracking';
 import { PoseReceiver } from '../src/pose-input';
 import { rotate, v } from '../src/math';
@@ -16,7 +16,7 @@ describe('independent hand measurement and calibration', () => {
     expect(down.bend).toBe(rest.bend); expect(bent.handAngle).toBe(rest.handAngle); expect(bent.bend).toBeGreaterThan(rest.bend + 0.5);
     const c = new HandCalibration(); record(c, 'neutral', rest); record(c, 'down', down); record(c, 'bent', bent);
     const moved = c.pose(down, 0.1); expect(moved.tiltY).toBeLessThan(-0.2); expect(moved.tiltX).toBe(0); expect(moved.dip).toBe(0);
-    for (let i = 0; i < 5; i++) c.pose(bent, 0.1);
+    for (let i = 0; i < 40; i++) c.pose(bent, 0.1);
     const flexed = c.pose(bent, 0.1); expect(Math.abs(flexed.tiltY)).toBeLessThan(0.001); expect(flexed.dip).toBeGreaterThan(1);
   });
   it('calibrates two non-collinear estimated axes without a second mirror inversion', () => {
@@ -25,8 +25,20 @@ describe('independent hand measurement and calibration', () => {
     const rest = sample(), down = sample(rotate(v(-0.05), v(0, 0, 1), 0.3)), left = sample(rotate(v(-0.05), v(0, 1, 0), 0.3));
     record(c, 'neutral', rest); record(c, 'down', down); record(c, 'left', left); record(c, 'bent', sample(v(-0.05), true));
     expect(c.pose(down, 0.1).tiltY).toBeCloseTo(-0.3, 2);
-    for (let i = 0; i < 4; i++) c.pose(left, 0.1);
+    for (let i = 0; i < 40; i++) c.pose(left, 0.1);
     const p = c.pose(left, 0.1); expect(p.tiltX).toBeCloseTo(-0.3, 3); expect(p.tiltY).toBeCloseTo(0, 3);
+  });
+  it('smooths jitter while still and follows real motion with little lag', () => {
+    const f = new OneEuro(); let maxJitter = 0;
+    for (let i = 0; i < 60; i++) { const out = f.filter(0.5 + (i % 2 ? 0.02 : -0.02), 1 / 30); if (i > 10) maxJitter = Math.max(maxJitter, Math.abs(out - 0.5)); }
+    expect(maxJitter).toBeLessThan(0.008);
+    let out = 0; for (let i = 0; i < 9; i++) out = f.filter(0.5 + (i + 1) * 0.1, 1 / 30);
+    expect(1.4 - out).toBeLessThan(0.2);
+  });
+  it('rejects frames whose image bone lengths jump away from the calibrated pose', () => {
+    const c = new HandCalibration(); record(c, 'neutral', measureHand(image(), null)!);
+    expect(c.plausible(measureHand(image(true), null)!)).toBe(true);
+    expect(c.plausible(measureHand([{ x: 120, y: 240 }, { x: 240, y: 240 }, { x: 265, y: 230 }, { x: 395, y: 210 }], null)!)).toBe(false);
   });
   it('rejects missing/foreshortened joints and unstable calibration', () => {
     expect(measureHand([{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 20, y: 0 }, { x: 40, y: 0 }], null)).toBeNull();
