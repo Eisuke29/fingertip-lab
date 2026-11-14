@@ -9,34 +9,29 @@ import type { HandLandmarker } from '@mediapipe/tasks-vision';
 const names = ['MCP', 'PIP', 'DIP', 'TIP'];
 const initialColors = ['#ff4055', '#4cd36a', '#4185f4', '#bc51d9'];
 export function startTracker() {
-  $('app').innerHTML = `<main class="tracker-shell"><header class="panel-head page-head"><div><h1>計測画面</h1><p class="meta">PCカメラで人差し指の姿勢を計測し、表示端末へ送信 · room ${roomName()}</p></div><a href="${href('dev')}" target="_blank" rel="noopener">開発画面 ↗</a></header>
-  <ol class="pipeline wide" id="pipeline"></ol>
-  <div class="tracker-grid"><div class="tracker-main">
-    <figure class="camera-figure"><div class="camera-box"><video id="camera-video" autoplay muted playsinline></video><canvas id="camera-preview" width="640" height="480"></canvas><div class="camera-empty" id="camera-empty">カメラ停止中</div></div>
-      <figcaption><span>カメラ映像 — 検出点 MCP・PIP・DIP・TIP</span><span id="tracking-state">停止中</span></figcaption></figure>
-    <div class="tracker-error" id="camera-error" hidden></div>
-    <section class="dev-section"><h2>計測値</h2><table class="data-table"><tbody>
-      <tr><th scope="row">手側 θx（左右）</th><td id="read-x">—</td></tr><tr><th scope="row">手側 θy（上下）</th><td id="read-y">—</td></tr><tr><th scope="row">DIP 屈曲 θd</th><td id="read-dip">—</td></tr>
-      <tr><th scope="row">校正</th><td id="axis-status">—</td></tr><tr><th scope="row">接触（固定点）</th><td id="contact-state">無効</td></tr><tr><th scope="row">中継</th><td id="network-state">接続中</td></tr></tbody></table></section>
-  </div>
-  <aside class="tracker-side">
-    <section class="dev-section"><h2><span class="num">1</span>カメラ</h2>
-      <div class="field-grid"><label for="tracking-source">計測方式</label><select id="tracking-source"><option value="mediapipe">MediaPipe（手指推定）</option><option value="markers">4色マーカー（面内1軸）</option><option value="simulation">シミュレーション（カメラなし）</option></select></div>
-      <div id="camera-controls"><div class="button-row"><button class="primary" id="start-camera">開始</button><button id="stop-camera" disabled>停止</button></div>
-        <div class="field-grid"><label for="camera-device">カメラ</label><select id="camera-device"><option value="">既定</option></select></div>
+  $('app').innerHTML = `<main class="tracker-shell"><header class="topbar"><h1>計測画面</h1><ol class="pipeline" id="pipeline"></ol><p class="meta"><span id="network-state">接続中</span> · <a href="${href('dev')}" target="_blank" rel="noopener">開発画面 ↗</a></p></header>
+  <div class="tracker-grid">
+    <div class="camera-box"><video id="camera-video" autoplay muted playsinline></video><canvas id="camera-preview" width="640" height="480"></canvas><div class="camera-empty" id="camera-empty">カメラ停止中</div><span class="camera-state" id="tracking-state">停止中</span></div>
+    <aside class="side">
+      <section><h2><span class="num">1</span>カメラ</h2>
+        <select id="tracking-source" aria-label="計測方式"><option value="mediapipe">MediaPipe（手指推定）</option><option value="markers">4色マーカー</option><option value="simulation">シミュレーション（カメラなし）</option></select>
+        <div class="button-row" id="camera-controls"><button class="primary" id="start-camera">開始</button><button id="stop-camera" disabled>停止</button></div>
+        <div class="tracker-error" id="camera-error" hidden></div>
+        <div id="sender-simulation" hidden>${slider('send-x', '手側 θx', -25, 25, 0)}${slider('send-y', '手側 θy', -25, 25, 0)}${slider('send-dip', 'DIP θd', -15, 75, 0)}<div class="control-row"><input type="checkbox" id="send-contact"/><label for="send-contact">接触あり</label></div></div></section>
+      <section id="calibration-panel"><h2><span class="num">2</span>校正<span class="hint">各姿勢で静止して押す</span></h2>
+        <div class="calibration-list"><button data-record="neutral">基準姿勢</button><button data-record="down">手側を下へ倒す</button><button data-record="left" id="record-left" hidden>手側を左へ倒す</button><button data-record="bent">DIPだけ曲げる</button></div>
+        <p class="status-text" id="calibration-message"></p></section>
+      <section><h2><span class="num">3</span>計測値</h2><div class="readouts"><div><span>手側 θx</span><strong id="read-x">—</strong></div><div><span>手側 θy</span><strong id="read-y">—</strong></div><div><span>DIP θd</span><strong id="read-dip">—</strong></div></div></section>
+      <section><h2><span class="num">4</span>iPhoneで開く</h2><div id="network-links" class="network-links"></div></section>
+      <details id="tracker-advanced"><summary>詳細設定</summary>
+        <div class="field-grid"><label for="camera-device">カメラ</label><select id="camera-device"><option value="">既定</option></select>
+          <label for="phone-rotation">端末の向き</label><select id="phone-rotation"><option value="0">縦 0°</option><option value="90">横 90°</option><option value="180">縦 180°</option><option value="270">横 270°</option></select>
+          <label for="axis-mode">計測軸</label><select id="axis-mode"><option value="plane-y">面内1軸（上下）</option><option value="estimated-xy">2軸推定（上下・左右）</option></select></div>
         <div class="control-row"><input type="checkbox" id="mirror-preview" checked/><label for="mirror-preview">プレビューを左右反転</label></div>
-        <div id="markers-panel" hidden><p class="label">マーカー色（ボタンを押して映像上の点をクリック）</p>${names.map((name, i) => `<div class="marker-row"><span class="marker-dot" id="marker-state-${i}"></span><input type="color" id="marker-color-${i}" value="${initialColors[i]}" aria-label="${name}の色"/><button data-pick="${i}">${name}</button></div>`).join('')}<button class="full-width" id="reacquire">再検出</button></div></div>
-      <div id="sender-simulation" hidden>${slider('send-x', '手側 θx（左 − / 右 +）', -25, 25, 0)}${slider('send-y', '手側 θy（下 − / 上 +）', -25, 25, 0)}${slider('send-dip', 'DIP 屈曲 θd', -15, 75, 0)}<div class="control-row"><input type="checkbox" id="send-contact"/><label for="send-contact">接触あり</label></div></div>
-      <div class="field-grid"><label for="phone-rotation">端末の向き</label><select id="phone-rotation"><option value="0">縦 0°</option><option value="90">横 90°</option><option value="180">縦 180°</option><option value="270">横 270°</option></select></div></section>
-    <section class="dev-section" id="calibration-panel"><h2><span class="num">2</span>校正</h2>
-      <div class="field-grid"><label for="axis-mode">計測軸</label><select id="axis-mode"><option value="plane-y">面内1軸（上下）</option><option value="estimated-xy">2軸推定（上下・左右）</option></select></div>
-      <p class="label">各姿勢で約0.5秒静止して記録</p>
-      <div class="calibration-list"><button data-record="neutral">基準姿勢（第2関節を接触）</button><button data-record="down">手側を下へ倒す</button><button data-record="left" id="record-left" hidden>手側を左へ倒す</button><button data-record="bent">基準に戻し DIPのみ曲げる</button></div>
-      <p class="status-text" id="calibration-message"></p><button class="full-width quiet" id="reset-calibration">校正をリセット</button></section>
-    <section class="dev-section" id="contact-panel"><h2><span class="num">3</span>接触判定（固定点）</h2>
-      <div class="control-row"><input type="checkbox" id="contact-armed"/><label for="contact-armed">有効にする（裏側／タッチ非反応時）</label></div>${slider('contact-radius', '許容半径（画像上）', 8, 40, 18, 1, ' px')}</section>
-    <section class="dev-section"><h2><span class="num">4</span>表示端末</h2><p class="label">同じWi-FiのiPhoneで開く</p><div id="network-links" class="network-links"></div></section>
-  </aside></div></main>`;
+        <div id="contact-panel"><div class="control-row"><input type="checkbox" id="contact-armed"/><label for="contact-armed">固定点で接触判定（裏側用）</label><span class="tag" id="contact-state">無効</span></div>${slider('contact-radius', '許容半径', 8, 40, 18, 1, ' px')}</div>
+        <div id="markers-panel" hidden><p class="hint">色ボタン → 映像上の点をクリック</p>${names.map((name, i) => `<div class="marker-row"><span class="marker-dot" id="marker-state-${i}"></span><input type="color" id="marker-color-${i}" value="${initialColors[i]}" aria-label="${name}の色"/><button data-pick="${i}">${name}</button></div>`).join('')}<button class="full-width" id="reacquire">再検出</button></div>
+        <button class="quiet" id="reset-calibration">校正をリセット</button></details>
+    </aside></div></main>`;
   const video = $<HTMLVideoElement>('camera-video');
   const preview = $<HTMLCanvasElement>('camera-preview');
   const ctx = preview.getContext('2d')!;
@@ -58,12 +53,12 @@ export function startTracker() {
   function resetCalibration() { calibration.reset(); sample = null; pose = neutralPose(); $<HTMLInputElement>('contact-armed').checked = false; lastPip = null; selectedHand = ''; updateUi(); }
   function updateUi() {
     const sim = source() === 'simulation', markerMode = source() === 'markers';
-    $('camera-controls').hidden = sim; $('sender-simulation').hidden = !sim; $('markers-panel').hidden = !markerMode;
-    $('calibration-panel').hidden = $('contact-panel').hidden = sim;
+    $('sender-simulation').hidden = !sim; $('markers-panel').hidden = !markerMode; if (markerMode) $<HTMLDetailsElement>('tracker-advanced').open = true;
+    $('calibration-panel').hidden = $('contact-panel').hidden = sim; $('camera-controls').hidden = sim;
     $<HTMLSelectElement>('axis-mode').disabled = markerMode;
     $('record-left').hidden = calibration.mode !== 'estimated-xy';
     $('calibration-message').textContent = calibration.message;
-    const steps = calibrationSteps(); $('axis-status').textContent = calibration.ready ? (calibration.mode === 'plane-y' ? '完了（面内1軸）' : '完了（2軸推定）') : `未完了 ${steps.done}/${steps.total}`;
+    
     document.querySelectorAll<HTMLButtonElement>('[data-record]').forEach(b => { b.setAttribute('aria-pressed', String(!!calibration[b.dataset.record as 'neutral' | 'down' | 'left' | 'bent'])); });
     $<HTMLButtonElement>('start-camera').disabled = starting || running;
     $<HTMLButtonElement>('stop-camera').disabled = !running;

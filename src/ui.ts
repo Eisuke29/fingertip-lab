@@ -13,7 +13,7 @@ export function renderPipeline(el: HTMLElement, stages: Stage[]) {
   const html = stages.map(([label, value, state]) => `<li data-state="${state}"><span class="pl-label">${label}</span><span class="pl-value">${value}</span></li>`).join('');
   if (el.innerHTML !== html) el.innerHTML = html;
 }
-export function renderTable(el: HTMLElement, rows: [string, string][]) {
-  const html = `<tbody>${rows.map(([k, val]) => `<tr><th scope="row">${k}</th><td>${val}</td></tr>`).join('')}</tbody>`;
+export function renderReadouts(el: HTMLElement, cells: [string, string][]) {
+  const html = cells.map(([k, val]) => `<div><span>${k}</span><strong>${val}</strong></div>`).join('');
   if (el.innerHTML !== html) el.innerHTML = html;
 }

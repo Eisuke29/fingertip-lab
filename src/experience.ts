@@ -6,7 +6,7 @@ import { PivotScene } from './scene';
 import { PoseSocket } from './socket';
 import { isStaticDemo } from './deployment';
 import { neutralPose, type Ball, type FingerConfig, type Pose, type SceneKind, type Side } from './types';
-import { $, href, isDeveloper, renderPipeline, renderTable, roomName, rotation, slider } from './ui';
+import { $, href, isDeveloper, renderPipeline, renderReadouts, roomName, rotation, slider } from './ui';
 
 type Setup = {
   side: Side; radius: number; middleLength: number; distalLength: number; yaw: number; pitch: number; dipRest: number;
@@ -205,8 +205,7 @@ export function startExperience() {
         document.querySelectorAll<HTMLButtonElement>('[data-gain]').forEach(b => b.disabled = !!engine.contact);
         $<HTMLInputElement>('spread').disabled = !!engine.contact || engine.gain !== 1;
         const receiving = simulation || remote.status === 'ready';
-        const sourceName = simulation ? 'シミュレーション' : ({ mediapipe: 'MediaPipe', markers: '4色マーカー', simulation: 'PC側シミュレーション' } as Record<string, string>)[remote.source || ''] || '—';
-        const statusName = ({ waiting: '未接続', ready: '受信中', hold: '保持', lost: '途絶', rotation: '画面の向き変更' } as Record<string, string>)[remote.status];
+        const statusName = ({ waiting: '未接続', ready: '受信中', hold: '保持', lost: '途絶', rotation: '向き変更' } as Record<string, string>)[remote.status];
         renderPipeline($('pipeline'), [
           ['入力', simulation ? 'SIM' : statusName, receiving ? 'ok' : remote.status === 'hold' ? 'wait' : 'off'],
           ['接点', active ? '登録済' : '未登録', active ? 'ok' : 'off'],
@@ -214,11 +213,9 @@ export function startExperience() {
           ['変形', material.depth > 0.05 ? material.depth.toFixed(1) + ' px' : '0', material.depth > 0.05 ? 'ok' : 'off'],
         ]);
         const deg = (r: number) => degrees(r).toFixed(1) + '°';
-        renderTable($('diagnostics'), [
-          ['入力源', sourceName], ['計測軸', simulation ? 'X・Y（描画のみ）' : remote.axes === 'plane-y' ? '面内1軸（Y）' : remote.axes === 'estimated-xy' ? '2軸推定（X・Y）' : '—'],
-          ['手側 θx（左右）', deg(pose.tiltX)], ['手側 θy（上下）', deg(pose.tiltY)],
-          ['DIP 入力', deg(pose.dip)], ['DIP 表示', deg(engine.displayedDip)], ['表示倍率 g', engine.gain.toFixed(1)],
-          ['へこみ深さ', material.depth.toFixed(2) + ' px'], ['中節 / 末節', `${setup.middleLength} / ${setup.distalLength} px`],
+        renderReadouts($('diagnostics'), [
+          ['手側 θx', deg(pose.tiltX)], ['手側 θy', deg(pose.tiltY)], ['表示倍率 g', engine.gain.toFixed(1)],
+          ['DIP 入力', deg(pose.dip)], ['DIP 表示', deg(engine.displayedDip)], ['へこみ', material.depth.toFixed(1) + ' px'],
         ]);
       }
     }
@@ -228,29 +225,25 @@ export function startExperience() {
 }
 
 function developerPanel(s: Setup) {
-  return `<aside class="developer-panel"><header class="panel-head"><div><h1>開発画面</h1><p class="meta"><span id="connection">接続待ち</span></p></div><a id="tracker-link" href="#">計測画面 ↗</a></header>
-  <section class="dev-section state-section"><h2>状態</h2><ol class="pipeline" id="pipeline"></ol><table class="data-table" id="diagnostics"></table></section>
-  <section class="dev-section"><h2><span class="num">1</span>入力</h2>
-    <div class="control-row"><input type="checkbox" id="use-simulation"/><label for="use-simulation">入力シミュレーション（実指を使わない）</label></div>
-    <button class="full-width" id="play-pose">自動再生：押す → 保持 → 戻す</button>
-    <div id="simulation-controls" hidden><div class="control-row"><input type="checkbox" id="sim-contact" checked/><label for="sim-contact">接点あり</label></div>
-      ${slider('hand-x', '手側 θx（左 − / 右 +）', -25, 25, 0)}${slider('hand-y', '手側 θy（下 − / 上 +）', -25, 25, 0)}${slider('dip', 'DIP 屈曲 θd', -15, 75, 0)}
-      <button class="full-width" id="neutral-pose">基準姿勢</button></div></section>
-  <section class="dev-section"><h2><span class="num">2</span>接点</h2>
-    <div class="field-grid"><label for="side">面</label><select id="side"><option value="front">表側（奥へ伸びる）</option><option value="back">裏側（手前へ出る）</option></select>
-    <label for="contact-mode">接触検出</label><select id="contact-mode"><option value="touch">タッチ</option><option value="camera">カメラ固定点</option></select></div>
+  return `<aside class="developer-panel"><header class="topbar"><h1>開発画面</h1><p class="meta"><span id="connection">接続待ち</span> · <a id="tracker-link" href="#">計測画面 ↗</a></p></header>
+  <ol class="pipeline" id="pipeline"></ol><div class="readouts" id="diagnostics"></div>
+  <section><h2><span class="num">1</span>入力</h2>
+    <div class="control-row"><input type="checkbox" id="use-simulation"/><label for="use-simulation">シミュレーション</label><button id="play-pose">自動再生</button></div>
+    <div id="simulation-controls" hidden>${slider('hand-x', '手側 θx　左 − / 右 +', -25, 25, 0)}${slider('hand-y', '手側 θy　下 − / 上 +', -25, 25, 0)}${slider('dip', 'DIP θd', -15, 75, 0)}
+      <div class="control-row"><input type="checkbox" id="sim-contact" checked/><label for="sim-contact">接点あり</label><button id="neutral-pose">基準姿勢</button></div></div></section>
+  <section><h2><span class="num">2</span>条件</h2>
+    <div class="field-grid"><label for="side">面</label><select id="side"><option value="front">表側（奥へ）</option><option value="back">裏側（手前へ）</option></select>
+    <span class="label-cell">表示倍率 g</span><div class="button-row segmented"><button data-gain="0.8">0.8</button><button data-gain="1" aria-pressed="true">1.0</button><button data-gain="1.2">1.2</button></div></div>
+    <div id="release-controls" hidden>${slider('break-distance', '糸の破断距離', 12, 50, 26, 1, ' px')}</div><div id="stroke-controls" hidden>${slider('stroke-gain', '表面模様の追従率', 0.25, 1.35, 0.65, 0.05, '')}</div></section>
+  <details id="dev-advanced"><summary>詳細設定</summary>
+    <div class="field-grid"><label for="contact-mode">接触検出</label><select id="contact-mode"><option value="touch">タッチ</option><option value="camera">カメラ固定点</option></select></div>
     <button class="full-width" id="realign">接点を再登録</button>
-    <details><summary>指の形状・継ぎ目</summary>${slider('offset-x', '継ぎ目 X', -60, 60, s.offsetX, 1, ' px')}${slider('offset-y', '継ぎ目 Y', -60, 60, s.offsetY, 1, ' px')}
+    <h3>指</h3>${slider('offset-x', '継ぎ目 X', -60, 60, s.offsetX, 1, ' px')}${slider('offset-y', '継ぎ目 Y', -60, 60, s.offsetY, 1, ' px')}
     ${slider('width', '指の半径', 10, 36, s.radius, 1, ' px')}${slider('middle-length', '中節長', 70, 165, s.middleLength, 1, ' px')}${slider('distal-length', '末節長', 45, 115, s.distalLength, 1, ' px')}
     ${slider('yaw', '基準方向 左右', -40, 40, s.yaw)}${slider('pitch', '基準方向 上下', 5, 55, s.pitch)}${slider('dip-rest', 'DIP 基準角', -60, -10, s.dipRest)}
-    <div class="control-row"><label for="skin-color">根元の色</label><input type="color" id="skin-color" value="${s.skin}"/></div></details></section>
-  <section class="dev-section"><h2><span class="num">3</span>素材</h2>
-    <details><summary>球の大きさ・位置</summary>${slider('ball-radius', '半径', 45, 105, s.ballRadius, 1, ' px')}${slider('ball-depth', 'ガラスからの奥行き', 135, 255, s.ballDepth, 1, ' px')}${slider('ball-x', '中心 X', -55, 55, s.ballX, 1, ' px')}${slider('ball-y', '中心 Y', -55, 55, s.ballY, 1, ' px')}</details>
+    ${slider('root-gap', '根元の隙間', 0, 18, s.rootGap, 1, ' px')}<div class="control-row"><label for="skin-color">根元の色</label><input type="color" id="skin-color" value="${s.skin}"/></div>
+    <h3>球</h3>${slider('ball-radius', '半径', 45, 105, s.ballRadius, 1, ' px')}${slider('ball-depth', '奥行き', 135, 255, s.ballDepth, 1, ' px')}${slider('ball-x', '中心 X', -55, 55, s.ballX, 1, ' px')}${slider('ball-y', '中心 Y', -55, 55, s.ballY, 1, ' px')}
     ${slider('spread', 'へこみの広がり', 0.3, 0.65, 0.43, 0.01, '')}
-    <div id="release-controls" hidden>${slider('break-distance', '糸の破断距離', 12, 50, 26, 1, ' px')}</div><div id="stroke-controls" hidden>${slider('stroke-gain', '表面模様の追従率', 0.25, 1.35, 0.65, 0.05, '')}</div></section>
-  <section class="dev-section"><h2><span class="num">4</span>条件</h2>
-    <p class="label">表示倍率 g = Δθ<sub>表示</sub> / Δθ<sub>入力</sub>（接触後のみ）</p><div class="button-row segmented"><button data-gain="0.8">0.8</button><button data-gain="1" aria-pressed="true">1.0</button><button data-gain="1.2">1.2</button></div>
-    ${slider('root-gap', '根元の隙間', 0, 18, s.rootGap, 1, ' px')}
-    <details><summary>観察点</summary>${slider('view-yaw', '左右', -14, 14, s.viewYaw)}${slider('view-pitch', '上下', -14, 14, s.viewPitch)}</details></section>
-  <section class="dev-section"><button class="full-width quiet" id="reset-setup">設定を初期値に戻す</button></section></aside>`;
+    <h3>観察点</h3>${slider('view-yaw', '左右', -14, 14, s.viewYaw)}${slider('view-pitch', '上下', -14, 14, s.viewPitch)}
+    <button class="quiet" id="reset-setup">設定を初期値に戻す</button></details></aside>`;
 }
