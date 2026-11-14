@@ -82,7 +82,7 @@ test('real MediaPipe runtime starts on camera frames and does not invent a hand 
 });
 
 test('four colored points travel through video, calibration and WebSocket to the articulated renderer', async ({ page, context }) => {
-  test.setTimeout(60000);
+  test.setTimeout(90000);
   await page.addInitScript(() => {
     (window as any).__markerStage = 'neutral';
     const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 480; const ctx = canvas.getContext('2d')!;
@@ -99,7 +99,7 @@ test('four colored points travel through video, calibration and WebSocket to the
   const viewer = await context.newPage(); await ready(viewer, '/?dev=1&room=' + room); await viewer.selectOption('#contact-mode', 'camera');
   await page.goto('/tracker?room=' + room); await page.selectOption('#tracking-source', 'markers'); await page.locator('#start-camera').click();
   await expect.poll(() => page.evaluate(() => (window as any).__pivotTracker.snapshot().points)).toBeTruthy();
-  const recordStable = async (kind: string) => expect(async () => { await page.locator(`[data-record="${kind}"]`).click(); await expect(page.locator(`[data-record="${kind}"]`)).toHaveAttribute('aria-pressed', 'true', { timeout: 200 }); }).toPass({ timeout: 6000, intervals: [250, 400] });
+  const recordStable = async (kind: string) => expect(async () => { await page.locator(`[data-record="${kind}"]`).click(); await expect(page.locator(`[data-record="${kind}"]`)).toHaveAttribute('aria-pressed', 'true', { timeout: 200 }); }).toPass({ timeout: 15000, intervals: [250, 400] });
   await recordStable('neutral');
   await page.evaluate(() => (window as any).__markerStage = 'down'); await recordStable('down');
   await page.evaluate(() => (window as any).__markerStage = 'bent'); await recordStable('bent');

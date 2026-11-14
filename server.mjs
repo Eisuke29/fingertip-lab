@@ -59,8 +59,12 @@ wss.on('connection', (ws, req, url) => {
     const json = JSON.stringify(data);
     for (const viewer of room.viewers) if (viewer.readyState === WebSocket.OPEN) viewer.send(json);
   };
+  // Tell the sender how many display devices are listening (no viewer data is shared).
+  const announcePeers = () => {
+    if (room.tracker?.readyState === WebSocket.OPEN) room.tracker.send(JSON.stringify({ type: 'peers', version: 1, viewers: room.viewers.size }));
+  };
   if (role === 'viewer') {
-    room.viewers.add(ws);
+    room.viewers.add(ws); announcePeers();
   } else {
     if (room.tracker?.readyState === WebSocket.OPEN) { ws.close(4003, 'Tracker already active'); return; }
     room.tracker = ws;
@@ -68,6 +72,7 @@ wss.on('connection', (ws, req, url) => {
     ws.seq = -1;
     ws.windowAt = Date.now();
     ws.frameCount = 0;
+    announcePeers();
     ws.on('message', raw => {
       let frame;
       try { frame = JSON.parse(raw.toString()); } catch { return; }
@@ -85,8 +90,9 @@ wss.on('connection', (ws, req, url) => {
   }
   ws.on('error', () => {});
   ws.on('close', () => {
-    room.viewers.delete(ws);
+    const wasViewer = room.viewers.delete(ws);
     if (room.tracker === ws) room.tracker = null;
+    if (wasViewer) announcePeers();
     // Viewers' receive-time watchdog also covers a stopped-but-open sender.
     if (!room.tracker && !room.viewers.size) rooms.delete(roomName);
   });

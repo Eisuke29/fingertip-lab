@@ -4,7 +4,7 @@ import { $, href } from './ui';
 async function boot() {
   const tracker = location.pathname.replace(/\/$/, '') === '/tracker' || new URLSearchParams(location.search).get('view') === 'tracker';
   if (tracker && isStaticDemo) {
-    $('app').innerHTML = `<main class="static-info"><p class="overline">PIVOT / CAMERA</p><h1>実指の計測は、PCで。</h1><p>PCでサーバーを起動し、localhostの追跡画面で姿勢を校正します。スマホは同じWi-FiのLANアドレスを開きます。</p><pre>npm install\nnpm run dev</pre><p>公開ページでは、開発画面から同じレンダラーへ再生用の姿勢を入力できます。</p><a href="${href('dev')}">描画を確認する →</a><a href="${repositoryUrl}#pcから起動する">PC起動の手順 ↗</a></main>`;
+    $('app').innerHTML = `<main class="static-info"><h1>計測画面</h1><p class="meta">公開版ではカメラ計測と中継を使えません。PCで起動し、<code>http://localhost:5173/tracker</code> を開きます。</p><pre>npm ci\nnpm run dev</pre><p class="links"><a href="${href('dev')}">開発画面（シミュレーション）</a><a href="${repositoryUrl}#pcから起動する">起動手順 ↗</a></p></main>`;
   } else if (tracker) { const { startTracker } = await import('./tracker'); startTracker(); }
   else { const { startExperience } = await import('./experience'); startExperience(); }
 }

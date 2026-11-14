@@ -3,24 +3,40 @@ import { MarkerTracker, type ImagePoint } from './marker-tracking';
 import { degrees, radians, v } from './math';
 import { PoseSocket } from './socket';
 import { neutralPose, type Pose, type PoseFrame } from './types';
-import { $, href, roomName, slider } from './ui';
+import { $, href, renderPipeline, roomName, slider } from './ui';
 import type { HandLandmarker } from '@mediapipe/tasks-vision';
 
-const names = ['MCP / 手の付け根', 'PIP / 第2関節・支点', 'DIP / 第1関節', '指先'];
+const names = ['MCP', 'PIP', 'DIP', 'TIP'];
 const initialColors = ['#ff4055', '#4cd36a', '#4185f4', '#bc51d9'];
 export function startTracker() {
-  $('app').innerHTML = `<main class="tracker-shell"><header class="tracker-header"><div><div class="overline">PIVOT / HAND INPUT</div><h1>実指の、向きと曲げ。</h1><p>外部カメラで4点を計測し、姿勢だけを同じLANの端末へ送ります。</p></div><a href="${href('dev')}" target="_blank" rel="noopener">表示・位置合わせ ↗</a></header>
-  <div class="tracker-grid"><div><div class="camera-box"><video id="camera-video" autoplay muted playsinline></video><canvas id="camera-preview" width="640" height="480"></canvas><div class="camera-empty" id="camera-empty"><strong>PCの外部カメラ</strong>PIP・DIP・指先・MCPが見える横視点から始めます</div></div>
-    <div class="camera-footer"><span id="tracking-state">停止中</span><span id="network-state">中継へ接続中</span></div><div class="tracker-error" id="camera-error" hidden></div>
-    <div class="tracker-panel"><h2>iPhoneで開くアドレス</h2><div id="network-links" class="network-links"></div><p>PCと同じWi-Fiで開きます。端末は固定し、カメラの位置と端末の向きを校正後に変えないでください。</p></div>
-    <div class="tracker-note"><ol><li>スマホをスタンドで固定。人差し指を曲げ、PIP付近をガラスへ軽く当てます。カメラは指の外側に置きます。</li><li>4点が隠れる場合は4色の小さな目印へ切り替えます。背景に同じ色を置かず、カメラ映像内の点を選んで色を採取できます。</li><li>基準 → 手側を下 → 基準へ戻してDIPだけ曲げる、の順に記録します。2軸推定では左方向も記録します。</li><li>表側はスマホの印にPIPを当てます。裏側・タッチが反応しない場合は固定点の接触確認を使い、接触の許可を一度切ってから入れ直します。</li></ol><p>面内1軸は横視点の投影角です。斜め視点の2軸は単眼3D推定で、実際の指・iPhoneでの軸と遅延の確認はまだ行っていません。接触確認も画像上の近さであり、ガラスまでの距離の測定ではありません。</p></div></div>
-  <aside><section class="tracker-panel"><h2>1. 入力と設置</h2><label for="tracking-source" class="small">計測方式</label><select id="tracking-source"><option value="mediapipe">MediaPipe / 人差し指</option><option value="markers">4色マーカー / 面内1軸</option><option value="simulation">通信の入力シミュレーション</option></select>
-    <div id="camera-controls"><div class="button-row"><button class="primary" id="start-camera">カメラを開始</button><button id="stop-camera" disabled>停止</button></div><select id="camera-device" aria-label="カメラ"><option value="">既定のカメラ</option></select><div class="control-row"><input type="checkbox" id="mirror-preview" checked/><label for="mirror-preview">プレビューを鏡像にする</label></div><p>鏡像はプレビューだけに適用します。画面上の方向は次の動作校正で決めます。</p>
-    <div id="markers-panel" hidden>${names.map((name, i) => `<div class="marker-row"><span class="marker-dot" id="marker-state-${i}"></span><input type="color" id="marker-color-${i}" value="${initialColors[i]}" aria-label="${name}の色"/><button data-pick="${i}">${name}の色を採る</button></div>`).join('')}<button class="full-width small" id="reacquire">4点を再検出</button></div></div>
-    <div id="sender-simulation" hidden><p class="note-box warning">実指ではなく通信確認用の角度です。</p>${slider('send-x', '手側 左 ← → 右', -25, 25, 0)}${slider('send-y', '手側 下 ← → 上', -25, 25, 0)}${slider('send-dip', 'DIPの曲げ', -15, 75, 0)}<div class="control-row"><input type="checkbox" id="send-contact"/><label for="send-contact">固定点に接触</label></div></div>
-    <label class="small" for="phone-rotation">校正する端末の画面向き</label><select id="phone-rotation"><option value="0">縦 / 0°</option><option value="90">横 / 90°</option><option value="180">縦 / 180°</option><option value="270">横 / 270°</option></select></section>
-  <section class="tracker-panel" id="calibration-panel"><h2>2. 動作の校正</h2><select id="axis-mode" aria-label="計測軸"><option value="plane-y">面内1軸 / 上下を校正</option><option value="estimated-xy">単眼3D推定 / 上下・左右を校正</option></select><div class="calibration-list"><button data-record="neutral">① 接触姿勢を基準に記録</button><button data-record="down">② DIPを保って、手側を下へ</button><button data-record="left" id="record-left" hidden>③ 基準へ戻して、手側を左へ</button><button data-record="bent">③ 基準へ戻して、DIPだけ曲げる</button></div><p id="calibration-message"></p><div class="pose-readouts"><span>手側 X<strong id="read-x">—</strong></span><span>手側 Y<strong id="read-y">—</strong></span><span>DIP<strong id="read-dip">—</strong></span></div><p id="axis-status"></p><button class="full-width small" id="reset-calibration">校正をやり直す</button></section>
-  <section class="tracker-panel" id="contact-panel"><h2>3. 裏側・固定点の接触確認</h2><div class="control-row"><input type="checkbox" id="contact-armed"/><label for="contact-armed">固定した接点で接触を許可</label></div>${slider('contact-radius', '基準PIPからの画像上の許容半径', 8, 40, 18, 1, ' px')}<p>校正済みのPIPが基準の近くにある間だけ送ります。端末やカメラを動かしたら校正をやり直します。表側のタッチ方式ではスマホ側の接触が優先されます。</p><div class="chip" id="contact-state">接触なし</div></section></aside></div></main>`;
+  $('app').innerHTML = `<main class="tracker-shell"><header class="panel-head page-head"><div><h1>計測画面</h1><p class="meta">PCカメラで人差し指の姿勢を計測し、表示端末へ送信 · room ${roomName()}</p></div><a href="${href('dev')}" target="_blank" rel="noopener">開発画面 ↗</a></header>
+  <ol class="pipeline wide" id="pipeline"></ol>
+  <div class="tracker-grid"><div class="tracker-main">
+    <figure class="camera-figure"><div class="camera-box"><video id="camera-video" autoplay muted playsinline></video><canvas id="camera-preview" width="640" height="480"></canvas><div class="camera-empty" id="camera-empty">カメラ停止中</div></div>
+      <figcaption><span>カメラ映像 — 検出点 MCP・PIP・DIP・TIP</span><span id="tracking-state">停止中</span></figcaption></figure>
+    <div class="tracker-error" id="camera-error" hidden></div>
+    <section class="dev-section"><h2>計測値</h2><table class="data-table"><tbody>
+      <tr><th scope="row">手側 θx（左右）</th><td id="read-x">—</td></tr><tr><th scope="row">手側 θy（上下）</th><td id="read-y">—</td></tr><tr><th scope="row">DIP 屈曲 θd</th><td id="read-dip">—</td></tr>
+      <tr><th scope="row">校正</th><td id="axis-status">—</td></tr><tr><th scope="row">接触（固定点）</th><td id="contact-state">無効</td></tr><tr><th scope="row">中継</th><td id="network-state">接続中</td></tr></tbody></table></section>
+  </div>
+  <aside class="tracker-side">
+    <section class="dev-section"><h2><span class="num">1</span>カメラ</h2>
+      <div class="field-grid"><label for="tracking-source">計測方式</label><select id="tracking-source"><option value="mediapipe">MediaPipe（手指推定）</option><option value="markers">4色マーカー（面内1軸）</option><option value="simulation">シミュレーション（カメラなし）</option></select></div>
+      <div id="camera-controls"><div class="button-row"><button class="primary" id="start-camera">開始</button><button id="stop-camera" disabled>停止</button></div>
+        <div class="field-grid"><label for="camera-device">カメラ</label><select id="camera-device"><option value="">既定</option></select></div>
+        <div class="control-row"><input type="checkbox" id="mirror-preview" checked/><label for="mirror-preview">プレビューを左右反転</label></div>
+        <div id="markers-panel" hidden><p class="label">マーカー色（ボタンを押して映像上の点をクリック）</p>${names.map((name, i) => `<div class="marker-row"><span class="marker-dot" id="marker-state-${i}"></span><input type="color" id="marker-color-${i}" value="${initialColors[i]}" aria-label="${name}の色"/><button data-pick="${i}">${name}</button></div>`).join('')}<button class="full-width" id="reacquire">再検出</button></div></div>
+      <div id="sender-simulation" hidden>${slider('send-x', '手側 θx（左 − / 右 +）', -25, 25, 0)}${slider('send-y', '手側 θy（下 − / 上 +）', -25, 25, 0)}${slider('send-dip', 'DIP 屈曲 θd', -15, 75, 0)}<div class="control-row"><input type="checkbox" id="send-contact"/><label for="send-contact">接触あり</label></div></div>
+      <div class="field-grid"><label for="phone-rotation">端末の向き</label><select id="phone-rotation"><option value="0">縦 0°</option><option value="90">横 90°</option><option value="180">縦 180°</option><option value="270">横 270°</option></select></div></section>
+    <section class="dev-section" id="calibration-panel"><h2><span class="num">2</span>校正</h2>
+      <div class="field-grid"><label for="axis-mode">計測軸</label><select id="axis-mode"><option value="plane-y">面内1軸（上下）</option><option value="estimated-xy">2軸推定（上下・左右）</option></select></div>
+      <p class="label">各姿勢で約0.5秒静止して記録</p>
+      <div class="calibration-list"><button data-record="neutral">基準姿勢（第2関節を接触）</button><button data-record="down">手側を下へ倒す</button><button data-record="left" id="record-left" hidden>手側を左へ倒す</button><button data-record="bent">基準に戻し DIPのみ曲げる</button></div>
+      <p class="status-text" id="calibration-message"></p><button class="full-width quiet" id="reset-calibration">校正をリセット</button></section>
+    <section class="dev-section" id="contact-panel"><h2><span class="num">3</span>接触判定（固定点）</h2>
+      <div class="control-row"><input type="checkbox" id="contact-armed"/><label for="contact-armed">有効にする（裏側／タッチ非反応時）</label></div>${slider('contact-radius', '許容半径（画像上）', 8, 40, 18, 1, ' px')}</section>
+    <section class="dev-section"><h2><span class="num">4</span>表示端末</h2><p class="label">同じWi-FiのiPhoneで開く</p><div id="network-links" class="network-links"></div></section>
+  </aside></div></main>`;
   const video = $<HTMLVideoElement>('camera-video');
   const preview = $<HTMLCanvasElement>('camera-preview');
   const ctx = preview.getContext('2d')!;
@@ -36,6 +52,9 @@ export function startTracker() {
   const simulationPose = (): Pose => ({ tiltX: radians(Number($<HTMLInputElement>('send-x').value)), tiltY: radians(Number($<HTMLInputElement>('send-y').value)), dip: radians(Number($<HTMLInputElement>('send-dip').value)) });
   const fail = (message: string) => { $('camera-error').textContent = message; $('camera-error').hidden = false; };
   socket.onStatus = text => $('network-state').textContent = text;
+  const calibrationSteps = () => { const keys = calibration.mode === 'estimated-xy' ? ['neutral', 'down', 'left', 'bent'] as const : ['neutral', 'down', 'bent'] as const; return { done: keys.filter(k => !!calibration[k]).length, total: keys.length }; };
+  let viewers: number | null = null;
+  socket.onPeers = n => { viewers = n; };
   function resetCalibration() { calibration.reset(); sample = null; pose = neutralPose(); $<HTMLInputElement>('contact-armed').checked = false; lastPip = null; selectedHand = ''; updateUi(); }
   function updateUi() {
     const sim = source() === 'simulation', markerMode = source() === 'markers';
@@ -44,7 +63,7 @@ export function startTracker() {
     $<HTMLSelectElement>('axis-mode').disabled = markerMode;
     $('record-left').hidden = calibration.mode !== 'estimated-xy';
     $('calibration-message').textContent = calibration.message;
-    $('axis-status').textContent = calibration.ready ? (calibration.mode === 'plane-y' ? '面内1軸を校正済み / 左右は入力しません' : '単眼3Dの2軸を校正済み / 実指での各軸は未確認') : '未校正 / 姿勢は有効として送信しません';
+    const steps = calibrationSteps(); $('axis-status').textContent = calibration.ready ? (calibration.mode === 'plane-y' ? '完了（面内1軸）' : '完了（2軸推定）') : `未完了 ${steps.done}/${steps.total}`;
     document.querySelectorAll<HTMLButtonElement>('[data-record]').forEach(b => { b.setAttribute('aria-pressed', String(!!calibration[b.dataset.record as 'neutral' | 'down' | 'left' | 'bent'])); });
     $<HTMLButtonElement>('start-camera').disabled = starting || running;
     $<HTMLButtonElement>('stop-camera').disabled = !running;
@@ -65,7 +84,7 @@ export function startTracker() {
       preview.width = raw.width; preview.height = raw.height;
       preview.parentElement!.style.aspectRatio = `${raw.width} / ${raw.height}`;
       if (source() === 'mediapipe' && !detector) {
-        reason = 'MediaPipeモデルを準備中'; $('tracking-state').textContent = reason; modelState = 'loading';
+        reason = 'モデル読み込み中'; $('tracking-state').textContent = reason; modelState = 'loading';
         const { FilesetResolver, HandLandmarker } = await import('@mediapipe/tasks-vision');
         const vision = await FilesetResolver.forVisionTasks(`${import.meta.env.BASE_URL}vendor/mediapipe`);
         const options = { baseOptions: { modelAssetPath: `${import.meta.env.BASE_URL}models/hand_landmarker.task` }, runningMode: 'VIDEO' as const, numHands: 2, minHandDetectionConfidence: 0.6, minHandPresenceConfidence: 0.6, minTrackingConfidence: 0.6 };
@@ -75,11 +94,11 @@ export function startTracker() {
       }
       if (disposed) { await stopCamera(); return; }
       const devices = await navigator.mediaDevices.enumerateDevices();
-      const select = $<HTMLSelectElement>('camera-device'); select.replaceChildren(new Option('既定のカメラ', ''));
+      const select = $<HTMLSelectElement>('camera-device'); select.replaceChildren(new Option('既定', ''));
       devices.filter(d => d.kind === 'videoinput').forEach((d, i) => select.add(new Option(d.label || `カメラ ${i + 1}`, d.deviceId)));
       select.value = device; running = true; lastVideo = -1; resetCalibration();
       $('camera-empty').hidden = true;
-    } catch (error) { modelState = detector ? 'ready' : 'error'; await stopCamera(); fail(`${error instanceof Error ? error.message : error} / 4色マーカーへの切り替えも利用できます。`); }
+    } catch (error) { modelState = detector ? 'ready' : 'error'; await stopCamera(); fail(`${error instanceof Error ? error.message : error}（計測方式を4色マーカーに変更して再試行可）`); }
     finally { starting = false; updateUi(); }
   }
   $('start-camera').addEventListener('click', startCamera);
@@ -92,7 +111,7 @@ export function startTracker() {
   for (const id of ['phone-rotation', 'mirror-preview', 'camera-device']) $(id).addEventListener('change', () => { resetCalibration(); if (id === 'camera-device' && running) void stopCamera(); });
   $('reset-calibration').addEventListener('click', resetCalibration);
   document.querySelectorAll<HTMLButtonElement>('[data-record]').forEach(button => button.addEventListener('click', () => { calibration.record(button.dataset.record as 'neutral' | 'down' | 'left' | 'bent'); updateUi(); }));
-  document.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach(button => button.addEventListener('click', () => { pick = Number(button.dataset.pick); $('tracking-state').textContent = `${names[pick]}の目印を映像上で選びます`; }));
+  document.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach(button => button.addEventListener('click', () => { pick = Number(button.dataset.pick); $('tracking-state').textContent = `映像上の${names[pick]}の目印をクリック`; }));
   preview.addEventListener('click', event => {
     if (pick === null || !lastPixels) return;
     const rect = preview.getBoundingClientRect(), mirror = $<HTMLInputElement>('mirror-preview').checked;
@@ -109,7 +128,7 @@ export function startTracker() {
   for (const id of ['send-x', 'send-y', 'send-dip']) $(id).addEventListener('input', () => $(id + '-out').textContent = $<HTMLInputElement>(id).value + '°');
   fetch('/api/network').then(r => r.json()).then(data => {
     for (const address of data.urls.length ? data.urls : [data.local]) { const url = new URL(address); url.searchParams.set('room', roomName()); const link = document.createElement('a'); link.href = url.href; link.target = '_blank'; link.rel = 'noopener'; link.textContent = url.href; $('network-links').append(link); }
-  }).catch(() => { $('network-links').textContent = 'PCの起動ターミナルに表示されたLANアドレスを使います'; });
+  }).catch(() => { $('network-links').textContent = '起動ターミナルに表示されたLANアドレス'; });
 
   function processCamera(now: number, dt: number) {
     if (!running || video.readyState < 2 || video.currentTime === lastVideo) return;
@@ -138,7 +157,7 @@ export function startTracker() {
             sample = measureHand(points as HandSample['image'], world); selectedHand = candidate.label;
           }
         }
-        reason = sample ? '人差し指の4点を追跡中' : '4点が見えるようカメラと指を合わせます';
+        reason = sample ? '4点を追跡中' : '人差し指の4点が映っていない';
       }
     } catch (error) { sample = null; reason = `計測エラー：${error instanceof Error ? error.message : error}`; }
     if (sample) { lastPip = sample.image[1]; lastSeen = now; pose = calibration.pose(sample, dt); }
@@ -166,8 +185,16 @@ export function startTracker() {
       lastFrame = { type: 'pose', version: 2, seq: seq++, source: source(), pose: { ...pose }, valid, calibrated: sim || calibration.ready, contact,
         axes: calibration.mode, rotation: Number($<HTMLSelectElement>('phone-rotation').value), confidence: valid ? 1 : 0, sentAt: Date.now() };
       socket.send(lastFrame);
-      $('tracking-state').textContent = sim ? '入力シミュレーション / 実指の計測ではありません' : reason;
-      $('contact-state').textContent = contact ? '固定点の近傍で接触を許可中' : '接触なし';
+      $('tracking-state').textContent = sim ? 'シミュレーション（実指ではない）' : reason;
+      $('contact-state').textContent = contact ? 'あり' : $<HTMLInputElement>('contact-armed').checked ? 'なし' : '無効';
+      const steps = calibrationSteps();
+      renderPipeline($('pipeline'), [
+        ['カメラ', sim ? '使用しない' : running ? '取得中' : starting ? '起動中' : '停止', sim ? 'skip' : running ? 'ok' : starting ? 'wait' : 'off'],
+        ['手指検出', sim ? '—' : sample ? '4点検出' : running ? '未検出' : '—', sim ? 'skip' : sample ? 'ok' : running ? 'wait' : 'off'],
+        ['校正', sim ? '—' : calibration.ready ? '完了' : `${steps.done}/${steps.total}`, sim ? 'skip' : calibration.ready ? 'ok' : running ? 'wait' : 'off'],
+        ['送信', !socket.connected ? '中継なし' : valid ? '送信中' : '無効値', !socket.connected ? 'off' : valid ? 'ok' : 'wait'],
+        ['表示端末', viewers === null ? '—' : viewers + '台', viewers ? 'ok' : 'off'],
+      ]);
       for (const [id, value] of [['read-x', pose.tiltX], ['read-y', pose.tiltY], ['read-dip', pose.dip]] as const) $(id).textContent = valid ? degrees(value).toFixed(1) + '°' : '—';
     }
     requestAnimationFrame(tick);

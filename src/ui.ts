@@ -7,3 +7,13 @@ export const rotation = () => ((screen.orientation?.angle ?? (window as unknown 
 export function slider(id: string, label: string, min: number, max: number, value: number, step = 1, unit = '°') {
   return `<label class="slider-label" for="${id}"><span>${label}</span><output id="${id}-out">${value}${unit}</output></label><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}"/>`;
 }
+
+export type Stage = [label: string, value: string, state: 'ok' | 'wait' | 'off' | 'skip'];
+export function renderPipeline(el: HTMLElement, stages: Stage[]) {
+  const html = stages.map(([label, value, state]) => `<li data-state="${state}"><span class="pl-label">${label}</span><span class="pl-value">${value}</span></li>`).join('');
+  if (el.innerHTML !== html) el.innerHTML = html;
+}
+export function renderTable(el: HTMLElement, rows: [string, string][]) {
+  const html = `<tbody>${rows.map(([k, val]) => `<tr><th scope="row">${k}</th><td>${val}</td></tr>`).join('')}</tbody>`;
+  if (el.innerHTML !== html) el.innerHTML = html;
+}

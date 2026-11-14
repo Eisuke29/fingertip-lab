@@ -4,7 +4,7 @@ test('published path runs the same pivot renderer and exposes simulation only in
   test.setTimeout(45000);
   const sockets: string[] = []; page.on('websocket', s => sockets.push(s.url()));
   await page.goto('./'); await expect(page.locator('#stage canvas')).toBeVisible();
-  await expect(page.locator('#input-note')).toContainText('実指の入力はPCで接続');
+  await expect(page.locator('#input-note')).toContainText('実指入力なし');
   await expect(page.locator('#use-simulation')).toHaveCount(0);
   await page.locator('.adjust-link').click(); await expect(page).toHaveURL(/\/fingertip-lab\/\?dev=1/);
   await page.locator('#use-simulation').check();
