@@ -1,1 +1,1 @@
-export function validControl(data: unknown): boolean;
+export function validPose(data: unknown): boolean;

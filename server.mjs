@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
-import { validControl } from './server/protocol.mjs';
+import { validPose } from './server/protocol.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 5173);
@@ -28,7 +28,7 @@ const server = http.createServer((req, res) => {
   if (target !== dist && !target.startsWith(dist + path.sep)) { res.writeHead(403); res.end(); return; }
   if (!fs.existsSync(target) || !fs.statSync(target).isFile()) target = path.join(dist, 'index.html');
   if (!fs.existsSync(target)) { res.writeHead(503); res.end('Run npm run build first.'); return; }
-  const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' };
+  const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.wasm': 'application/wasm', '.task': 'application/octet-stream' };
   res.writeHead(200, { 'Content-Type': mime[path.extname(target)] || 'application/octet-stream' });
   fs.createReadStream(target).pipe(res);
 });
@@ -71,14 +71,16 @@ wss.on('connection', (ws, req, url) => {
     ws.on('message', raw => {
       let frame;
       try { frame = JSON.parse(raw.toString()); } catch { return; }
-      if (!validControl(frame) || frame.seq <= ws.seq) return;
+      if (!validPose(frame) || frame.seq <= ws.seq) return;
       if (Date.now() - ws.windowAt > 1000) { ws.windowAt = Date.now(); ws.frameCount = 0; }
       if (++ws.frameCount > 100) return;
       ws.seq = frame.seq;
       // Explicitly project the schema: never relay pixels or arbitrary fields.
-      broadcast({ type: 'control', version: 1, seq: frame.seq, value: frame.value,
-        valid: frame.valid, calibrated: frame.calibrated, confidence: frame.confidence,
-        source: frame.source, sentAt: frame.sentAt, angle: frame.angle, streamId: ws.streamId });
+      broadcast({ type: 'pose', version: 2, seq: frame.seq,
+        pose: { tiltX: frame.pose.tiltX, tiltY: frame.pose.tiltY, dip: frame.pose.dip },
+        valid: frame.valid, calibrated: frame.calibrated, contact: frame.contact,
+        axes: frame.axes, rotation: frame.rotation, confidence: frame.confidence,
+        source: frame.source, sentAt: frame.sentAt, streamId: ws.streamId });
     });
   }
   ws.on('error', () => {});
@@ -90,7 +92,7 @@ wss.on('connection', (ws, req, url) => {
   });
 });
 server.listen(port, '0.0.0.0', () => {
-  console.log(`\n  FINGERTIP LAB\n  Phone / PC : http://localhost:${port}\n  PC tracker : http://localhost:${port}/tracker`);
+  console.log(`\n  PIVOT FINGER LAB\n  Phone / PC : http://localhost:${port}\n  Developer  : http://localhost:${port}/?dev=1\n  PC tracker : http://localhost:${port}/tracker`);
   for (const url of networkUrls()) console.log(`  LAN phone  : ${url}`);
   console.log('  Keep this terminal running. Ctrl+C to stop.\n');
 });

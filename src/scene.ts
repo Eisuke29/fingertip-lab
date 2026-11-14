@@ -1,240 +1,188 @@
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import type { DisplayCondition, InputMode, Vec3 } from './types';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { add, mul, norm, sub, v, type V3 } from './math';
+import type { Ball, FingerConfig, SceneKind, Skeleton } from './types';
+import type { MaterialResponse } from './material';
 
-const vector = (v: Vec3) => new THREE.Vector3(v.x, v.y, v.z);
+const vector = (p: V3) => new THREE.Vector3(p.x, p.y, p.z);
+const yAxis = new THREE.Vector3(0, 1, 0);
+function radialTexture() {
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+  const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gradient.addColorStop(0, 'rgba(69,55,47,.4)'); gradient.addColorStop(0.4, 'rgba(69,55,47,.13)'); gradient.addColorStop(1, 'rgba(69,55,47,0)');
+  ctx.fillStyle = gradient; ctx.fillRect(0, 0, 128, 128);
+  const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace; return texture;
+}
+function grainTexture() {
+  const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 256;
+  const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#f6fbf8'; ctx.fillRect(0, 0, 512, 256);
+  ctx.fillStyle = '#9ab9ae';
+  for (let y = 4; y < 256; y += 13) for (let x = 4; x < 512; x += 13) {
+    ctx.beginPath(); ctx.arc(x + (y % 2) * 3, y, 0.9, 0, Math.PI * 2); ctx.fill();
+  }
+  const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping; return texture;
+}
 
-export class ProductScene {
+export class PivotScene {
   readonly renderer: THREE.WebGLRenderer;
   readonly canvas: HTMLCanvasElement;
-  width = 600;
-  height = 520;
+  width = 390;
+  height = 800;
+  viewYaw = 0;
+  viewPitch = 0;
+  onResize?: () => void;
   private scene = new THREE.Scene();
-  private camera = new THREE.PerspectiveCamera(36, 1, 1, 5000);
-  private pouch = new THREE.Group();
+  private camera = new THREE.PerspectiveCamera(32, 1, 1, 6000);
+  private raycaster = new THREE.Raycaster();
+  private glass = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
   private finger = new THREE.Group();
-  private skin = new THREE.MeshStandardMaterial({ color: 0xdca784, roughness: 0.69, metalness: 0 });
-  private tube = new THREE.Mesh(new THREE.BufferGeometry(), this.skin);
-  private tipCap = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), this.skin);
-  private nail = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), new THREE.MeshPhysicalMaterial({ color: 0xf2d8c6, roughness: 0.3, clearcoat: 0.35 }));
-  private point = new THREE.Group();
-  private pedestal: THREE.Mesh;
-  private shadow: THREE.Mesh;
-  private floor: THREE.Mesh;
-  private surfaceClip = [new THREE.Plane(new THREE.Vector3(0, 0, -1), 0)];
-  private rearClip = [new THREE.Plane(new THREE.Vector3(0, 0, 1), 0)];
+  private skin = new THREE.MeshPhysicalMaterial({ color: 0xd9aa91, roughness: 0.56, metalness: 0, clearcoat: 0.13 });
+  private nailMaterial = new THREE.MeshPhysicalMaterial({ color: 0xf0d9c8, roughness: 0.29, clearcoat: 0.9 });
+  private creaseMaterial = new THREE.MeshStandardMaterial({ color: 0xb98570, roughness: 0.8, transparent: true, opacity: 0.38 });
+  private cylinder = new THREE.CylinderGeometry(0.91, 1, 1, 40, 2, true);
+  private sphere = new THREE.SphereGeometry(1, 32, 24);
+  private middle = new THREE.Mesh(this.cylinder, this.skin);
+  private distal = new THREE.Mesh(this.cylinder, this.skin);
+  private joint = new THREE.Mesh(this.sphere, this.skin);
+  private cap = new THREE.Mesh(this.sphere, this.skin);
+  private nail = new THREE.Mesh(this.sphere, this.nailMaterial);
+  private crease = new THREE.Mesh(new THREE.TorusGeometry(1, 0.018, 6, 40, Math.PI * 0.85), this.creaseMaterial);
+  private rootShadow: THREE.Mesh;
+  private contactShadow: THREE.Mesh;
+  private ballGeometry = new THREE.SphereGeometry(1, 96, 64);
+  private baseDirections: Float32Array;
+  private ballMaterial = new THREE.MeshPhysicalMaterial({ color: 0xa7c9b9, roughness: 0.22, transmission: 0.38, thickness: 38,
+    ior: 1.34, attenuationColor: new THREE.Color(0xadd1c0), attenuationDistance: 160, clearcoat: 0.85, clearcoatRoughness: 0.16, transparent: true, opacity: 0.96 });
+  private ballMesh = new THREE.Mesh(this.ballGeometry, this.ballMaterial);
+  private pattern = grainTexture();
+  private uniforms = { normal: { value: new THREE.Vector3(0, 0, 1) }, shift: { value: new THREE.Vector2() }, enabled: { value: 0 } };
+  private strand = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshPhysicalMaterial({ color: 0xb8d8c9, roughness: 0.2, clearcoat: 1, transparent: true, opacity: 0.88 }));
   private observer: ResizeObserver;
-  private lastShape = '';
-  private lastRender = '';
+  private lastKey = '';
   private dirty = true;
-  private onResize?: () => void;
+  private environment: THREE.WebGLRenderTarget;
+  private lastThread = '';
 
   constructor(private container: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'low-power' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    this.renderer.shadowMap.enabled = true;
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'low-power' });
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+    this.renderer.setClearColor(0xf1f2ed);
     this.renderer.localClippingEnabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.25;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 0.95;
     this.canvas = this.renderer.domElement;
-    this.canvas.setAttribute('aria-label', '仮想の指先でループ付きポーチを持ち上げる操作領域');
-    this.canvas.setAttribute('role', 'img');
-    this.canvas.tabIndex = 0;
-    container.prepend(this.canvas);
-    this.scene.add(new THREE.HemisphereLight(0xfff7eb, 0x8a8d88, 2.3));
-    const key = new THREE.DirectionalLight(0xfff4df, 3.1);
-    key.position.set(-230, 350, 460);
-    key.castShadow = true;
-    key.shadow.mapSize.set(1024, 1024);
-    Object.assign(key.shadow.camera, { left: -420, right: 420, top: 420, bottom: -420, near: 1, far: 1300 });
-    key.shadow.bias = -0.0007;
-    key.shadow.normalBias = 0.4;
-    this.scene.add(key);
-    const fill = new THREE.DirectionalLight(0xe2eafa, 0.7);
-    fill.position.set(300, 40, 100);
-    this.scene.add(fill);
-
-    this.pedestal = new THREE.Mesh(new THREE.CylinderGeometry(124, 132, 25, 96),
-      new THREE.MeshStandardMaterial({ color: 0xe0d9ca, roughness: 0.97 }));
-    this.pedestal.position.y = -116;
-    this.pedestal.receiveShadow = true;
-    this.scene.add(this.pedestal);
-    const floor = this.floor = new THREE.Mesh(new THREE.PlaneGeometry(2200, 1600), new THREE.ShadowMaterial({ color: 0x5e584c, opacity: 0.11 }));
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = -129;
-    floor.receiveShadow = true;
-    this.scene.add(floor);
-    this.shadow = new THREE.Mesh(new THREE.CircleGeometry(1, 64), new THREE.MeshBasicMaterial({ color: 0x554c3e, transparent: true, opacity: 0.10, depthWrite: false }));
-    this.shadow.rotation.x = -Math.PI / 2;
-    this.shadow.position.y = -103.2;
-    this.shadow.scale.set(73, 32, 1);
-    this.scene.add(this.shadow);
-    this.makePouch();
-    this.scene.add(this.pouch);
-
-    this.tube.castShadow = true;
-    this.tipCap.castShadow = true;
-    this.finger.add(this.tube, this.tipCap, this.nail);
-    this.scene.add(this.finger);
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(7, 24, 16), new THREE.MeshStandardMaterial({ color: 0x346454, roughness: 0.6 }));
-    const outline = new THREE.Mesh(new THREE.TorusGeometry(9, 1.5, 8, 32), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-    outline.position.z = 1;
-    this.point.add(dot, outline);
-    this.scene.add(this.point);
-    this.observer = new ResizeObserver(() => this.resize());
-    this.observer.observe(container);
-    this.resize();
+    this.canvas.setAttribute('aria-label', 'PIPを支点とする二節の指と、固定された柔らかい球');
+    this.canvas.tabIndex = 0; container.prepend(this.canvas);
+    this.scene.background = new THREE.Color(0xf1f2ed);
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    const room = new RoomEnvironment();
+    this.environment = pmrem.fromScene(room, 0.04); this.scene.environment = this.environment.texture; this.scene.environmentIntensity = 0.65;
+    room.dispose(); pmrem.dispose();
+    this.scene.add(new THREE.HemisphereLight(0xfff5e8, 0x9cae9d, 1.2));
+    const light = new THREE.DirectionalLight(0xfff1de, 2.3); light.position.set(-230, 350, 450); this.scene.add(light);
+    const fill = new THREE.DirectionalLight(0xe9f3ff, 0.9); fill.position.set(300, -80, 220); this.scene.add(fill);
+    this.finger.add(this.middle, this.distal, this.joint, this.cap, this.nail, this.crease);
+    this.scene.add(this.finger, this.ballMesh, this.strand);
+    const shadow = new THREE.MeshBasicMaterial({ map: radialTexture(), transparent: true, opacity: 0.55, depthWrite: false });
+    this.rootShadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shadow); this.rootShadow.scale.set(65, 65, 1);
+    this.contactShadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shadow.clone()); this.contactShadow.scale.set(35, 35, 1);
+    this.scene.add(this.rootShadow, this.contactShadow);
+    this.baseDirections = new Float32Array(this.ballGeometry.attributes.position.array);
+    this.ballMaterial.map = this.pattern;
+    this.ballMaterial.onBeforeCompile = shader => {
+      shader.uniforms.uStrokeNormal = this.uniforms.normal; shader.uniforms.uStrokeShift = this.uniforms.shift; shader.uniforms.uStrokeOn = this.uniforms.enabled;
+      shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSphereDirection;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSphereDirection = normalize(position);');
+      shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vSphereDirection;\nuniform vec3 uStrokeNormal;\nuniform vec2 uStrokeShift;\nuniform float uStrokeOn;')
+        .replace('#include <map_fragment>', `
+          #ifdef USE_MAP
+            float a = acos(clamp(dot(normalize(vSphereDirection), uStrokeNormal), -1.0, 1.0));
+            float localMask = exp(-pow(a / 0.48, 2.0));
+            vec4 texel = texture2D(map, vMapUv + uStrokeShift * localMask);
+            diffuseColor.rgb *= mix(vec3(1.0), texel.rgb, uStrokeOn);
+          #endif
+        `);
+    };
+    this.observer = new ResizeObserver(() => this.resize()); this.observer.observe(container); this.resize();
   }
-
-  private makePouch() {
-    const fabric = new THREE.MeshStandardMaterial({ color: 0xa5a38d, roughness: 0.95 });
-    const body = new THREE.Mesh(new RoundedBoxGeometry(151, 116, 35, 5, 16), fabric);
-    body.position.set(0, -109, -8);
-    body.castShadow = true; body.receiveShadow = true;
-    this.pouch.add(body);
-    // Slightly inset front panel and individual stitches make the scale legible.
-    const panel = new THREE.Mesh(new RoundedBoxGeometry(137, 101, 2, 4, 13), new THREE.MeshStandardMaterial({ color: 0xa9a790, roughness: 1 }));
-    panel.position.set(0, -110, 10);
-    this.pouch.add(panel);
-    const stitchMaterial = new THREE.MeshStandardMaterial({ color: 0xc9c5ad, roughness: 1 });
-    const stitchGeometry = new THREE.CapsuleGeometry(0.35, 2.4, 2, 4);
-    const stitches = new THREE.InstancedMesh(stitchGeometry, stitchMaterial, 66);
-    const stitch = new THREE.Object3D();
-    let stitchIndex = 0;
-    for (let i = 0; i < 20; i++) {
-      for (const y of [-66, -154]) {
-        stitch.rotation.z = Math.PI / 2;
-        stitch.position.set(-55 + i * 5.8, y, 11.5);
-        stitch.updateMatrix(); stitches.setMatrixAt(stitchIndex++, stitch.matrix);
-      }
-    }
-    for (let i = 0; i < 13; i++) for (const x of [-63, 63]) {
-      stitch.rotation.z = 0;
-      stitch.position.set(x, -75 - i * 5.6, 11.5);
-      stitch.updateMatrix(); stitches.setMatrixAt(stitchIndex++, stitch.matrix);
-    }
-    this.pouch.add(stitches);
-    const zip = new THREE.Mesh(new THREE.BoxGeometry(120, 2.5, 4), new THREE.MeshStandardMaterial({ color: 0x797a67, metalness: 0.35, roughness: 0.6 }));
-    zip.position.set(0, -54, 5);
-    this.pouch.add(zip);
-    const pull = new THREE.Mesh(new RoundedBoxGeometry(6, 16, 2.5, 2, 1), new THREE.MeshStandardMaterial({ color: 0xa7a18b, metalness: 0.72, roughness: 0.35 }));
-    pull.rotation.z = -0.3;
-    pull.position.set(49, -60, 12);
-    this.pouch.add(pull);
-    // The loop straddles the fingertip in depth; normal depth testing supplies occlusion.
-    const loop = new THREE.Mesh(new THREE.TorusGeometry(36, 3.7, 12, 80), new THREE.MeshStandardMaterial({ color: 0x6e7463, roughness: 0.83 }));
-    loop.position.set(0, -23, 0);
-    loop.scale.x = 0.82;
-    loop.rotation.y = -0.65;
-    loop.castShadow = true;
-    this.pouch.add(loop);
-    const attachment = new THREE.Mesh(new RoundedBoxGeometry(17, 13, 7, 2, 2), fabric);
-    attachment.position.set(0, -54, -3);
-    this.pouch.add(attachment);
-  }
-
-  setResizeHandler(handler: () => void) { this.onResize = handler; }
   private resize() {
-    const rect = this.container.getBoundingClientRect();
-    this.width = Math.max(1, rect.width); this.height = Math.max(1, rect.height);
-    this.renderer.setSize(this.width, this.height, false);
-    this.dirty = true;
+    const rect = this.container.getBoundingClientRect(); this.width = Math.max(1, rect.width); this.height = Math.max(1, rect.height);
+    this.renderer.setSize(this.width, this.height, false); this.setView(this.viewYaw, this.viewPitch); this.onResize?.();
+  }
+  setView(yaw: number, pitch: number) {
+    this.viewYaw = yaw; this.viewPitch = pitch;
+    const d = this.height / (2 * Math.tan(THREE.MathUtils.degToRad(16)));
     this.camera.aspect = this.width / this.height;
-    // At z=0 one world unit is one CSS pixel, regardless of DPR or orientation.
-    this.camera.position.set(0, 0, this.height / (2 * Math.tan(THREE.MathUtils.degToRad(18))));
-    this.camera.updateProjectionMatrix();
-    this.onResize?.();
+    this.camera.position.set(d * Math.sin(yaw) * Math.cos(pitch), d * Math.sin(pitch), d * Math.cos(yaw) * Math.cos(pitch));
+    this.camera.lookAt(0, 0, 0); this.camera.updateProjectionMatrix(); this.camera.updateMatrixWorld(); this.dirty = true;
   }
-  screenPoint(v: Vec3) {
-    this.camera.updateMatrixWorld();
-    const p = vector(v).project(this.camera);
-    return { x: (p.x + 1) * this.width / 2, y: (1 - p.y) * this.height / 2 };
+  project(point: V3) { const p = vector(point).project(this.camera); return { x: (p.x + 1) * this.width / 2, y: (1 - p.y) * this.height / 2 }; }
+  glassPoint(localX: number, localY: number): V3 {
+    this.raycaster.setFromCamera(new THREE.Vector2(localX / this.width * 2 - 1, 1 - localY / this.height * 2), this.camera);
+    const result = this.raycaster.ray.intersectPlane(this.glass, new THREE.Vector3());
+    return result ? { x: result.x, y: result.y, z: 0 } : v();
   }
-  worldRoot(clientX: number, clientY: number, offsetX: number, offsetY: number): Vec3 {
-    const rect = this.canvas.getBoundingClientRect();
-    return { x: clientX - rect.left - rect.width / 2 + offsetX,
-      y: rect.height / 2 - (clientY - rect.top) - offsetY, z: 0 };
+  clientPoint(clientX: number, clientY: number): V3 {
+    const rect = this.canvas.getBoundingClientRect(); return this.glassPoint(clientX - rect.left, clientY - rect.top);
   }
-  setRest(rest: Vec3) {
-    this.dirty = true;
-    this.pedestal.position.z = rest.z - 8;
-    this.pedestal.position.y = rest.y - 179.5;
-    this.floor.position.y = rest.y - 192.5;
-    this.shadow.position.y = rest.y - 166.6;
-    this.shadow.position.z = rest.z;
+  private segment(mesh: THREE.Mesh, start: V3, end: V3, radius: number) {
+    const d = vector(end).sub(vector(start)); mesh.position.copy(vector(start)).addScaledVector(d, 0.5);
+    mesh.quaternion.setFromUnitVectors(yAxis, d.clone().normalize()); mesh.scale.set(radius, d.length(), radius);
   }
-
-  render(options: { root: Vec3; tip: Vec3; product: Vec3; rest: Vec3; mode: InputMode; display: DisplayCondition; width: number; visible: boolean; held: boolean; value: number }) {
-    const { root, tip, product, rest, mode, display, width, visible, held, value } = options;
-    const renderKey = [root.x, root.y, root.z, tip.x, tip.y, tip.z, product.x, product.y, product.z,
-      width, value, mode, display, visible].map(v => typeof v === 'number' ? Math.round(v * 100) / 100 : v).join(',');
-    if (!this.dirty && renderKey === this.lastRender) return;
-    this.lastRender = renderKey; this.dirty = false;
-    this.pouch.position.copy(vector(product));
-    // The attachment origin is exactly the displayed contact, even while moving sideways.
-    this.pouch.rotation.set(0, 0, 0);
-    this.shadow.position.x = product.x * 0.2;
-    const elevation = Math.max(0, product.y - rest.y);
-    (this.shadow.material as THREE.MeshBasicMaterial).opacity = 0.13 * Math.exp(-elevation / 160);
-    this.shadow.scale.set(73 + elevation * 0.12, 32 + elevation * 0.07, 1);
-    this.finger.visible = visible && display === 'finger';
-    this.skin.clippingPlanes = mode === 'surface' ? this.surfaceClip : this.rearClip;
-    this.point.visible = visible && display === 'point';
-    this.point.position.copy(vector(tip));
-    if (this.finger.visible) {
-      const shape = [root.x, root.y, tip.x, tip.y, tip.z, width, value, mode].map(v => typeof v === 'number' ? Math.round(v * 5) / 5 : v).join(',');
-      if (shape !== this.lastShape) {
-        this.lastShape = shape;
-        const start = vector(root), end = vector(tip);
-        let controls: THREE.Vector3[];
-        if (mode === 'surface') {
-          controls = [start, start.clone().lerp(end, 0.34), start.clone().lerp(end, 0.73), end];
-          controls[1].z = -18; controls[2].z = tip.z * 0.82;
-        } else {
-          // The proximal part stays behind the glass and is clipped there.
-          // Only the distal continuation emerges toward the viewer.
-          start.z = -18;
-          const dip = new THREE.Vector3(rest.x + 8, rest.y + 48, -5);
-          const middle = start.clone().lerp(dip, 0.5); middle.z = -22;
-          controls = [start, middle, dip,
-            new THREE.Vector3(tip.x + 1, (dip.y + tip.y) / 2, tip.z + 12 + 10 * value), end];
-        }
-        const curve = new THREE.CatmullRomCurve3(controls, false, 'centripetal');
-        const geometry = new THREE.TubeGeometry(curve, 34, 1, 14, false);
-        const positions = geometry.getAttribute('position');
-        for (let i = 0; i <= 34; i++) {
-          const t = i / 34, center = curve.getPointAt(t);
-          const radius = width / 2 * (1 - 0.17 * t);
-          for (let j = 0; j <= 14; j++) {
-            const index = i * 15 + j;
-            positions.setXYZ(index, center.x + (positions.getX(index) - center.x) * radius,
-              center.y + (positions.getY(index) - center.y) * radius,
-              center.z + (positions.getZ(index) - center.z) * radius);
-          }
-        }
-        geometry.computeVertexNormals();
-        this.tube.geometry.dispose(); this.tube.geometry = geometry;
-        this.tipCap.position.copy(end);
-        this.tipCap.scale.setScalar(width * 0.415);
-        const tangent = curve.getTangent(1).normalize();
-        this.nail.position.copy(end).addScaledVector(tangent, -width * 0.36);
-        this.nail.position.z += width * 0.395;
-        this.nail.scale.set(width * 0.285, width * 0.43, width * 0.055);
-        this.nail.rotation.z = Math.atan2(tangent.y, tangent.x) - Math.PI / 2;
+  render(s: Skeleton, ball: Ball, response: MaterialResponse, config: FingerConfig, kind: SceneKind, visible: boolean, rootGap: number, skinColor: string) {
+    const key = JSON.stringify([s, ball, response.depth, response.contactNormal, response.thread, response.strokeShift, config.radius, config.side, visible, rootGap, skinColor, kind]);
+    if (key === this.lastKey && !this.dirty) return; this.lastKey = key; this.dirty = false;
+    this.finger.visible = this.rootShadow.visible = visible;
+    const sign = config.side === 'front' ? -1 : 1;
+    const planes = [new THREE.Plane(new THREE.Vector3(0, 0, sign), 0),
+      new THREE.Plane(vector(s.middleDirection), -vector(s.middleDirection).dot(vector(s.pip)) - rootGap)];
+    for (const material of [this.skin, this.nailMaterial, this.creaseMaterial]) material.clippingPlanes = planes;
+    this.skin.color.set(skinColor);
+    this.segment(this.middle, s.pip, s.dip, config.radius);
+    const endCenter = add(s.tip, mul(s.distalDirection, -config.radius * 0.5));
+    this.segment(this.distal, s.dip, endCenter, config.radius * 0.9);
+    this.joint.position.copy(vector(s.dip)); this.joint.scale.setScalar(config.radius * 0.93);
+    this.cap.position.copy(vector(endCenter)); this.cap.scale.setScalar(config.radius * 0.82);
+    const dorsal = vector(s.padNormal).negate();
+    const localX = new THREE.Vector3().crossVectors(vector(s.distalDirection), dorsal).normalize();
+    const basis = new THREE.Matrix4().makeBasis(localX, vector(s.distalDirection), dorsal);
+    this.nail.quaternion.setFromRotationMatrix(basis);
+    this.nail.position.copy(vector(add(s.dip, mul(s.distalDirection, config.distalLength * 0.79)))).addScaledVector(dorsal, config.radius * 0.82);
+    this.nail.scale.set(config.radius * 0.59, config.radius * 0.88, config.radius * 0.065);
+    this.crease.position.copy(vector(s.dip)).addScaledVector(vector(s.padNormal), config.radius * 0.55);
+    this.crease.quaternion.setFromRotationMatrix(basis); this.crease.scale.setScalar(config.radius * 0.8);
+    this.rootShadow.position.set(s.pip.x, s.pip.y, -0.8);
+    this.rootShadow.scale.set(config.radius * 4.0, config.radius * 3.2, 1);
+    this.ballMesh.position.copy(vector(ball.center));
+    const positions = this.ballGeometry.attributes.position;
+    for (let i = 0; i < positions.count; i++) {
+      const n = v(this.baseDirections[i * 3], this.baseDirections[i * 3 + 1], this.baseDirections[i * 3 + 2]);
+      const r = response.radiusAt(n, ball); positions.setXYZ(i, n.x * r, n.y * r, n.z * r);
+    }
+    positions.needsUpdate = true; this.ballGeometry.computeVertexNormals(); this.ballGeometry.computeBoundingSphere();
+    this.uniforms.normal.value.copy(vector(response.contactNormal));
+    this.uniforms.shift.value.set(response.strokeShift.x, response.strokeShift.y); this.uniforms.enabled.value = kind === 'stroke' ? 0.52 : 0;
+    this.contactShadow.visible = visible && response.depth > 0.2;
+    this.contactShadow.position.copy(vector(add(ball.center, mul(response.contactNormal, ball.radius - response.depth + 0.2))));
+    this.contactShadow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), vector(response.contactNormal));
+    (this.contactShadow.material as THREE.MeshBasicMaterial).opacity = Math.min(0.32, response.depth / 60);
+    this.strand.visible = !!response.thread;
+    if (response.thread) {
+      const threadKey = JSON.stringify(response.thread);
+      if (threadKey !== this.lastThread) {
+        this.lastThread = threadKey;
+        const start = vector(response.thread.start), end = vector(response.thread.end), middle = start.clone().lerp(end, 0.5);
+        middle.y -= start.distanceTo(end) * 0.09;
+        const curve = new THREE.CatmullRomCurve3([start, middle, end]);
+        this.strand.geometry.dispose(); this.strand.geometry = new THREE.TubeGeometry(curve, 20, 1.25, 9, false);
       }
     }
     this.renderer.render(this.scene, this.camera);
   }
-
   dispose() {
-    this.observer.disconnect();
-    this.scene.traverse(object => {
-      if (object instanceof THREE.Mesh) {
-        object.geometry.dispose();
-        for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose();
-      }
-    });
+    this.observer.disconnect(); this.environment.dispose(); this.pattern.dispose();
+    this.scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); for (const m of Array.isArray(object.material) ? object.material : [object.material]) m.dispose(); } });
     this.renderer.dispose();
   }
 }

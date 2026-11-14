@@ -1,49 +1,22 @@
-export type InputMode = 'surface' | 'rear';
-export type DisplayCondition = 'finger' | 'point';
-export type InputSource = 'surface' | 'camera' | 'simulation';
-export type Vec3 = { x: number; y: number; z: number };
-export type ControlFrame = {
-  type: 'control';
-  version: 1;
-  seq: number;
-  value: number;
-  valid: boolean;
-  calibrated: boolean;
-  confidence: number;
-  source: 'camera' | 'simulation';
-  sentAt: number;
-  streamId?: string;
-  angle?: number;
+import type { V3 } from './math';
+export type Side = 'front' | 'back';
+export type SceneKind = 'press' | 'release' | 'stroke';
+/** Hand-side tilts: +x = MCP moves right, +y = MCP moves up in device coordinates. */
+export type Pose = { tiltX: number; tiltY: number; dip: number };
+export type PoseSource = 'mediapipe' | 'markers' | 'simulation';
+export type PoseFrame = {
+  type: 'pose'; version: 2; seq: number; source: PoseSource; pose: Pose;
+  valid: boolean; calibrated: boolean; contact: boolean; axes: 'plane-y' | 'estimated-xy';
+  rotation: number; confidence: number; sentAt: number; streamId?: string;
 };
-export type InputSample = {
-  active: boolean;
-  value: number;
-  eligible: boolean;
-  tip: Vec3;
-  root: Vec3;
-  source: InputSource;
-  seq?: number;
+export type FingerConfig = {
+  middleLength: number; distalLength: number; radius: number; yaw: number; pitch: number;
+  dipRest: number; side: Side; thickness: number;
 };
-export type InteractionEvent = {
-  kind: 'contact' | 'release' | 'lift';
-  reason: string;
-  value: number;
-  lift: number;
-  source: InputSource;
-  seq?: number;
+export type Skeleton = {
+  pip: V3; dip: V3; tip: V3; pad: V3; padNormal: V3; middleDirection: V3;
+  distalDirection: V3; flexDirection: V3; bendAxis: V3;
 };
-export const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
-export const copy = (v: Vec3): Vec3 => ({ ...v });
-export const distance = (a: Vec3, b: Vec3) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
-
-/** randomUUID is secure-context-only; the phone also runs on ordinary LAN HTTP. */
-export function newId(): string {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  const bytes = new Uint8Array(16);
-  if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(bytes);
-  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
+export type Ball = { center: V3; radius: number };
+export type Contact = { point: V3; normal: V3; depth: number; angle: number };
+export const neutralPose = (): Pose => ({ tiltX: 0, tiltY: 0, dip: 0 });
