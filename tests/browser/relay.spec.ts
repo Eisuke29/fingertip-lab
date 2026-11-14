@@ -13,7 +13,9 @@ test('relay isolates rooms, drops duplicate sequences, and forwards only the pos
     expect(frames[0].pose).toEqual(packet.pose); expect(frames[0].pixels).toBeUndefined(); expect(frames[0].streamId).toBeTruthy();
     sender.send(JSON.stringify(packet)); sender.send(JSON.stringify({ type: 'control', version: 1, value: 1 }));
     await new Promise(resolve => setTimeout(resolve, 100)); expect(frames).toHaveLength(1); expect(unrelated).toHaveLength(0);
-    const duplicate = await connect('tracker');
-    const code = await new Promise(resolve => duplicate.on('close', code => resolve(code))); expect(code).toBe(4003);
+    // A newer sender (e.g. after a page reload) replaces the old one instead of being rejected.
+    const replacedCode = new Promise(resolve => sender.on('close', code => resolve(code)));
+    const newer = await connect('tracker'); expect(await replacedCode).toBe(4004);
+    newer.send(JSON.stringify({ ...packet, seq: 1 })); await expect.poll(() => frames.length).toBe(2); newer.close();
   } finally { viewer.close(); other.close(); sender.close(); }
 });

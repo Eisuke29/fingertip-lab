@@ -66,7 +66,9 @@ wss.on('connection', (ws, req, url) => {
   if (role === 'viewer') {
     room.viewers.add(ws); announcePeers();
   } else {
-    if (room.tracker?.readyState === WebSocket.OPEN) { ws.close(4003, 'Tracker already active'); return; }
+    // Newest sender wins: a reload often connects before the old socket has closed,
+    // so rejecting the newcomer would leave the only open tab stuck.
+    if (room.tracker && room.tracker.readyState === WebSocket.OPEN) room.tracker.close(4004, 'Replaced by a newer tracker');
     room.tracker = ws;
     ws.streamId = randomUUID();
     ws.seq = -1;

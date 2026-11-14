@@ -84,6 +84,7 @@ export function startTracker() {
   const simulationPose = (): Pose => ({ tiltX: radians(Number($<HTMLInputElement>('send-x').value)), tiltY: radians(Number($<HTMLInputElement>('send-y').value)), dip: radians(Number($<HTMLInputElement>('send-dip').value)) });
   const fail = (message: string) => { $('camera-error').textContent = message; $('camera-error').hidden = false; };
   socket.onStatus = text => $('network-state').textContent = text;
+  socket.onReplaced = () => { void stopCamera(); };
   const calibrationSteps = () => { const keys = calibration.mode === 'estimated-xy' ? ['neutral', 'down', 'left', 'bent'] as const : ['neutral', 'down', 'bent'] as const; return { done: keys.filter(k => !!calibration[k]).length, total: keys.length }; };
   let viewers: number | null = null;
   socket.onPeers = n => { viewers = n; };
@@ -285,7 +286,7 @@ export function startTracker() {
       [['step-camera', 1], ['calibration-panel', 2], ['step-phone', 3]].forEach(([id, n]) => setData($(id as string), 'state', (n as number) < current ? 'done' : n === current ? 'current' : 'todo'));
       const next = nextRecord(), nextPose = poses.find(p => p.kind === next);
       const [tone, num, title, detail] =
-        socket.duplicate ? ['err', '!', '同じ接続名で、別の「指の読み取り」が開いています', `他のタブやPCで開いている「指の読み取り」を閉じて再読み込みするか、URLの ?room= を別の名前にします（現在 ${roomName()}）`] :
+        socket.replaced ? ['err', '!', '別のタブで「指の読み取り」が開かれたので、この画面は止まりました', 'このタブを使う場合は再読み込みしてください（新しく開いた方が優先されます）'] :
         !socket.connected ? ['err', '!', 'PCのサーバーに接続できません', 'PCで npm run dev が動いているか確認してください。自動で再接続します'] :
         sim ? (phoneDone ? ['ok', '✓', '手動の値を送信中', 'スライダーを動かすと、iPhoneの指が動きます（実際の指ではありません）'] : ['info', '3', 'iPhoneで表示を開く', '右の ③ のQRコードを読み取ります']) :
         starting ? ['info', '1', 'カメラを起動しています', modelState === 'loading' ? '手指検出モデルを読み込み中…' : 'ブラウザーのカメラ許可を確認してください'] :

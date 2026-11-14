@@ -9,8 +9,9 @@ export class PoseSocket {
   private retry?: ReturnType<typeof setTimeout>;
   private closed = false;
   connected = false;
-  /** Closed by the relay because another tracker already owns this room. */
-  duplicate = false;
+  /** Closed by the relay because a newer tracker took over this room. */
+  replaced = false;
+  onReplaced?: () => void;
   constructor(private role: 'viewer' | 'tracker', private room: string) {
     if (!isStaticDemo) this.connect();
     else queueMicrotask(() => this.onStatus?.('公開版（PCと接続なし）'));
@@ -23,8 +24,9 @@ export class PoseSocket {
     ws.onopen = () => { this.connected = true; this.onStatus?.(`PCと接続済み · 接続名 ${this.room}`); };
     ws.onmessage = event => { try { const frame = JSON.parse(event.data); if (frame.type === 'pose' && frame.version === 2) this.onPose?.(frame); else if (frame.type === 'peers' && typeof frame.viewers === 'number') this.onPeers?.(frame.viewers); } catch {} };
     ws.onclose = event => {
-      this.connected = false; this.duplicate = event.code === 4003; this.onStatus?.(event.code === 4003 ? '同じ接続名で別の読み取り画面が開いています' : 'PCに再接続中');
-      if (!this.closed && event.code !== 4003) this.retry = setTimeout(() => this.connect(), 1300);
+      this.connected = false; this.replaced = event.code === 4004; this.onStatus?.(this.replaced ? '別のタブに切り替わりました' : 'PCに再接続中');
+      if (this.replaced) this.onReplaced?.();
+      if (!this.closed && !this.replaced) this.retry = setTimeout(() => this.connect(), 1300);
     };
     ws.onerror = () => {};
   }
