@@ -17,7 +17,7 @@ const sceneNames: Record<SceneKind, string> = { press: '押す', release: '離�
 const sceneInfo: Record<SceneKind, string> = {
   press: '指先をゆっくり曲げて、球を押し込む',
   release: '押したあと指先を戻すと、糸が伸びて切れる',
-  stroke: '触れたまま手側を左右へ倒して、表面をなぞる',
+  stroke: '触れたまま手を左右へ傾けて、表面をなぞる',
 };
 const defaults = (): Setup => ({ ...defaultFinger(), side: 'front', yaw: 11, pitch: 23, dipRest: -35, offsetX: 0, offsetY: 0,
   ballRadius: 70, ballDepth: 200, ballX: 0, ballY: 0, skin: '#d9aa91', rootGap: 0, viewYaw: 0, viewPitch: 0, contactMode: 'touch' });
@@ -29,7 +29,7 @@ export function startExperience() {
   const stageHtml = `<div class="view-container" id="stage">
     <header class="experience-header">
       <div class="status-pill" id="status-pill" data-tone="off"><span class="dot"></span><span id="status-text">接続中</span></div>
-      <a class="adjust-link" href="${href(developer ? 'product' : 'dev')}">${developer ? icon('phone', 16) + '体験画面' : icon('gear', 16) + '調整'}</a>
+      <a class="adjust-link" href="${href(developer ? 'product' : 'dev')}">${developer ? icon('phone', 16) + 'iPhone体験' : icon('gear', 16) + '調整・お試し'}</a>
     </header>
     <span class="simulation-badge" id="simulation-badge" hidden>実指の入力ではありません</span>
     <div class="pivot-guide" id="pivot-guide" aria-hidden="true"><span class="ring"></span><span class="core"></span><span class="guide-label" id="guide-label">第2関節をここに</span></div>
@@ -206,20 +206,20 @@ export function startExperience() {
       $('simulation-badge').hidden = !(simulation || remote.source === 'simulation');
       // Status pill = what the input is doing; note = the one thing the user should do next (empty when nothing).
       const simulated = simulation || remote.source === 'simulation';
-      const [tone, statusText] = simulation ? ['sim', 'シミュレーション'] :
-        remote.status === 'ready' ? [simulated ? 'sim' : 'ok', simulated ? 'PCからシミュレーション受信' : 'PCで計測中'] :
+      const [tone, statusText] = simulation ? ['sim', '手動で動かし中'] :
+        remote.status === 'ready' ? [simulated ? 'sim' : 'ok', simulated ? 'PCから手動の値を受信' : 'PCで指を読み取り中'] :
         remote.status === 'hold' ? ['wait', '追跡を待っています'] :
         remote.status === 'lost' ? ['err', '追跡が途切れました'] :
         remote.status === 'rotation' ? ['err', '画面の向きが変わりました'] :
-        isStaticDemo ? ['off', '公開デモ'] : socket.connected ? ['wait', 'PCの計測を待っています'] : ['off', '中継に接続中'];
+        isStaticDemo ? ['off', '公開デモ'] : socket.connected ? ['wait', 'PCの読み取りを待っています'] : ['off', 'PCに接続中'];
       setData($('status-pill'), 'tone', tone); setText($('status-text'), statusText);
       const [noteTone, note] = simulation ? ['info', ''] :
-        remote.status === 'rotation' ? ['err', '画面の向きが変わりました。PCの「端末の向き」を合わせて校正し直してください'] :
+        remote.status === 'rotation' ? ['err', '画面の向きが変わりました。PCの「端末の向き」を合わせて、動きを登録し直してください'] :
         remote.status === 'lost' ? ['err', '追跡が途切れました。指を一度離して、もう一度当ててください'] :
         touchNeedsFresh ? ['warn', '指を一度離して、もう一度当ててください'] :
         visible && remote.valid ? ['info', ''] :
         remote.status === 'hold' ? ['warn', 'PCのカメラに人差し指が映っているか確認してください'] :
-        remote.status === 'waiting' ? (isStaticDemo ? ['info', `公開版：実指入力なし · <a href="${href('dev')}">開発画面で動きを試す</a>`] : ['info', `PCの<a href="${href('tracker')}">計測画面</a>でカメラを開始し、校正してください`]) :
+        remote.status === 'waiting' ? (isStaticDemo ? ['info', `公開版：実指入力なし · <a href="${href('dev')}">調整・お試しで動きを見る</a>`] : ['info', `PCで<a href="${href('tracker')}">指の読み取り</a>を開き、カメラを開始してください`]) :
         setup.side === 'back' || setup.contactMode === 'camera' ? ['info', '第2関節を印に合わせると、PCが接触を判定します'] : ['info', '第2関節を ○ に当てると、指の続きが現れます'];
       if ($('input-note').innerHTML !== note) $('input-note').innerHTML = note;
       setData($('input-note'), 'tone', noteTone);
@@ -232,14 +232,14 @@ export function startExperience() {
         const statusName = ({ waiting: '未接続', ready: '受信中', hold: '保持', lost: '途絶', rotation: '向き変更' } as Record<string, string>)[remote.status];
         renderPipeline($('pipeline'), [
           ['入力', simulation ? 'シミュ' : statusName, receiving ? 'ok' : remote.status === 'hold' ? 'wait' : 'off'],
-          ['接点', active ? '登録済' : '未登録', active ? 'ok' : 'off'],
-          ['接触', engine.contact ? 'あり' : 'なし', engine.contact ? 'ok' : 'off'],
-          ['変形', material.depth > 0.05 ? material.depth.toFixed(1) + ' px' : '0', material.depth > 0.05 ? 'ok' : 'off'],
+          ['指の位置', active ? '決定' : '未決定', active ? 'ok' : 'off'],
+          ['球に接触', engine.contact ? 'あり' : 'なし', engine.contact ? 'ok' : 'off'],
+          ['へこみ', material.depth > 0.05 ? material.depth.toFixed(1) + ' px' : '0', material.depth > 0.05 ? 'ok' : 'off'],
         ]);
         const deg = (r: number) => degrees(r).toFixed(1) + '°';
         renderReadouts($('diagnostics'), [
-          ['手側 θx', deg(pose.tiltX)], ['手側 θy', deg(pose.tiltY)], ['表示倍率 g', engine.gain.toFixed(1)],
-          ['DIP 入力', deg(pose.dip)], ['DIP 表示', deg(engine.displayedDip)], ['へこみ', material.depth.toFixed(1) + ' px'],
+          ['手の傾き 左右', deg(pose.tiltX)], ['手の傾き 上下', deg(pose.tiltY)], ['表示倍率 g', engine.gain.toFixed(1)],
+          ['指先の曲げ 入力', deg(pose.dip)], ['指先の曲げ 表示', deg(engine.displayedDip)], ['へこみ', material.depth.toFixed(1) + ' px'],
         ]);
       }
     }
@@ -251,8 +251,8 @@ export function startExperience() {
 function developerPanel(s: Setup) {
   return `<aside class="developer-panel">
   <header class="panel-head">
-    <div><p class="eyebrow">Pivot Finger Lab</p><h1>開発画面</h1></div>
-    <a class="pill-link" id="tracker-link" href="#" target="_blank" rel="noopener">${icon('camera', 16)}計測画面${icon('external', 13)}</a>
+    <div><p class="eyebrow">Pivot Finger Lab</p><h1>調整・お試し</h1><p class="subtitle">PCで開く画面 · 指や球の見た目を合わせ、カメラなしでも動きを試せます</p></div>
+    <a class="pill-link" id="tracker-link" href="#" target="_blank" rel="noopener">${icon('camera', 16)}指の読み取り${icon('external', 13)}</a>
   </header>
   <p class="conn-line">${icon('info', 14)}<span id="connection">接続待ち</span></p>
   <ol class="pipeline" id="pipeline"></ol>
@@ -260,13 +260,13 @@ function developerPanel(s: Setup) {
 
   <section class="card">
     <h2>入力</h2>
-    <p class="card-desc">PCのカメラがなくても、ここで角度を入れて同じ描画を確かめられます。</p>
-    ${toggle('use-simulation', 'シミュレーション入力', false, '実指の代わりにスライダーで動かす')}
+    <p class="card-desc">PCのカメラがなくても、スライダーで指を動かして見え方を確かめられます。</p>
+    ${toggle('use-simulation', '手動で動かす', false, '実際の指の代わりにスライダーで動かす')}
     <button class="secondary full-width" id="play-pose">${icon('play', 14)}自動再生（押す→戻す→なぞる）</button>
     <div id="simulation-controls" class="sub" hidden>
-      ${slider('dip', 'DIP（指先の曲げ）', -15, 75, 0, 1, '°', '右へ動かすと球を押す')}
-      ${slider('hand-y', '手側 上下', -25, 25, 0, 1, '°', '− 下 / + 上')}
-      ${slider('hand-x', '手側 左右', -25, 25, 0, 1, '°', '− 左 / + 右')}
+      ${slider('dip', '指先の曲げ', -15, 75, 0, 1, '°', '右へ動かすと球を押す')}
+      ${slider('hand-y', '手の傾き 上下', -25, 25, 0, 1, '°', '− 下 / + 上')}
+      ${slider('hand-x', '手の傾き 左右', -25, 25, 0, 1, '°', '− 左 / + 右')}
       ${toggle('sim-contact', '接点あり', true)}
       <button class="ghost" id="neutral-pose">${icon('reset', 14)}基準姿勢に戻す</button>
     </div>
@@ -285,14 +285,14 @@ function developerPanel(s: Setup) {
 
   <details class="card" id="dev-advanced"><summary>接触の検出</summary>
     <div class="field-grid"><label for="contact-mode">検出方法</label><select id="contact-mode"><option value="touch">タッチ（画面に当てる）</option><option value="camera">カメラ固定点（PCで判定）</option></select></div>
-    <p class="card-desc">タッチが反応しない端末や裏側では「カメラ固定点」を選び、PCの計測画面で接触判定を有効にします。</p>
+    <p class="card-desc">タッチが反応しない端末や裏側では「カメラ固定点」を選び、PCの「指の読み取り」でカメラによる接触判定を有効にします。</p>
     <button class="secondary full-width" id="realign">${icon('reset', 14)}接点を登録し直す</button>
   </details>
   <details class="card"><summary>指の形と継ぎ目</summary>
     <p class="card-desc">指を離した状態で変更できます。実指の見え方に合わせます。</p>
     ${slider('offset-x', '継ぎ目 X', -60, 60, s.offsetX, 1, ' px')}${slider('offset-y', '継ぎ目 Y', -60, 60, s.offsetY, 1, ' px')}
     ${slider('width', '指の半径', 10, 36, s.radius, 1, ' px')}${slider('middle-length', '中節の長さ', 70, 165, s.middleLength, 1, ' px')}${slider('distal-length', '末節の長さ', 45, 115, s.distalLength, 1, ' px')}
-    ${slider('yaw', '基準の向き 左右', -40, 40, s.yaw)}${slider('pitch', '基準の向き 上下', 5, 55, s.pitch)}${slider('dip-rest', 'DIP 基準角', -60, -10, s.dipRest)}
+    ${slider('yaw', '基準の向き 左右', -40, 40, s.yaw)}${slider('pitch', '基準の向き 上下', 5, 55, s.pitch)}${slider('dip-rest', '指先の基準の曲げ', -60, -10, s.dipRest)}
     ${slider('root-gap', '根元の隙間', 0, 18, s.rootGap, 1, ' px', '描画だけを切り取る比較条件')}
     <div class="switch-row"><label class="switch-text" for="skin-color">根元の色</label><input type="color" id="skin-color" value="${s.skin}"/></div>
   </details>

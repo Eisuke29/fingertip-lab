@@ -43,6 +43,6 @@ export class MarkerTracker {
         .sort((a, b) => Math.hypot(a.x - old.x, a.y - old.y) - Math.hypot(b.x - old.x, b.y - old.y))[0] ?? null;
     });
     points.forEach((p, i) => { if (p) this.previous[i] = p; });
-    return result(points, points.every(Boolean) ? '4点を追跡中 · 面内1軸' : '点の隠れ・色・位置を確認してください');
+    return result(points, points.every(Boolean) ? '4点を読み取り中' : '点の隠れ・色・位置を確認してください');
   }
 }
