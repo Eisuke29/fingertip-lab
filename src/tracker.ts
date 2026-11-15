@@ -308,8 +308,7 @@ export function startTracker() {
   let cachedHints: (ImagePoint | null)[] | null = null;
   function markerHints(now: number): (ImagePoint | null)[] | null {
     if (!detector) return null;
-    // The hand model only helps to find marks whose position is not known yet; known marks are followed by position.
-    if (!markers.unknown) { cachedHints = null; return null; }
+    // Every frame: the PIP (第2関節) comes from the hand model, and it fills in any mark that cannot be seen.
     cachedHints = findHints(now);
     return cachedHints;
   }
@@ -330,9 +329,21 @@ export function startTracker() {
         const colors = initialColors.map((_, i) => $<HTMLInputElement>(`marker-color-${i}`).value);
         // Strict colour search; known marks are followed only near their predicted position.
         hints = markerHints(now);
-        const tracked = markers.detect(lastPixels.data, raw.width, raw.height, colors, hints ?? undefined);
-        points = tracked.points; reason = markerReason = tracked.reason; markerPoints = points;
-        if (tracked.valid) sample = measureHand(points as HandSample['image'], null);
+        // 第2関節 is taken from the hand model (no mark needed) whenever the model sees the hand.
+        const pipFromModel = !!hints?.[1];
+        const tracked = markers.detect(lastPixels.data, raw.width, raw.height, colors, hints ?? undefined, [false, pipFromModel, false, false]);
+        // Never leave a joint empty while the hand model sees the hand: a mark that cannot be seen uses its estimate.
+        // (Stale last positions are not used: they would mix old and new joints into a wrong pose.)
+        points = tracked.points.map((p, i) => {
+          if (i === 1 && pipFromModel) return { ...hints![1]!, estimated: true };
+          if (p) return p;
+          const fill = hints?.[i];
+          return fill ? { x: fill.x, y: fill.y, estimated: true } : null;
+        });
+        const filled = points.map((p, i) => (p?.estimated && !(i === 1 && pipFromModel) ? names[i] : '')).filter(Boolean);
+        reason = markerReason = points.every(Boolean) ? (filled.length ? `4点を読み取り中（${filled.join('・')}は推定）` : '4点を読み取り中') : tracked.reason;
+        markerPoints = points;
+        if (points.every(Boolean)) sample = measureHand(points as HandSample['image'], null);
       } else if (detector) {
         const result = detector.detectForVideo(video, now);
         const candidates = result.landmarks.map((hand, index) => ({ hand, index, label: result.handedness[index]?.[0]?.categoryName || '' }));
@@ -410,7 +421,7 @@ export function startTracker() {
 
       // Panel 2: per-mark status.
       if (markerMode) {
-        markerPoints.forEach((p, i) => { $(`marker-state-${i}`).classList.toggle('ok', !!p && !p.estimated); setText($(`marker-found-${i}`), !p ? '未検出' : p.estimated ? '推定' : '検出'); });
+        markerPoints.forEach((p, i) => { $(`marker-state-${i}`).classList.toggle('ok', !!p && (!p.estimated || i === 1)); setText($(`marker-found-${i}`), !p ? '未検出' : i === 1 && p.estimated ? '指推定' : p.estimated ? '推定' : '検出'); });
         // Per-mark 検出/未検出 is shown in each row; the message is only for colour problems (which joint, and why).
         setText($('marker-message'), !running ? 'カメラを開始してください' : markerPoints.some(Boolean) || markerReason.includes('見つかりません') ? '' : markerReason);
       }

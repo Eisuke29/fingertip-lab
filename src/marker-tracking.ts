@@ -78,11 +78,14 @@ export class MarkerTracker {
    *   after a while the window widens, and only after a long loss the mark is searched for again;
    * - an unknown mark takes the candidate nearest the hand model's estimate (`hints`), else the largest one.
    */
-  detect(pixels: Uint8ClampedArray, width: number, height: number, colors: string[], hints?: (ImagePoint | null)[]) {
+  /** `skip`: joints that are not searched by colour (their position comes from elsewhere, e.g. the hand model). */
+  detect(pixels: Uint8ClampedArray, width: number, height: number, colors: string[], hints?: (ImagePoint | null)[], skip: boolean[] = [false, false, false, false]) {
     const result = (points: (ImagePoint | null)[], reason: string) => ({ points, valid: points.every(Boolean), reason });
-    const problem = markerColorProblem(colors);
+    const used = colors.map((_, i) => i).filter(i => !skip[i]);
+    const problem = markerColorProblem(used.map(i => colors[i]), used.map(i => MARKER_NAMES[i]));
     if (problem) return result([null, null, null, null], problem);
-    const targets = colors.map(toTarget), darkId = targets.findIndex(t => t.dark), lightId = targets.findIndex(t => t.light);
+    const targets = colors.map(toTarget);
+    const darkId = targets.findIndex((t, i) => t.dark && !skip[i]), lightId = targets.findIndex((t, i) => t.light && !skip[i]);
     const size = width * height, labels = new Uint8Array(size), queue = new Uint32Array(size);
     for (let p = 0; p < size; p++) {
       const color = hsv(pixels[p * 4], pixels[p * 4 + 1], pixels[p * 4 + 2]);
@@ -90,7 +93,7 @@ export class MarkerTracker {
       if (lightId >= 0 && color.v >= targets[lightId].lightMin && color.s < LIGHT_MAX_SATURATION) { labels[p] = lightId + 1; continue; }
       if (color.s < MIN_SATURATION || color.v < 0.17 || isSkinLike(color)) continue;
       let best = this.tolerance, id = 0;
-      for (let k = 0; k < targets.length; k++) { if (targets[k].neutral || Math.abs(color.s - targets[k].s) > 0.25) continue; const d = hueDistance(color.h, targets[k].h); if (d < best) { best = d; id = k + 1; } }
+      for (let k = 0; k < targets.length; k++) { if (skip[k] || targets[k].neutral || Math.abs(color.s - targets[k].s) > 0.25) continue; const d = hueDistance(color.h, targets[k].h); if (d < best) { best = d; id = k + 1; } }
       labels[p] = id;
     }
     const groups: ImagePoint[][] = [[], [], [], []];
@@ -108,12 +111,13 @@ export class MarkerTracker {
     const dist = (a: ImagePoint, b: ImagePoint) => Math.hypot(a.x - b.x, a.y - b.y);
     const track = Math.max(18, width * TRACK_RADIUS);
     const points = groups.map((group, i) => {
+      if (skip[i]) return null;
       const old = this.previous[i], v = this.velocity[i], hint = hints?.[i] ?? null;
       const sizeOk = (p: ImagePoint) => !old?.area || (p.area! / old.area > 0.25 && p.area! / old.area < 4);
       if (old) {
         const pred = { x: old.x + v.x, y: old.y + v.y };
         // Lost for a few frames: allow a wider window around the last position; lost for long: forget it.
-        const radius = this.misses[i] < 6 ? track + Math.hypot(v.x, v.y) : track * 2.5;
+        const radius = this.misses[i] < 4 ? track + Math.hypot(v.x, v.y) : Math.max(track * 2.5, width * 0.12);
         const found = group.filter(p => dist(p, pred) < radius && sizeOk(p)).sort((a, b) => dist(a, pred) - dist(b, pred))[0];
         if (found) {
           v.x = 0.5 * v.x + 0.5 * (found.x - old.x); v.y = 0.5 * v.y + 0.5 * (found.y - old.y);
@@ -121,7 +125,7 @@ export class MarkerTracker {
           this.misses[i] = 0; this.previous[i] = found; return found;
         }
         this.misses[i]++; v.x = 0; v.y = 0;
-        if (this.misses[i] > 45) this.previous[i] = null;
+        if (this.misses[i] > 15) this.previous[i] = null;
         return null;
       }
       // Not known yet: nearest to the hand model's estimate of this joint, else the largest candidate.
@@ -132,7 +136,7 @@ export class MarkerTracker {
       if (pick) { this.previous[i] = pick; this.misses[i] = 0; v.x = 0; v.y = 0; }
       return pick ?? null;
     });
-    const missing = points.map((p, i) => (p ? '' : MARKER_NAMES[i])).filter(Boolean);
+    const missing = points.map((p, i) => (p || skip[i] ? '' : MARKER_NAMES[i])).filter(Boolean);
     return result(points, missing.length ? `${missing.join('・')}の目印が見つかりません（隠れ・色・位置を確認）` : '4点を読み取り中');
   }
 }
