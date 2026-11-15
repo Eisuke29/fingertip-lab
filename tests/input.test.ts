@@ -78,3 +78,25 @@ describe('input validation', () => {
     expect(tracker.detect(data, width, height, colors).valid).toBe(false);
   });
 });
+
+describe('marker colours', () => {
+  it('accepts one black pen mark, names the bad joint otherwise, and samples the clicked mark robustly', async () => {
+    const { markerColorProblem, sampleMarkerColor } = await import('../src/marker-tracking');
+    expect(markerColorProblem(['#e02020', '#20a040', '#8a3cc8', '#141414'])).toBeNull();
+    expect(markerColorProblem(['#eaa58f', '#20a040', '#8a3cc8', '#141414'])).toContain('付け根で肌の色を採取');
+    expect(markerColorProblem(['#e02020', '#c8c8c8', '#8a3cc8', '#141414'])).toContain('第2関節の色が薄すぎます');
+    expect(markerColorProblem(['#e02020', '#101010', '#8a3cc8', '#141414'])).toContain('第2関節と指先');
+    const width = 40, height = 40, data = new Uint8ClampedArray(width * height * 4).fill(200);
+    for (let x = 20; x < 24; x++) for (let y = 20; y < 24; y++) data.set([30, 160, 60, 255], (y * width + x) * 4);
+    data.set([255, 255, 255, 255], (21 * width + 21) * 4); // one stray pixel inside the mark
+    const picked = sampleMarkerColor(data, width, height, 21, 21);
+    expect(picked.hex).toBe('#1ea03c'); expect(picked.x).toBe(21);
+  });
+  it('tracks a black mark among three coloured marks', () => {
+    const width = 160, height = 120, data = new Uint8ClampedArray(width * height * 4).fill(210);
+    const rgb = [[220, 30, 30], [30, 170, 60], [140, 60, 200], [15, 15, 15]];
+    for (let i = 0; i < 4; i++) for (let x = 20 + i * 30; x < 26 + i * 30; x++) for (let y = 40; y < 46; y++) data.set([...rgb[i], 255], (y * width + x) * 4);
+    const r = new MarkerTracker().detect(data, width, height, ['#dc1e1e', '#1eaa3c', '#8c3cc8', '#0f0f0f']);
+    expect(r.valid).toBe(true); expect(r.points[3]!.x).toBeCloseTo(112.5, 0);
+  });
+});

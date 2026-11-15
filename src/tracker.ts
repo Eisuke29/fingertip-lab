@@ -1,5 +1,5 @@
 import { HandCalibration, measureHand, type HandSample } from './calibration';
-import { MarkerTracker, type ImagePoint } from './marker-tracking';
+import { MarkerTracker, sampleMarkerColor, type ImagePoint } from './marker-tracking';
 import { degrees, radians, v } from './math';
 import { PoseSocket } from './socket';
 import { neutralPose, type Pose, type PoseFrame } from './types';
@@ -24,7 +24,7 @@ const poseSvg = (points: PosePoints, ghost: boolean) => {
 };
 const sources: { id: PoseFrame['source']; title: string; detail: string }[] = [
   { id: 'mediapipe', title: '自動検出', detail: '目印なし' },
-  { id: 'markers', title: '4色マーカー', detail: '色シールを貼る' },
+  { id: 'markers', title: '4色マーカー', detail: '色シール・ペン（黒も1か所可）' },
   { id: 'simulation', title: '手動', detail: 'カメラなしで試す' },
 ];
 const meter = (id: string, label: string) => `<div class="meter"><span class="meter-label">${label}</span><span class="meter-track"><span class="meter-zero"></span><span class="meter-fill" id="${id}-bar"></span></span><strong id="${id}">—</strong></div>`;
@@ -63,7 +63,7 @@ export function startTracker() {
         </details>
         <div class="checks" id="setup-checks" hidden></div>
         <div id="sender-simulation" class="sub" hidden>${slider('send-dip', '指先の曲げ', -15, 75, 0)}${slider('send-y', '手の傾き 上下', -25, 25, 0)}${slider('send-x', '手の傾き 左右', -25, 25, 0)}${toggle('send-contact', '接触あり', false)}</div>
-        <details id="markers-panel" class="sub markers" open hidden><summary>色の目印<span class="tag" id="marker-summary">0 / 4</span></summary><p class="card-desc">付け根・第2関節・第1関節・指先に異なる色の目印を付け、ボタンを押してから映像上の目印をクリックします。</p>${names.map((name, i) => `<div class="marker-row"><span class="marker-dot" id="marker-state-${i}"></span><input type="color" id="marker-color-${i}" value="${initialColors[i]}" aria-label="${name}の色"/><button class="secondary" data-pick="${i}">${name} の色を採取</button></div>`).join('')}<button class="ghost" id="reacquire">${icon('reset', 14)}再検出</button></details>
+        <details id="markers-panel" class="sub markers" open hidden><summary>色の目印<span class="tag" id="marker-summary">0 / 4</span></summary><p class="card-desc">付け根・第2関節・第1関節・指先の指の横に、異なる色の目印（シールや色ペン。黒は1か所だけ可）を付けます。ボタンを押してから映像上の目印をクリックします（目印の真ん中をクリック。外すと肌の色になり、そう表示されます）。</p>${names.map((name, i) => `<div class="marker-row"><span class="marker-dot" id="marker-state-${i}"></span><input type="color" id="marker-color-${i}" value="${initialColors[i]}" aria-label="${name}の色"/><button class="secondary" data-pick="${i}">${name} の色を採取</button></div>`).join('')}<button class="ghost" id="reacquire">${icon('reset', 14)}再検出</button></details>
       </section>
       <section class="step" id="calibration-panel"><header><span class="step-num">2</span><h2>指の動きを登録</h2><span class="step-count" id="calibration-count"></span></header>
         <p class="card-desc">横から見たカメラで、各姿勢を約0.5秒止めて記録します。<kbd>Space</kbd> で次の姿勢を記録できます。</p>
@@ -210,9 +210,9 @@ export function startTracker() {
     const sx = (event.clientX - rect.left) / rect.width;
     const x = Math.max(0, Math.min(raw.width - 1, Math.round((mirror ? 1 - sx : sx) * raw.width)));
     const y = Math.max(0, Math.min(raw.height - 1, Math.round((event.clientY - rect.top) / rect.height * raw.height)));
-    const p = (y * raw.width + x) * 4;
-    $<HTMLInputElement>(`marker-color-${pick}`).value = '#' + [...lastPixels.data.slice(p, p + 3)].map(n => n.toString(16).padStart(2, '0')).join('');
-    markers.seed(pick, x, y); pick = null; preview.style.cursor = ''; resetCalibration();
+    const picked = sampleMarkerColor(lastPixels.data, raw.width, raw.height, x, y);
+    $<HTMLInputElement>(`marker-color-${pick}`).value = picked.hex;
+    markers.seed(pick, picked.x, picked.y); pick = null; preview.style.cursor = ''; resetCalibration();
   });
   for (let i = 0; i < 4; i++) $(`marker-color-${i}`).addEventListener('change', () => { markers.reset(); resetCalibration(); });
   $('reacquire').addEventListener('click', () => { markers.reset(); resetCalibration(); });
