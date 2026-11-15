@@ -15,12 +15,15 @@ const MIN_SATURATION = 0.25;
 const HINT_RADIUS = 0.1;
 /** Dark but clearly coloured ink (deep green, purple) stays a colour marker; only near-neutral dark counts as black. */
 const DARK_MAX_SATURATION = 0.55;
+/** White paint/tape: bright and almost colourless. Skin is clearly more saturated, mid-grey walls are darker. */
+const LIGHT_TARGET = 0.7, LIGHT_MAX_SATURATION = 0.2;
 
-type Target = { h: number; s: number; v: number; dark: boolean; darkMax: number };
+/** A mark is either a colour (matched by hue) or one neutral mark, black or white (matched by brightness). */
+type Target = { h: number; s: number; v: number; dark: boolean; light: boolean; neutral: boolean; darkMax: number; lightMin: number };
 const parseHex = (hex: string) => hsv(parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16));
 function toTarget(hex: string): Target {
-  const c = parseHex(hex), dark = c.v < DARK_TARGET && c.s < DARK_MAX_SATURATION;
-  return { ...c, dark, darkMax: Math.min(0.3, c.v + 0.06) };
+  const c = parseHex(hex), dark = c.v < DARK_TARGET && c.s < DARK_MAX_SATURATION, light = !dark && c.v >= LIGHT_TARGET && c.s < LIGHT_MAX_SATURATION;
+  return { ...c, dark, light, neutral: dark || light, darkMax: Math.min(0.3, c.v + 0.06), lightMin: Math.max(0.72, c.v - 0.12) };
 }
 
 /** Skin tones: orange-ish hue with only moderate saturation. Pen and sticker colours are far more saturated. */
@@ -29,14 +32,14 @@ const isSkinLike = (c: { h: number; s: number; v: number }) => c.h >= 10 && c.h 
 /** Returns a Japanese message naming the joint whose colour cannot be tracked, or null when all four are usable. */
 export function markerColorProblem(colors: string[], names = MARKER_NAMES): string | null {
   const targets = colors.map(toTarget);
-  const pale = targets.findIndex(t => !t.dark && t.s < MIN_SATURATION);
+  const pale = targets.findIndex(t => !t.neutral && t.s < MIN_SATURATION);
   if (pale >= 0) return `${names[pale]}の色が薄すぎます（背景などを採取しています）。目印の真ん中をクリックし直してください`;
-  const skin = targets.findIndex(t => !t.dark && isSkinLike(t));
+  const skin = targets.findIndex(t => !t.neutral && isSkinLike(t));
   if (skin >= 0) return `${names[skin]}で肌の色を採取しています。目印の真ん中をクリックし直してください`;
-  const darks = targets.map((t, i) => (t.dark ? i : -1)).filter(i => i >= 0);
-  if (darks.length > 1) return `${darks.map(i => names[i]).join('と')}が両方とも黒っぽい色です。黒は1か所だけにして、他は色ペンにしてください`;
+  const neutrals = targets.map((t, i) => (t.neutral ? i : -1)).filter(i => i >= 0);
+  if (neutrals.length > 1) return `${neutrals.map(i => names[i]).join('と')}が両方とも白か黒です。白・黒は1か所だけにして、他は色ペンにしてください`;
   for (let i = 0; i < targets.length; i++) for (let j = i + 1; j < targets.length; j++) {
-    if (targets[i].dark || targets[j].dark) continue;
+    if (targets[i].neutral || targets[j].neutral) continue;
     if (hueDistance(targets[i].h, targets[j].h) < TOLERANCE * 1.7) return `${names[i]}と${names[j]}の色が近すぎて区別できません。どちらかを別の色にしてください`;
   }
   return null;
@@ -60,17 +63,19 @@ export class MarkerTracker {
   seed(i: number, x: number, y: number) { this.previous[i] = { x, y }; }
   /** `hints`: optional rough positions of the four joints from the hand-landmark model, in the same pixel space. */
   detect(pixels: Uint8ClampedArray, width: number, height: number, colors: string[], hints?: (ImagePoint | null)[]) {
-    const result = (points: (ImagePoint | null)[], reason: string) => ({ points, valid: points.every(Boolean), reason });
+    // `ambiguous`: some mark had no candidate or several same-coloured candidates, so a hint would help.
+    const result = (points: (ImagePoint | null)[], reason: string, ambiguous = true) => ({ points, valid: points.every(Boolean), reason, ambiguous });
     const problem = markerColorProblem(colors);
     if (problem) return result([null, null, null, null], problem);
-    const targets = colors.map(toTarget), darkId = targets.findIndex(t => t.dark);
+    const targets = colors.map(toTarget), darkId = targets.findIndex(t => t.dark), lightId = targets.findIndex(t => t.light);
     const size = width * height, labels = new Uint8Array(size), queue = new Uint32Array(size);
     for (let p = 0; p < size; p++) {
       const color = hsv(pixels[p * 4], pixels[p * 4 + 1], pixels[p * 4 + 2]);
       if (darkId >= 0 && color.v <= targets[darkId].darkMax && color.s < DARK_MAX_SATURATION) { labels[p] = darkId + 1; continue; }
+      if (lightId >= 0 && color.v >= targets[lightId].lightMin && color.s < LIGHT_MAX_SATURATION) { labels[p] = lightId + 1; continue; }
       if (color.s < MIN_SATURATION || color.v < 0.17 || isSkinLike(color)) continue;
       let best = this.tolerance, id = 0;
-      for (let k = 0; k < targets.length; k++) { if (targets[k].dark || Math.abs(color.s - targets[k].s) > 0.25) continue; const d = hueDistance(color.h, targets[k].h); if (d < best) { best = d; id = k + 1; } }
+      for (let k = 0; k < targets.length; k++) { if (targets[k].neutral || Math.abs(color.s - targets[k].s) > 0.25) continue; const d = hueDistance(color.h, targets[k].h); if (d < best) { best = d; id = k + 1; } }
       labels[p] = id;
     }
     const groups: ImagePoint[][] = [[], [], [], []];
@@ -101,6 +106,7 @@ export class MarkerTracker {
     });
     points.forEach((p, i) => { if (p) this.previous[i] = p; });
     const missing = points.map((p, i) => (p ? '' : MARKER_NAMES[i])).filter(Boolean);
-    return result(points, missing.length ? `${missing.join('・')}の目印が見つかりません（隠れ・色・位置を確認）` : '4点を読み取り中');
+    const ambiguous = groups.some(g => g.length !== 1);
+    return result(points, missing.length ? `${missing.join('・')}の目印が見つかりません（隠れ・色・位置を確認）` : '4点を読み取り中', ambiguous);
   }
 }

@@ -93,14 +93,15 @@ test('four colored points travel through video, calibration and WebSocket to the
       const stage = (window as any).__markerStage;
       const pts = [stage === 'down' ? [127, 281] : [120, 240], [240, 240], [330, 200], stage === 'bent' ? [345, 265] : [395, 210]];
       ctx.fillStyle = '#202020'; ctx.fillRect(0, 0, 640, 480);
-      pts.forEach((p, i) => { ctx.fillStyle = ['#ff4055', '#4cd36a', '#4185f4', '#bc51d9'][i]; ctx.beginPath(); ctx.arc(p[0], p[1], 7, 0, Math.PI * 2); ctx.fill(); });
+      pts.forEach((p, i) => { ctx.fillStyle = ['#ff4055', '#4cd36a', '#bc51d9', '#ffffff'][i]; ctx.beginPath(); ctx.arc(p[0], p[1], 7, 0, Math.PI * 2); ctx.fill(); });
     };
     draw(); setInterval(draw, 30);
     navigator.mediaDevices.getUserMedia = async () => canvas.captureStream(24);
   });
   const room = 'markers-' + Date.now();
   const viewer = await context.newPage(); await ready(viewer, '/?dev=1&room=' + room); await viewer.locator('#dev-advanced summary').click(); await viewer.selectOption('#contact-mode', 'camera');
-  await page.goto('/tracker?room=' + room); await page.locator('[data-source="markers"]').click(); await page.locator('#start-camera').click();
+  // Colour pipeline only (the fake video has no hand; the hand model has its own test above).
+  await page.goto('/tracker?handmodel=0&room=' + room); await page.locator('[data-source="markers"]').click(); await page.locator('#start-camera').click();
   await expect.poll(() => page.evaluate(() => (window as any).__pivotTracker.snapshot().points)).toBeTruthy();
   const recordStable = async (kind: string) => expect(async () => { await page.locator(`[data-record="${kind}"]`).click(); await expect(page.locator(`[data-record="${kind}"]`)).toHaveAttribute('aria-pressed', 'true', { timeout: 200 }); }).toPass({ timeout: 15000, intervals: [250, 400] });
   await recordStable('neutral');
@@ -108,12 +109,12 @@ test('four colored points travel through video, calibration and WebSocket to the
   await page.evaluate(() => (window as any).__markerStage = 'bent'); await recordStable('bent');
   await expect.poll(() => page.evaluate(() => (window as any).__pivotTracker.snapshot().calibrated)).toBe(true);
   await expect.poll(async () => (await snapshot(viewer)).tracking).toBe('ready');
-  await page.locator('#contact-armed').check();
+  await page.locator('#open-settings').click(); await page.locator('#contact-armed').check();
   await expect.poll(async () => (await snapshot(viewer)).depth).toBeGreaterThan(5);
   expect((await snapshot(viewer)).axes).toBe('plane-y'); expect((await snapshot(viewer)).simulation).toBe(false);
   const pressed = await snapshot(viewer);
   await page.evaluate(() => (window as any).__markerStage = 'neutral');
   await expect.poll(async () => (await snapshot(viewer)).depth).toBeLessThan(0.1);
   expect((await snapshot(viewer)).dip).toEqual(pressed.dip);
-  await page.locator('#stop-camera').click(); await viewer.close();
+  await page.locator('[data-goto="1"]').click(); await page.locator('#stop-camera').click(); await viewer.close();
 });

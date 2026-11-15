@@ -84,7 +84,7 @@ describe('marker colours', () => {
     const { markerColorProblem, sampleMarkerColor } = await import('../src/marker-tracking');
     expect(markerColorProblem(['#e02020', '#20a040', '#8a3cc8', '#141414'])).toBeNull();
     expect(markerColorProblem(['#eaa58f', '#20a040', '#8a3cc8', '#141414'])).toContain('付け根で肌の色を採取');
-    expect(markerColorProblem(['#e02020', '#c8c8c8', '#8a3cc8', '#141414'])).toContain('第2関節の色が薄すぎます');
+    expect(markerColorProblem(['#e02020', '#8c8c8c', '#8a3cc8', '#141414'])).toContain('第2関節の色が薄すぎます');
     expect(markerColorProblem(['#e02020', '#101010', '#8a3cc8', '#141414'])).toContain('第2関節と指先');
     const width = 40, height = 40, data = new Uint8ClampedArray(width * height * 4).fill(200);
     for (let x = 20; x < 24; x++) for (let y = 20; y < 24; y++) data.set([30, 160, 60, 255], (y * width + x) * 4);
@@ -114,5 +114,20 @@ describe('marker tracking guided by hand-model hints', () => {
     expect(r.valid).toBe(true); expect(r.points[0]!.x).toBeCloseTo(21.5, 0);
     const noHint = new MarkerTracker().detect(data, width, height, colors);
     expect(noHint.points[0]!.x).toBeGreaterThan(100); // without a hint the larger blob wins
+  });
+});
+
+describe('white fingertip mark', () => {
+  it('accepts one white mark, rejects white plus black, and tracks a small white mark but not a large white area', async () => {
+    const { markerColorProblem } = await import('../src/marker-tracking');
+    expect(markerColorProblem(['#ff4055', '#4cd36a', '#bc51d9', '#ffffff'])).toBeNull();
+    expect(markerColorProblem(['#ff4055', '#141414', '#bc51d9', '#ffffff'])).toContain('白か黒');
+    const width = 160, height = 120, data = new Uint8ClampedArray(width * height * 4).fill(120);
+    for (let p = 0; p < width * height; p++) data[p * 4 + 3] = 255;
+    const paint = (x0: number, y0: number, w: number, h: number, rgb: number[]) => { for (let x = x0; x < x0 + w; x++) for (let y = y0; y < y0 + h; y++) data.set([...rgb, 255], (y * width + x) * 4); };
+    paint(0, 90, 160, 30, [250, 250, 250]); // a big white screen area
+    paint(20, 40, 6, 6, [220, 30, 30]); paint(50, 40, 6, 6, [30, 170, 60]); paint(80, 40, 6, 6, [140, 60, 200]); paint(110, 40, 6, 6, [245, 245, 245]);
+    const r = new MarkerTracker().detect(data, width, height, ['#dc1e1e', '#1eaa3c', '#8c3cc8', '#f5f5f5']);
+    expect(r.valid).toBe(true); expect(r.points[3]!.y).toBeCloseTo(42.5, 0);
   });
 });

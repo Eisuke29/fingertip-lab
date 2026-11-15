@@ -3,7 +3,7 @@
    - No backdrop-filter or looping animation over the WebGL stage: they re-composite every frame and add latency.
    - Accent is a deep gel-green that harmonizes with the ball; status colors are used only for state. */
 :root {
-  --stage: #f1f2ed;
+  --stage: #0b0c0b;
   --bg: #eef0eb;
   --surface: #ffffff;
   --surface-2: #f6f7f3;
@@ -236,7 +236,7 @@ details[open] { padding-bottom: 14px; }
 .developer-panel #reset-setup { align-self: flex-start; margin-top: 4px; }
 
 /* ---------- Tracker ---------- */
-.tracker-shell { height: 100svh; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 12px; padding: 16px 20px 18px; max-width: 1480px; margin: 0 auto; }
+.tracker-shell { position: relative; height: 100svh; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 12px; padding: 16px 20px 18px; max-width: 1480px; margin: 0 auto; }
 .tracker-head { display: flex; align-items: center; gap: 16px 24px; flex-wrap: wrap; }
 .tracker-head h1 { display: flex; align-items: center; gap: 10px; font-size: 21px; }
 .room-chip { font-family: var(--mono); font-size: 11.5px; font-weight: 600; color: var(--ink-2); background: var(--surface); border: 1px solid var(--line); padding: 1px 8px; border-radius: 999px; }
@@ -380,11 +380,77 @@ details.guide > summary { font-size: 13px; padding: 10px 0; }
 }
 @media (max-width: 640px) { .developer-panel .pipeline li { flex: 1 1 22%; } }
 
-/* Tracker side panel: accordion steps, only the step in progress is open. */
-details.step > summary { justify-content: flex-start; gap: 10px; padding: 12px 0; }
-details.step > summary h2 { flex: 1; margin: 0; font-size: 15px; }
-details.step > summary .step-status { font-size: 12px; font-weight: 500; color: var(--muted); }
-details.step[data-state=done] > summary .step-status { color: var(--ok); }
-details.step[data-state=todo] > summary h2 { color: var(--ink-2); }
-details.step > summary::after { flex: none; margin-left: 6px; }
-.next-banner span#next-detail:empty { display: none; }
+/* ---------- Tracker layout: stepper / camera / current-step panel ---------- */
+.tracker-head h1 { margin: 0; white-space: nowrap; }
+.stepper { flex: 1 1 520px; display: flex; gap: 6px; margin: 0; padding: 0; list-style: none; max-width: 640px; }
+.stepper li { flex: 1; min-width: 0; }
+.stepper li[hidden] { display: none; }
+.stepper button { width: 100%; justify-content: flex-start; gap: 8px; min-height: 40px; padding: 6px 12px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); background: var(--surface); }
+.stepper .sn { flex: none; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; font-size: 12px; background: var(--surface-2); border: 1px solid var(--line-2); color: var(--muted); }
+.stepper li[data-state=current] button { border-color: var(--accent); color: var(--ink); }
+.stepper li[data-state=current] .sn { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper li[data-state=done] .sn { background: var(--ok); border-color: var(--ok); color: transparent; position: relative; }
+.stepper li[data-state=done] .sn::after { content: "✓"; position: absolute; color: #fff; font-size: 12px; }
+.stepper li.shown button { background: var(--accent-soft); box-shadow: inset 0 -3px 0 var(--accent); }
+.tracker-alert { padding: 10px 14px; font-size: 13.5px; font-weight: 600; color: #8f2519; background: var(--err-soft); border: 1px solid #f2c9c2; border-radius: var(--r); }
+.tracker-alert[hidden] { display: none; }
+.tracker-shell:has(.tracker-alert[hidden]) { grid-template-rows: auto minmax(0, 1fr); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px 18px; }
+.panel h2 { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; font-size: 17px; }
+.panel h2 .count { margin-left: auto; font-family: var(--mono); font-size: 13px; color: var(--muted); font-weight: 600; }
+.panel .lead { font-size: 13.5px; color: var(--ink-2); margin: 0 0 12px; }
+.seg { display: flex; padding: 3px; gap: 3px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; }
+.seg button { flex: 1; min-height: 32px; border: 0; border-radius: 7px; background: transparent; font-weight: 600; color: var(--muted); }
+.seg button:hover:enabled { background: var(--surface); border: 0; }
+.seg button[aria-checked=true] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgb(0 0 0 / 12%); }
+.field-grid .label { font-size: 13px; color: var(--ink-2); }
+.guide-box { margin-top: 14px; padding: 12px 14px 4px; border-radius: var(--r); background: var(--surface-2); }
+.guide-box .guide-list { font-size: 13px; }
+.guide-note { font-size: 12.5px; color: var(--ink-2); margin: 0 0 10px; }
+.marker-list { display: grid; gap: 6px; }
+.marker-row { display: grid; grid-template-columns: 10px 40px 1fr 56px; align-items: center; gap: 10px; margin: 0; }
+.marker-row button { justify-content: flex-start; min-height: 34px; font-size: 13.5px; }
+.marker-row button.picking { border-color: var(--accent); background: var(--accent-soft); }
+.marker-found { font-size: 12px; color: var(--muted); text-align: right; }
+.marker-row:has(.marker-dot.ok) .marker-found { color: var(--ok); font-weight: 600; }
+.panel #reacquire { margin-top: 8px; }
+.camera-checks { position: absolute; left: 12px; bottom: 12px; right: 12px; display: flex; flex-wrap: wrap; gap: 6px; pointer-events: none; }
+.camera-checks[hidden] { display: none; }
+.camera-checks .chip { font-size: 12.5px; font-weight: 700; color: #fff; padding: 4px 10px; border-radius: 999px; background: #000000a6; }
+.camera-checks .chip small { font-weight: 500; opacity: .85; }
+.camera-checks .chip[data-state=ok] { background: #1f6b45d9; }
+.camera-checks .chip[data-state=warn] { background: #9a6410e0; }
+.camera-checks .chip[data-state=bad] { background: #b3261ee6; }
+.meters[hidden] { display: none; }
+.camera-col:has(.meters[hidden]) { grid-template-rows: minmax(0, 1fr); }
+.settings { position: absolute; top: 64px; right: 20px; z-index: 20; width: 360px; max-height: calc(100svh - 84px); overflow-y: auto; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: 0 12px 40px rgb(0 0 0 / 18%); }
+.settings[hidden] { display: none; }
+.settings-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.settings-group { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
+.settings-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+#open-settings { gap: 6px; }
+
+/* ---------- iPad view: no white, controls gathered at the top ----------
+   The camera reads the finger near the bottom/centre of the iPad, so bright UI there
+   (and white anywhere) can be mistaken for the white fingertip mark or light the finger. */
+.view-container .status-pill, .view-container .adjust-link, .view-container .dock, .view-container .input-note {
+  background: #1a1e1ce8; border-color: #2c322e; box-shadow: none; color: #9aa59e;
+}
+.view-container .adjust-link:hover { background: #222724; color: #b9c2bc; }
+.view-container .status-pill[data-tone=ok] { color: #5fae84; }
+.view-container .status-pill[data-tone=wait] { color: #c99a4a; }
+.view-container .status-pill[data-tone=err] { color: #d0705f; }
+.view-container .input-note[data-tone=warn] { color: #c99a4a; background: #241f15e8; border-color: #3a3222; }
+.view-container .input-note[data-tone=err] { color: #d0705f; background: #261816e8; border-color: #3d2522; }
+.view-container .input-note a { color: #7fbf9f; }
+.view-container .dock { top: calc(max(14px, env(safe-area-inset-top)) + 50px); bottom: auto; padding: 8px; border-radius: 18px; }
+.view-container .input-note { top: calc(max(14px, env(safe-area-inset-top)) + 160px); bottom: auto; }
+.view-container .scene-hint { color: #8a948d; }
+.view-container .scene-hint strong { color: #b9c2bc; }
+.view-container .side-chip { background: #1f3a2f; color: #7fbf9f; }
+.view-container .scene-nav { background: #121513; }
+.view-container .scene-nav button { color: #7d877f; min-height: 46px; }
+.view-container .scene-nav button:hover:enabled { background: #1f2421; }
+.view-container .scene-nav button[aria-pressed=true] { background: #23302a; color: #8fd0ae; box-shadow: inset 0 0 0 1px #2f4a3d; }
+.view-container .simulation-badge { top: calc(max(14px, env(safe-area-inset-top)) + 160px); background: #241d33; color: #b7a3e0; border-color: #3a3150; }
+.view-container .guide-label { color: #0b0c0b; box-shadow: none; }

@@ -70,13 +70,13 @@ export class PivotScene {
   constructor(private container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'low-power' });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
-    this.renderer.setClearColor(0xf1f2ed);
+    this.renderer.setClearColor(0x0b0c0b);
     this.renderer.localClippingEnabled = true;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 0.95;
     this.canvas = this.renderer.domElement;
     this.canvas.setAttribute('aria-label', 'PIPを支点とする二節の指と、固定された柔らかい球');
     this.canvas.tabIndex = 0; container.prepend(this.canvas);
-    this.scene.background = new THREE.Color(0xf1f2ed);
+    this.scene.background = new THREE.Color(0x0b0c0b); // dark, so the screen does not light up the finger or show up as a white mark in the camera
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     const room = new RoomEnvironment();
     this.environment = pmrem.fromScene(room, 0.04); this.scene.environment = this.environment.texture; this.scene.environmentIntensity = 0.65;
