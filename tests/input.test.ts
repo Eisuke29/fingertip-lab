@@ -132,62 +132,41 @@ describe('white fingertip mark', () => {
   });
 });
 
-describe('marks searched around the hand model estimate', () => {
-  const setup = () => {
-    const width = 200, height = 120, data = new Uint8ClampedArray(width * height * 4).fill(90);
-    for (let p = 0; p < width * height; p++) data[p * 4 + 3] = 255;
-    const paint = (x0: number, y0: number, n: number, rgb: number[]) => { for (let x = x0; x < x0 + n; x++) for (let y = y0; y < y0 + n; y++) data.set([...rgb, 255], (y * width + x) * 4); };
-    return { width, height, data, paint };
-  };
-  const colors = ['#dc1e1e', '#1eaa3c', '#8c3cc8', '#f5f5f5'];
-  it('finds a mark whose colour drifted under the lighting, as long as it is near the estimate', () => {
-    const { width, height, data, paint } = setup();
-    paint(20, 20, 5, [200, 70, 60]); paint(60, 40, 5, [70, 160, 90]); paint(100, 60, 5, [130, 80, 180]); paint(140, 80, 5, [215, 215, 210]);
-    const r = new MarkerTracker().detect(data, width, height, colors, [{ x: 24, y: 24 }, { x: 64, y: 44 }, { x: 104, y: 64 }, { x: 144, y: 84 }]);
-    expect(r.valid).toBe(true); expect(r.points.every(p => p && !p.estimated)).toBe(true);
-    expect(r.points[0]!.x).toBeCloseTo(22, 0);
-  });
-  it('uses the estimate itself for a joint whose mark is hidden, and says so', () => {
-    const { width, height, data, paint } = setup();
-    paint(20, 20, 5, [220, 30, 30]); paint(60, 40, 5, [30, 170, 60]); paint(100, 60, 5, [140, 60, 200]); // fingertip mark hidden
-    const r = new MarkerTracker().detect(data, width, height, colors, [{ x: 24, y: 24 }, { x: 64, y: 44 }, { x: 104, y: 64 }, { x: 150, y: 90 }]);
-    expect(r.valid).toBe(true); expect(r.points[3]).toMatchObject({ x: 150, y: 90, estimated: true }); expect(r.reason).toContain('指先');
-  });
-});
-
-
-
-describe('registration by proposal, then predictive following', () => {
+describe('known marks are followed only near their predicted position', () => {
   const frame = () => {
     const width = 240, height = 140, data = new Uint8ClampedArray(width * height * 4);
     for (let p = 0; p < width * height; p++) data.set([60, 60, 62, 255], p * 4);
-    const paint = (x0: number, y0: number, n: number, rgb: number[]) => { for (let x = x0; x < x0 + n; x++) for (let y = y0; y < y0 + n; y++) data.set([...rgb, 255], (y * width + x) * 4); };
+    const paint = (x0: number, y0: number, n: number, rgb: number[]) => { for (let x = x0; x < x0 + n; x++) for (let y = y0; y < y0 + n; y++) if (x < width && y < height) data.set([...rgb, 255], (y * width + x) * 4); };
     return { width, height, data, paint };
   };
-  const skin = [225, 165, 140], red = [220, 40, 40], green = [40, 170, 70], purple = [140, 60, 200], white = [245, 245, 245];
-  it('proposes the mark near each estimated joint (not the skin around it) with its colour', () => {
-    const { width, height, data, paint } = frame();
-    paint(10, 30, 105, skin); // finger
-    paint(20, 50, 6, red); paint(60, 50, 6, green); paint(95, 50, 6, purple); paint(120, 50, 6, white);
-    const hints = [{ x: 25, y: 55 }, { x: 62, y: 52 }, { x: 99, y: 56 }, { x: 125, y: 50 }];
-    const p = new MarkerTracker().propose(data, width, height, hints);
-    expect(p.every(Boolean)).toBe(true);
-    expect(p[0]!.x).toBeCloseTo(22.5, 0); expect(p[0]!.hex).toBe('#dc2828'); expect(p[3]!.hex).toBe('#f5f5f5');
-  });
-  it('follows confirmed marks as they move, and is not pulled to a same-coloured blob elsewhere', () => {
-    const tracker = new MarkerTracker(), colors = ['#dc2828', '#28aa46', '#8c3cc8', '#f5f5f5'];
-    const at = [[20, 50], [60, 50], [95, 50], [120, 50]];
-    at.forEach(([x, y], i) => tracker.seed(i, x + 3, y + 3));
+  const red = [220, 40, 40], green = [40, 170, 70], purple = [140, 60, 200], white = [245, 245, 245];
+  const colors = ['#dc2828', '#28aa46', '#8c3cc8', '#f5f5f5'];
+  it('follows the marks as they move and ignores a same-coloured blob elsewhere', () => {
+    const tracker = new MarkerTracker();
+    [[20, 40], [60, 40], [95, 40], [120, 40]].forEach(([x, y], i) => tracker.seed(i, x + 3, y + 3));
     let last: ReturnType<MarkerTracker['detect']> | null = null;
     for (let step = 0; step < 8; step++) {
-      const { width, height, data, paint } = frame();
-      const dy = step * 3;
-      paint(20, 50 + dy, 6, red); paint(60, 50 + dy, 6, green); paint(95, 50 + dy, 6, purple); paint(120, 50 + dy, 6, white);
-      paint(200, 20, 10, red); // a red distractor far from the finger
+      const { width, height, data, paint } = frame(), dy = step * 3;
+      paint(20, 40 + dy, 6, red); paint(60, 40 + dy, 6, green); paint(95, 40 + dy, 6, purple); paint(120, 40 + dy, 6, white);
+      paint(200, 10, 10, red); // a red thing far from the finger
       last = tracker.detect(data, width, height, colors);
     }
-    expect(last!.valid).toBe(true); expect(last!.points.some(p => p?.estimated)).toBe(false);
-    expect(last!.points[0]!.x).toBeCloseTo(22.5, 0); expect(last!.points[0]!.y).toBeCloseTo(52.5 + 21, 0);
-    expect(tracker.locked).toBe(true);
+    expect(last!.valid).toBe(true);
+    expect(last!.points[0]!.x).toBeCloseTo(22.5, 0); expect(last!.points[0]!.y).toBeCloseTo(42.5 + 21, 0);
+  });
+  it('does not jump to the reflection of a mark in the glass, even when the real mark disappears for a moment', () => {
+    const tracker = new MarkerTracker();
+    [[20, 40], [60, 40], [95, 40], [120, 40]].forEach(([x, y], i) => tracker.seed(i, x + 3, y + 3));
+    const draw = (tipVisible: boolean) => {
+      const { width, height, data, paint } = frame();
+      paint(20, 40, 6, red); paint(60, 40, 6, green); paint(95, 40, 6, purple);
+      if (tipVisible) paint(120, 40, 6, white);
+      paint(120, 72, 6, [235, 235, 235]); // reflection of the white tip mark, ~30 px below in the glass
+      return tracker.detect(data, width, height, colors);
+    };
+    expect(draw(true).points[3]!.y).toBeCloseTo(42.5, 0);
+    const hidden = draw(false);
+    expect(hidden.points[3]).toBeNull(); expect(hidden.valid).toBe(false); // holds instead of taking the reflection
+    expect(draw(true).points[3]!.y).toBeCloseTo(42.5, 0);
   });
 });

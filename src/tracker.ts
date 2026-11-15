@@ -1,5 +1,5 @@
 import { HandCalibration, measureHand, type HandSample } from './calibration';
-import { MarkerTracker, sampleMarkerColor, type ImagePoint, type Proposal } from './marker-tracking';
+import { MarkerTracker, sampleMarkerColor, type ImagePoint } from './marker-tracking';
 import { degrees, radians, v } from './math';
 import { PoseSocket } from './socket';
 import { neutralPose, type Pose, type PoseFrame } from './types';
@@ -75,11 +75,10 @@ export function startTracker() {
       </section>
       <section class="panel" data-panel="2" hidden>
         <h2>目印を登録</h2>
-        <p class="lead">指の推定位置の近くで目印を探して、映像に「？」で出します。合っていれば<strong>決定</strong>。違う関節は、その関節のボタンを押して映像の目印をクリック</p>
-        <div class="button-row"><button class="secondary" id="propose-marks">${icon('reset', 14)}目印を探す</button><button class="primary" id="accept-marks" disabled>この4点で決定</button></div>
+        <p class="lead">関節のボタンを押して、映像の目印の<strong>真ん中</strong>をクリック。決めた目印はその近くだけで追うので、画面の反射は拾いません</p>
         <div class="marker-list">${names.map((name, i) => `<div class="marker-row"><span class="marker-dot" id="marker-state-${i}"></span><input type="color" id="marker-color-${i}" value="${initialColors[i]}" aria-label="${name}の色"/><button class="secondary" data-pick="${i}">${name}</button><span class="marker-found" id="marker-found-${i}">—</span></div>`).join('')}</div>
         <p class="status-text" id="marker-message"></p>
-        <button class="ghost" id="reacquire">${icon('reset', 14)}追従をやり直す</button>
+        <button class="ghost" id="reacquire">${icon('reset', 14)}目印を探し直す</button>
       </section>
       <section class="panel" data-panel="3" hidden>
         <h2>指の動きを登録<span class="count" id="calibration-count"></span></h2>
@@ -228,7 +227,6 @@ export function startTracker() {
       if (disposed) { await stopCamera(); return; }
       await listCameras(device);
       running = true; sideAngle = null; sizeRatio = 0; detections.length = 0; lastVideo = -1; resetCalibration();
-      proposals = null; confirmed = false; autoProposed = false; $<HTMLButtonElement>('accept-marks').disabled = true;
       $('camera-empty').hidden = true;
     } catch (error) { modelState = detector ? 'ready' : 'error'; await stopCamera(); fail(`${error instanceof Error ? error.message : error}（4色マーカーに変えて再試行できます）`); }
     finally { starting = false; updateUi(); }
@@ -307,11 +305,11 @@ export function startTracker() {
 
   /** Rough MCP/PIP/DIP/tip from the hand model, used only to choose which colour blob is each mark. */
   let hints: (ImagePoint | null)[] | null = null, markerPoints: (ImagePoint | null)[] = [null, null, null, null], markerReason = '';
-  let hintFrame = 0, cachedHints: (ImagePoint | null)[] | null = null;
+  let cachedHints: (ImagePoint | null)[] | null = null;
   function markerHints(now: number): (ImagePoint | null)[] | null {
     if (!detector) return null;
-    // While all four marks are followed, the marks carry the tracking; the hand model only needs to check in now and then.
-    if (markers.locked && cachedHints && ++hintFrame % 3 !== 0) return cachedHints;
+    // The hand model only helps to find marks whose position is not known yet; known marks are followed by position.
+    if (!markers.unknown) { cachedHints = null; return null; }
     cachedHints = findHints(now);
     return cachedHints;
   }
@@ -321,23 +319,6 @@ export function startTracker() {
     const hand = result.landmarks.map(h => h).sort((a, b) => !ref ? 0 : Math.hypot(a[6].x * raw.width - ref.x, a[6].y * raw.height - ref.y) - Math.hypot(b[6].x * raw.width - ref.x, b[6].y * raw.height - ref.y))[0];
     return hand ? [5, 6, 7, 8].map(i => ({ x: hand[i].x * raw.width, y: hand[i].y * raw.height })) : null;
   }
-  // Registration: propose a mark near each estimated joint, the user confirms or corrects.
-  let proposals: Proposal[] | null = null, confirmed = false, autoProposed = false;
-  function proposeMarks() {
-    if (!lastPixels || !running) { setText($('marker-message'), 'カメラを開始してください'); return; }
-    if (!detector) { void loadDetector().catch(() => {}); setText($('marker-message'), '指の推定を読み込み中です。数秒後にもう一度'); return; }
-    if (!cachedHints) { setText($('marker-message'), '手が映っていません。人差し指全体を映してください'); return; }
-    proposals = markers.propose(lastPixels.data, raw.width, raw.height, cachedHints);
-    const missing = proposals.map((p, i) => (p ? '' : names[i])).filter(Boolean);
-    setText($('marker-message'), missing.length ? `${missing.join('・')}は見つかりませんでした。その関節のボタンを押して、映像の目印をクリック` : '');
-    $<HTMLButtonElement>('accept-marks').disabled = !proposals.some(Boolean);
-  }
-  $('propose-marks').addEventListener('click', proposeMarks);
-  $('accept-marks').addEventListener('click', () => {
-    if (!proposals) return;
-    proposals.forEach((p, i) => { if (!p) return; $<HTMLInputElement>(`marker-color-${i}`).value = p.hex; markers.seed(i, p.x, p.y); });
-    proposals = null; confirmed = true; $<HTMLButtonElement>('accept-marks').disabled = true; setText($('marker-message'), ''); updateUi();
-  });
   function processCamera(now: number, dt: number) {
     if (!running || video.readyState < 2 || video.currentTime === lastVideo) return;
     lastVideo = video.currentTime;
@@ -347,9 +328,8 @@ export function startTracker() {
       if (source() === 'markers') {
         lastPixels = rawCtx.getImageData(0, 0, raw.width, raw.height);
         const colors = initialColors.map((_, i) => $<HTMLInputElement>(`marker-color-${i}`).value);
-        // Every frame: the hand model gives rough joint positions, and each colour mark is taken nearest to them.
+        // Strict colour search; known marks are followed only near their predicted position.
         hints = markerHints(now);
-        if (!confirmed && !autoProposed && hints && !proposals) { autoProposed = true; proposeMarks(); }
         const tracked = markers.detect(lastPixels.data, raw.width, raw.height, colors, hints ?? undefined);
         points = tracked.points; reason = markerReason = tracked.reason; markerPoints = points;
         if (tracked.valid) sample = measureHand(points as HandSample['image'], null);
@@ -391,12 +371,10 @@ export function startTracker() {
       ctx.strokeStyle = '#f3e5ba'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(calibration.neutral.pip.x, calibration.neutral.pip.y, Number($<HTMLInputElement>('contact-radius').value), 0, Math.PI * 2); ctx.stroke();
     }
     ctx.strokeStyle = '#f9efc8'; ctx.lineWidth = 2; ctx.beginPath(); points.forEach((p, i) => { if (p) i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.stroke();
-    if (proposals) { ctx.strokeStyle = '#f2c94c'; ctx.lineWidth = 2; ctx.setLineDash([4, 3]); proposals.forEach(p => { if (p) ctx.strokeRect(p.x - 11, p.y - 11, 22, 22); }); ctx.setLineDash([]); }
     if (hints) { ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); hints.forEach(h => { if (h) { ctx.beginPath(); ctx.arc(h.x, h.y, 10, 0, Math.PI * 2); ctx.stroke(); } }); ctx.setLineDash([]); }
     // Filled dot = mark found; hollow ring = no mark visible, the hand model's estimate is used.
     points.forEach((p, i) => { if (p) { const col = source() === 'markers' ? $<HTMLInputElement>(`marker-color-${i}`).value : initialColors[i]; ctx.beginPath(); ctx.arc(p.x, p.y, p.estimated ? 7 : 5, 0, Math.PI * 2); if (p.estimated) { ctx.strokeStyle = col; ctx.lineWidth = 2.5; ctx.stroke(); } else { ctx.fillStyle = col; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.fill(); ctx.stroke(); } } }); ctx.restore();
     ctx.fillStyle = '#fff9dc'; ctx.font = '12px sans-serif'; points.forEach((p, i) => { if (p) ctx.fillText(names[i], (mirror ? raw.width - p.x : p.x) + 9, p.y - 9); });
-    if (proposals) { ctx.fillStyle = '#f2c94c'; ctx.font = 'bold 13px sans-serif'; proposals.forEach((p, i) => { if (p) ctx.fillText(names[i] + '？', (mirror ? raw.width - p.x : p.x) + 14, p.y + 4); }); }
   }
   let lastFrame: PoseFrame | null = null;
   (window as unknown as { __pivotTracker: unknown }).__pivotTracker = { snapshot: () => ({ running, modelState, source: source(), calibrated: calibration.ready, frame: structuredClone(lastFrame), points: sample?.image || null, reason }) };
