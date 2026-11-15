@@ -117,7 +117,7 @@ export class MarkerTracker {
       if (old) {
         const pred = { x: old.x + v.x, y: old.y + v.y };
         // Lost for a few frames: allow a wider window around the last position; lost for long: forget it.
-        const radius = this.misses[i] < 4 ? track + Math.hypot(v.x, v.y) : Math.max(track * 2.5, width * 0.12);
+        const radius = this.misses[i] < 4 ? track + Math.hypot(v.x, v.y) : Math.max(track * 3, width * 0.15);
         const found = group.filter(p => dist(p, pred) < radius && sizeOk(p)).sort((a, b) => dist(a, pred) - dist(b, pred))[0];
         if (found) {
           v.x = 0.5 * v.x + 0.5 * (found.x - old.x); v.y = 0.5 * v.y + 0.5 * (found.y - old.y);
@@ -125,7 +125,7 @@ export class MarkerTracker {
           this.misses[i] = 0; this.previous[i] = found; return found;
         }
         this.misses[i]++; v.x = 0; v.y = 0;
-        if (this.misses[i] > 15) this.previous[i] = null;
+        if (this.misses[i] > 10) this.previous[i] = null;
         return null;
       }
       // Not known yet: nearest to the hand model's estimate of this joint, else the largest candidate.
