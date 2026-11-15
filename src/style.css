@@ -379,3 +379,12 @@ details.guide > summary { font-size: 13px; padding: 10px 0; }
   .pipeline li { flex: 1 1 30%; }
 }
 @media (max-width: 640px) { .developer-panel .pipeline li { flex: 1 1 22%; } }
+
+/* Tracker side panel: accordion steps, only the step in progress is open. */
+details.step > summary { justify-content: flex-start; gap: 10px; padding: 12px 0; }
+details.step > summary h2 { flex: 1; margin: 0; font-size: 15px; }
+details.step > summary .step-status { font-size: 12px; font-weight: 500; color: var(--muted); }
+details.step[data-state=done] > summary .step-status { color: var(--ok); }
+details.step[data-state=todo] > summary h2 { color: var(--ink-2); }
+details.step > summary::after { flex: none; margin-left: 6px; }
+.next-banner span#next-detail:empty { display: none; }

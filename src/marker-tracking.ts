@@ -11,6 +11,8 @@ const TOLERANCE = 18;
 /** Below this brightness a sampled colour is treated as a dark (e.g. black pen) marker, matched by darkness instead of hue. */
 const DARK_TARGET = 0.36;
 const MIN_SATURATION = 0.25;
+/** How far (fraction of image width) a mark may lie from the hand model's rough joint position. */
+const HINT_RADIUS = 0.1;
 /** Dark but clearly coloured ink (deep green, purple) stays a colour marker; only near-neutral dark counts as black. */
 const DARK_MAX_SATURATION = 0.55;
 
@@ -56,7 +58,8 @@ export class MarkerTracker {
   tolerance = TOLERANCE;
   reset() { this.previous = [null, null, null, null]; }
   seed(i: number, x: number, y: number) { this.previous[i] = { x, y }; }
-  detect(pixels: Uint8ClampedArray, width: number, height: number, colors: string[]) {
+  /** `hints`: optional rough positions of the four joints from the hand-landmark model, in the same pixel space. */
+  detect(pixels: Uint8ClampedArray, width: number, height: number, colors: string[], hints?: (ImagePoint | null)[]) {
     const result = (points: (ImagePoint | null)[], reason: string) => ({ points, valid: points.every(Boolean), reason });
     const problem = markerColorProblem(colors);
     if (problem) return result([null, null, null, null], problem);
@@ -82,11 +85,19 @@ export class MarkerTracker {
       }
       if (tail >= 7 && tail < size * 0.025) groups[label - 1].push({ x: xSum / tail, y: ySum / tail, area: tail });
     }
+    const dist = (a: ImagePoint, b: ImagePoint) => Math.hypot(a.x - b.x, a.y - b.y);
     const points = groups.map((group, i) => {
-      const old = this.previous[i];
-      if (!old) return group.sort((a, b) => b.area! - a.area!)[0] ?? null;
-      return group.filter(p => Math.hypot(p.x - old.x, p.y - old.y) < width * 0.12 && (!old.area || (p.area! / old.area > 0.25 && p.area! / old.area < 4)))
-        .sort((a, b) => Math.hypot(a.x - old.x, a.y - old.y) - Math.hypot(b.x - old.x, b.y - old.y))[0] ?? null;
+      const old = this.previous[i], hint = hints?.[i] ?? null;
+      const sizeOk = (p: ImagePoint) => !old?.area || (p.area! / old.area > 0.25 && p.area! / old.area < 4);
+      // 1) The hand model's rough joint position: take the matching-colour mark nearest to it
+      //    (also staying close to where the mark was last frame), so a same-coloured blob elsewhere cannot steal the point.
+      if (hint) {
+        const near = group.filter(p => dist(p, hint) < width * HINT_RADIUS && sizeOk(p));
+        if (near.length) return near.sort((a, b) => (dist(a, hint) + (old ? 0.5 * dist(a, old) : 0)) - (dist(b, hint) + (old ? 0.5 * dist(b, old) : 0)))[0];
+      }
+      // 2) No usable hint (model lost the hand or misplaced a hidden joint): follow the mark from its last position.
+      if (!old) return hint ? null : group.sort((a, b) => b.area! - a.area!)[0] ?? null;
+      return group.filter(p => dist(p, old) < width * 0.12 && sizeOk(p)).sort((a, b) => dist(a, old) - dist(b, old))[0] ?? null;
     });
     points.forEach((p, i) => { if (p) this.previous[i] = p; });
     const missing = points.map((p, i) => (p ? '' : MARKER_NAMES[i])).filter(Boolean);

@@ -100,3 +100,19 @@ describe('marker colours', () => {
     expect(r.valid).toBe(true); expect(r.points[3]!.x).toBeCloseTo(112.5, 0);
   });
 });
+
+describe('marker tracking guided by hand-model hints', () => {
+  it('takes the same-coloured mark nearest the model hint, not a larger blob elsewhere', () => {
+    const width = 200, height = 120, data = new Uint8ClampedArray(width * height * 4).fill(210);
+    const paint = (x0: number, y0: number, n: number, rgb: number[]) => { for (let x = x0; x < x0 + n; x++) for (let y = y0; y < y0 + n; y++) data.set([...rgb, 255], (y * width + x) * 4); };
+    const red = [220, 30, 30], green = [30, 170, 60], purple = [140, 60, 200], black = [15, 15, 15];
+    paint(20, 20, 4, red); paint(150, 20, 9, red); // the real mark (small) and a bigger red thing far away
+    paint(50, 60, 5, green); paint(80, 70, 5, purple); paint(110, 80, 5, black);
+    const colors = ['#dc1e1e', '#1eaa3c', '#8c3cc8', '#0f0f0f'];
+    const hints = [{ x: 24, y: 24 }, { x: 52, y: 62 }, { x: 82, y: 72 }, { x: 112, y: 82 }];
+    const r = new MarkerTracker().detect(data, width, height, colors, hints);
+    expect(r.valid).toBe(true); expect(r.points[0]!.x).toBeCloseTo(21.5, 0);
+    const noHint = new MarkerTracker().detect(data, width, height, colors);
+    expect(noHint.points[0]!.x).toBeGreaterThan(100); // without a hint the larger blob wins
+  });
+});
