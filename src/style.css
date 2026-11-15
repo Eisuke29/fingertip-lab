@@ -1,5 +1,5 @@
 /* Pivot Finger Lab
-   - The stage background must stay #f1f2ed: it matches the WebGL clear color in scene.ts.
+   - The stage background must stay #0b0c0b: it matches the WebGL clear color in scene.ts.
    - No backdrop-filter or looping animation over the WebGL stage: they re-composite every frame and add latency.
    - Accent is a deep gel-green that harmonizes with the ball; status colors are used only for state. */
 :root {
@@ -454,3 +454,95 @@ details.guide > summary { font-size: 13px; padding: 10px 0; }
 .view-container .scene-nav button[aria-pressed=true] { background: #23302a; color: #8fd0ae; box-shadow: inset 0 0 0 1px #2f4a3d; }
 .view-container .simulation-badge { top: calc(max(14px, env(safe-area-inset-top)) + 160px); background: #241d33; color: #b7a3e0; border-color: #3a3150; }
 .view-container .guide-label { color: #0b0c0b; box-shadow: none; }
+
+/* ---------- Tracker theme: dark, one mint accent (layout unchanged) ---------- */
+body:has(.tracker-shell) { background: #0b0d0c; }
+.tracker-shell {
+  --bg: #0b0d0c; --surface: #131615; --surface-2: #1a1e1c; --ink: #e9eeea; --ink-2: #a9b3ac; --muted: #6c7770;
+  --line: #222826; --line-2: #2e3532; --accent: #3ddc97; --accent-ink: #7cf0bd; --accent-soft: #3ddc9717;
+  --ok: #3ddc97; --ok-soft: #3ddc971a; --warn: #f2b84b; --warn-soft: #f2b84b17; --err: #ff6b5e; --err-soft: #ff6b5e17;
+  --off: #48514c; --shadow: none; --shadow-lg: 0 24px 60px rgb(0 0 0 / 55%);
+  --r-sm: 8px; --r: 10px; --r-lg: 14px;
+  color: var(--ink); background: var(--bg); max-width: none; padding: 18px 24px 20px; gap: 14px;
+}
+.tracker-shell h1 { font-size: 17px; font-weight: 600; letter-spacing: .02em; display: flex; align-items: center; gap: 10px; }
+.tracker-shell h1::before { content: ""; width: 9px; height: 9px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 12px #3ddc9799; }
+.tracker-shell .room-chip { background: transparent; border-color: var(--line-2); color: var(--muted); font-weight: 500; }
+.tracker-shell .conn { color: var(--muted); font-size: 12px; }
+.tracker-shell button { background: var(--surface-2); border-color: var(--line-2); color: var(--ink); font-weight: 600; }
+.tracker-shell button:hover:enabled { background: #222725; border-color: #3a423e; }
+.tracker-shell button.primary { background: var(--accent); border-color: var(--accent); color: #05140d; box-shadow: 0 0 0 1px #3ddc9733, 0 8px 24px -8px #3ddc9780; }
+.tracker-shell button.primary:hover:enabled { background: #5ce6aa; border-color: #5ce6aa; }
+.tracker-shell button.ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
+.tracker-shell button.ghost:hover:enabled { background: var(--surface-2); color: var(--ink); }
+.tracker-shell button.danger { color: var(--err); }
+.tracker-shell select, .tracker-shell input[type=color] { background-color: var(--surface-2); border-color: var(--line-2); color: var(--ink); }
+.tracker-shell kbd { background: var(--surface-2); border-color: var(--line-2); color: var(--ink); }
+.tracker-shell .pill-link { background: var(--surface-2); border-color: var(--line-2); color: var(--ink); }
+
+/* Stepper: one continuous track, numbers in mono */
+.tracker-shell .stepper { gap: 0; padding: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.tracker-shell .stepper button { min-height: 36px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-weight: 600; letter-spacing: .01em; }
+.tracker-shell .stepper button:hover:enabled { background: var(--surface-2); border: 0; }
+.tracker-shell .stepper .sn { width: 20px; height: 20px; font-family: var(--mono); font-size: 11px; background: transparent; border-color: var(--line-2); color: var(--muted); }
+.tracker-shell .stepper li[data-state=current] button { color: var(--ink); border: 0; }
+.tracker-shell .stepper li[data-state=current] .sn { background: var(--accent); border-color: var(--accent); color: #05140d; box-shadow: 0 0 10px #3ddc9766; }
+.tracker-shell .stepper li[data-state=done] button { color: var(--ink-2); }
+.tracker-shell .stepper li[data-state=done] .sn { background: transparent; border-color: var(--accent); }
+.tracker-shell .stepper li[data-state=done] .sn::after { color: var(--accent); }
+.tracker-shell .stepper li.shown button { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2); }
+
+/* Camera */
+.tracker-shell .camera-box { background: #070808; border: 1px solid var(--line); border-radius: 14px; }
+.tracker-shell .camera-empty p { color: var(--ink-2); font-weight: 500; }
+.tracker-shell .camera-state { background: #000000b3; font-size: 12px; font-weight: 500; border: 1px solid #ffffff14; font-variant-numeric: tabular-nums; }
+.tracker-shell .camera-state[data-ok=true]::before { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.tracker-shell .camera-checks .chip { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; background: #000000b3; border: 1px solid #ffffff14; color: var(--ink); }
+.tracker-shell .camera-checks .chip[data-state=ok] { color: var(--ok); background: #000000b3; }
+.tracker-shell .camera-checks .chip[data-state=warn] { color: var(--warn); background: #000000b3; }
+.tracker-shell .camera-checks .chip[data-state=bad] { color: #fff; background: #c2392ce6; border-color: transparent; }
+.tracker-shell .meter { background: var(--surface); border-color: var(--line); }
+.tracker-shell .meter-label { font-size: 11.5px; letter-spacing: .02em; }
+.tracker-shell .meter-track { background: var(--surface-2); box-shadow: none; }
+.tracker-shell .meter-fill { box-shadow: 0 0 8px #3ddc9766; }
+
+/* Panel */
+.tracker-shell .panel { background: var(--surface); border-color: var(--line); padding: 18px 20px; }
+.tracker-shell .panel h2 { font-size: 16px; font-weight: 600; letter-spacing: .01em; margin-bottom: 4px; }
+.tracker-shell .panel .lead { color: var(--ink-2); font-size: 13px; }
+.tracker-shell .panel h2 .count { color: var(--accent); }
+.tracker-shell .field-grid { color: var(--muted); font-size: 12.5px; }
+.tracker-shell .seg { background: var(--bg); border-color: var(--line); }
+.tracker-shell .seg button { background: transparent; border: 0; color: var(--muted); }
+.tracker-shell .seg button[aria-checked=true] { background: var(--surface-2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-2); }
+.tracker-shell .guide-box { background: var(--bg); border: 1px solid var(--line); }
+.tracker-shell .guide-list { color: var(--ink-2); }
+.tracker-shell .guide-list strong { color: var(--ink); }
+.tracker-shell .guide-note { color: var(--muted); }
+.tracker-shell .setup-art .pad { fill: #262b29; }
+.tracker-shell .setup-art .screen { fill: #070808; }
+.tracker-shell .setup-art .cam, .tracker-shell .setup-art .lens { fill: #2a302d; }
+.tracker-shell .setup-art .note, .tracker-shell .setup-art .cap { fill: var(--ink-2); }
+.tracker-shell .status-text { background: var(--bg); border: 1px solid var(--line); color: var(--ink-2); }
+.tracker-shell .marker-found { font-size: 11.5px; }
+.tracker-shell .marker-row:has(.marker-dot.ok) .marker-found { color: var(--accent); }
+.tracker-shell .marker-dot.ok { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.tracker-shell .marker-row button.picking { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.tracker-shell .pose { background: var(--surface-2); border-color: var(--line-2); }
+.tracker-shell .pose-art { background: var(--bg); }
+.tracker-shell .pose-art .ghost { stroke: #3a423e; }
+.tracker-shell .pose-art .joint { fill: #e9eeea; stroke: #8b6450; }
+.tracker-shell .pose-art .pivot { stroke: #0b0d0c; }
+.tracker-shell .pose[data-next=true] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.tracker-shell .pose[data-next=true] .pose-state { color: #05140d; background: var(--accent); }
+.tracker-shell .pose[aria-pressed=true] { background: var(--accent-soft); border-color: #3ddc9740; }
+.tracker-shell .pose[aria-pressed=true] .pose-state { color: var(--accent); }
+.tracker-shell .qr { background: #fff; border-color: transparent; }
+.tracker-shell .qr-text .url { color: var(--accent-ink); }
+.tracker-shell .tracker-error, .tracker-shell .tracker-alert { color: #ffb3aa; background: var(--err-soft); border-color: #ff6b5e40; }
+.tracker-shell .settings { background: #161a18; border-color: var(--line-2); }
+.tracker-shell .tag { background: var(--surface-2); border-color: var(--line-2); color: var(--muted); }
+.tracker-shell .slider-label output { background: var(--surface-2); color: var(--ink); }
+.tracker-shell input.switch { background: var(--line-2); }
+.tracker-shell input.switch:checked { background: var(--accent); }
+.tracker-shell input.switch::after { background: #e9eeea; }
