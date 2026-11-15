@@ -155,3 +155,39 @@ describe('marks searched around the hand model estimate', () => {
   });
 });
 
+
+
+describe('registration by proposal, then predictive following', () => {
+  const frame = () => {
+    const width = 240, height = 140, data = new Uint8ClampedArray(width * height * 4);
+    for (let p = 0; p < width * height; p++) data.set([60, 60, 62, 255], p * 4);
+    const paint = (x0: number, y0: number, n: number, rgb: number[]) => { for (let x = x0; x < x0 + n; x++) for (let y = y0; y < y0 + n; y++) data.set([...rgb, 255], (y * width + x) * 4); };
+    return { width, height, data, paint };
+  };
+  const skin = [225, 165, 140], red = [220, 40, 40], green = [40, 170, 70], purple = [140, 60, 200], white = [245, 245, 245];
+  it('proposes the mark near each estimated joint (not the skin around it) with its colour', () => {
+    const { width, height, data, paint } = frame();
+    paint(10, 30, 105, skin); // finger
+    paint(20, 50, 6, red); paint(60, 50, 6, green); paint(95, 50, 6, purple); paint(120, 50, 6, white);
+    const hints = [{ x: 25, y: 55 }, { x: 62, y: 52 }, { x: 99, y: 56 }, { x: 125, y: 50 }];
+    const p = new MarkerTracker().propose(data, width, height, hints);
+    expect(p.every(Boolean)).toBe(true);
+    expect(p[0]!.x).toBeCloseTo(22.5, 0); expect(p[0]!.hex).toBe('#dc2828'); expect(p[3]!.hex).toBe('#f5f5f5');
+  });
+  it('follows confirmed marks as they move, and is not pulled to a same-coloured blob elsewhere', () => {
+    const tracker = new MarkerTracker(), colors = ['#dc2828', '#28aa46', '#8c3cc8', '#f5f5f5'];
+    const at = [[20, 50], [60, 50], [95, 50], [120, 50]];
+    at.forEach(([x, y], i) => tracker.seed(i, x + 3, y + 3));
+    let last: ReturnType<MarkerTracker['detect']> | null = null;
+    for (let step = 0; step < 8; step++) {
+      const { width, height, data, paint } = frame();
+      const dy = step * 3;
+      paint(20, 50 + dy, 6, red); paint(60, 50 + dy, 6, green); paint(95, 50 + dy, 6, purple); paint(120, 50 + dy, 6, white);
+      paint(200, 20, 10, red); // a red distractor far from the finger
+      last = tracker.detect(data, width, height, colors);
+    }
+    expect(last!.valid).toBe(true); expect(last!.points.some(p => p?.estimated)).toBe(false);
+    expect(last!.points[0]!.x).toBeCloseTo(22.5, 0); expect(last!.points[0]!.y).toBeCloseTo(52.5 + 21, 0);
+    expect(tracker.locked).toBe(true);
+  });
+});
