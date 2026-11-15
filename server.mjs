@@ -10,8 +10,14 @@ import { validPose } from './server/protocol.mjs';
 const root = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 5173);
 const production = process.argv.includes('--production');
-const networkUrls = () => Object.values(os.networkInterfaces()).flat().filter(n => n && n.family === 'IPv4' && !n.internal)
-  .map(n => `http://${n.address}:${port}`);
+// IPv4 addresses first, then global IPv6. An iPhone Personal Hotspot can hand an iPad
+// only IPv6 (the iPad then shows 192.0.0.2), so it reaches the PC solely over IPv6.
+const networkUrls = () => {
+  const nets = Object.values(os.networkInterfaces()).flat().filter(n => n && !n.internal);
+  const v4 = nets.filter(n => n.family === 'IPv4' && !n.address.startsWith('169.254.')).map(n => `http://${n.address}:${port}`);
+  const v6 = nets.filter(n => n.family === 'IPv6' && /^[23]/.test(n.address)).map(n => `http://[${n.address}]:${port}`);
+  return [...v4, ...v6];
+};
 let vite;
 const server = http.createServer((req, res) => {
   const url = new URL(req.url || '/', 'http://localhost');
@@ -99,7 +105,8 @@ wss.on('connection', (ws, req, url) => {
     if (!room.tracker && !room.viewers.size) rooms.delete(roomName);
   });
 });
-server.listen(port, '0.0.0.0', () => {
+// '::' accepts both IPv6 and IPv4 (dual stack).
+server.listen(port, '::', () => {
   console.log(`\n  PIVOT FINGER LAB\n  Phone / PC : http://localhost:${port}\n  Developer  : http://localhost:${port}/?dev=1\n  PC tracker : http://localhost:${port}/tracker`);
   for (const url of networkUrls()) console.log(`  LAN phone  : ${url}`);
   console.log('  Keep this terminal running. Ctrl+C to stop.\n');
