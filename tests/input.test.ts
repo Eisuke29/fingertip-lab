@@ -131,3 +131,27 @@ describe('white fingertip mark', () => {
     expect(r.valid).toBe(true); expect(r.points[3]!.y).toBeCloseTo(42.5, 0);
   });
 });
+
+describe('marks searched around the hand model estimate', () => {
+  const setup = () => {
+    const width = 200, height = 120, data = new Uint8ClampedArray(width * height * 4).fill(90);
+    for (let p = 0; p < width * height; p++) data[p * 4 + 3] = 255;
+    const paint = (x0: number, y0: number, n: number, rgb: number[]) => { for (let x = x0; x < x0 + n; x++) for (let y = y0; y < y0 + n; y++) data.set([...rgb, 255], (y * width + x) * 4); };
+    return { width, height, data, paint };
+  };
+  const colors = ['#dc1e1e', '#1eaa3c', '#8c3cc8', '#f5f5f5'];
+  it('finds a mark whose colour drifted under the lighting, as long as it is near the estimate', () => {
+    const { width, height, data, paint } = setup();
+    paint(20, 20, 5, [200, 70, 60]); paint(60, 40, 5, [70, 160, 90]); paint(100, 60, 5, [130, 80, 180]); paint(140, 80, 5, [215, 215, 210]);
+    const r = new MarkerTracker().detect(data, width, height, colors, [{ x: 24, y: 24 }, { x: 64, y: 44 }, { x: 104, y: 64 }, { x: 144, y: 84 }]);
+    expect(r.valid).toBe(true); expect(r.points.every(p => p && !p.estimated)).toBe(true);
+    expect(r.points[0]!.x).toBeCloseTo(22, 0);
+  });
+  it('uses the estimate itself for a joint whose mark is hidden, and says so', () => {
+    const { width, height, data, paint } = setup();
+    paint(20, 20, 5, [220, 30, 30]); paint(60, 40, 5, [30, 170, 60]); paint(100, 60, 5, [140, 60, 200]); // fingertip mark hidden
+    const r = new MarkerTracker().detect(data, width, height, colors, [{ x: 24, y: 24 }, { x: 64, y: 44 }, { x: 104, y: 64 }, { x: 150, y: 90 }]);
+    expect(r.valid).toBe(true); expect(r.points[3]).toMatchObject({ x: 150, y: 90, estimated: true }); expect(r.reason).toContain('指先');
+  });
+});
+

@@ -1,4 +1,5 @@
-export type ImagePoint = { x: number; y: number; area?: number };
+/** `estimated`: no mark was found, so this is the hand model's own estimate of the joint. */
+export type ImagePoint = { x: number; y: number; area?: number; estimated?: boolean };
 export function hsv(r: number, g: number, b: number) {
   r /= 255; g /= 255; b /= 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
@@ -12,7 +13,41 @@ const TOLERANCE = 18;
 const DARK_TARGET = 0.36;
 const MIN_SATURATION = 0.25;
 /** How far (fraction of image width) a mark may lie from the hand model's rough joint position. */
-const HINT_RADIUS = 0.1;
+const HINT_RADIUS = 0.09;
+
+/**
+ * Look for one mark only around the hand model's estimate of its joint. Because the search area is small,
+ * the colour test can be looser than a whole-frame search (lighting shifts no longer lose the mark).
+ */
+function findNear(pixels: Uint8ClampedArray, width: number, height: number, t: Target, center: ImagePoint, radius: number): ImagePoint | null {
+  const x0 = Math.max(0, Math.floor(center.x - radius)), x1 = Math.min(width - 1, Math.ceil(center.x + radius));
+  const y0 = Math.max(0, Math.floor(center.y - radius)), y1 = Math.min(height - 1, Math.ceil(center.y + radius));
+  const w = x1 - x0 + 1, h = y1 - y0 + 1; if (w <= 0 || h <= 0) return null;
+  const mask = new Uint8Array(w * h), queue = new Uint32Array(w * h);
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    if ((x - center.x) ** 2 + (y - center.y) ** 2 > radius * radius) continue;
+    const p = (y * width + x) * 4, c = hsv(pixels[p], pixels[p + 1], pixels[p + 2]);
+    const ok = t.dark ? c.v <= Math.min(0.38, t.v + 0.12) && c.s < 0.6
+      : t.light ? c.v >= Math.max(0.6, t.v - 0.2) && c.s < 0.28
+      : c.s >= 0.15 && c.v >= 0.15 && !isSkinLike(c) && hueDistance(c.h, t.h) <= 28 && Math.abs(c.s - t.s) <= 0.4;
+    if (ok) mask[(y - y0) * w + (x - x0)] = 1;
+  }
+  let best: ImagePoint | null = null, bestScore = 0;
+  for (let i = 0; i < mask.length; i++) {
+    if (!mask[i]) continue;
+    mask[i] = 0; queue[0] = i; let head = 0, tail = 1, xs = 0, ys = 0;
+    while (head < tail) {
+      const q = queue[head++], x = q % w, y = Math.floor(q / w); xs += x; ys += y;
+      for (const n of [x ? q - 1 : -1, x < w - 1 ? q + 1 : -1, y ? q - w : -1, y < h - 1 ? q + w : -1]) if (n >= 0 && mask[n]) { mask[n] = 0; queue[tail++] = n; }
+    }
+    if (tail < 4) continue;
+    const pt = { x: x0 + xs / tail, y: y0 + ys / tail, area: tail };
+    // Prefer larger blobs close to the estimate.
+    const score = tail * Math.exp(-Math.hypot(pt.x - center.x, pt.y - center.y) / radius);
+    if (score > bestScore) { bestScore = score; best = pt; }
+  }
+  return best;
+}
 /** Dark but clearly coloured ink (deep green, purple) stays a colour marker; only near-neutral dark counts as black. */
 const DARK_MAX_SATURATION = 0.55;
 /** White paint/tape: bright and almost colourless. Skin is clearly more saturated, mid-grey walls are darker. */
@@ -68,6 +103,24 @@ export class MarkerTracker {
     const problem = markerColorProblem(colors);
     if (problem) return result([null, null, null, null], problem);
     const targets = colors.map(toTarget), darkId = targets.findIndex(t => t.dark), lightId = targets.findIndex(t => t.light);
+    // With the hand model's joint estimates: search each mark only around its joint, and keep the estimate
+    // itself when the mark cannot be seen there, so tracking does not drop out.
+    if (hints && hints.some(Boolean)) {
+      const radius = Math.max(20, width * HINT_RADIUS);
+      const points = targets.map((t, i) => {
+        const hint = hints[i], old = this.previous[i];
+        if (!hint) return old ? findNear(pixels, width, height, t, old, radius) : null;
+        // Around the estimate first; if the model misplaced a hidden joint, around where the mark was last seen.
+        return findNear(pixels, width, height, t, hint, radius)
+          ?? (old ? findNear(pixels, width, height, t, old, radius) : null)
+          ?? { x: hint.x, y: hint.y, estimated: true };
+      });
+      points.forEach((p, i) => { if (p && !p.estimated) this.previous[i] = p; });
+      const estimated = points.map((p, i) => (p?.estimated ? MARKER_NAMES[i] : '')).filter(Boolean);
+      const missing = points.map((p, i) => (p ? '' : MARKER_NAMES[i])).filter(Boolean);
+      return result(points, missing.length ? `${missing.join('・')}が見つかりません`
+        : estimated.length ? `4点を読み取り中（${estimated.join('・')}は目印が見えず推定）` : '4点を読み取り中', false);
+    }
     const size = width * height, labels = new Uint8Array(size), queue = new Uint32Array(size);
     for (let p = 0; p < size; p++) {
       const color = hsv(pixels[p * 4], pixels[p * 4 + 1], pixels[p * 4 + 2]);
@@ -92,16 +145,10 @@ export class MarkerTracker {
     }
     const dist = (a: ImagePoint, b: ImagePoint) => Math.hypot(a.x - b.x, a.y - b.y);
     const points = groups.map((group, i) => {
-      const old = this.previous[i], hint = hints?.[i] ?? null;
+      // Without the hand model (not loaded, or it lost the hand): follow each mark from its last position.
+      const old = this.previous[i];
       const sizeOk = (p: ImagePoint) => !old?.area || (p.area! / old.area > 0.25 && p.area! / old.area < 4);
-      // 1) The hand model's rough joint position: take the matching-colour mark nearest to it
-      //    (also staying close to where the mark was last frame), so a same-coloured blob elsewhere cannot steal the point.
-      if (hint) {
-        const near = group.filter(p => dist(p, hint) < width * HINT_RADIUS && sizeOk(p));
-        if (near.length) return near.sort((a, b) => (dist(a, hint) + (old ? 0.5 * dist(a, old) : 0)) - (dist(b, hint) + (old ? 0.5 * dist(b, old) : 0)))[0];
-      }
-      // 2) No usable hint (model lost the hand or misplaced a hidden joint): follow the mark from its last position.
-      if (!old) return hint ? null : group.sort((a, b) => b.area! - a.area!)[0] ?? null;
+      if (!old) return group.sort((a, b) => b.area! - a.area!)[0] ?? null;
       return group.filter(p => dist(p, old) < width * 0.12 && sizeOk(p)).sort((a, b) => dist(a, old) - dist(b, old))[0] ?? null;
     });
     points.forEach((p, i) => { if (p) this.previous[i] = p; });

@@ -365,7 +365,8 @@ export function startTracker() {
     }
     ctx.strokeStyle = '#f9efc8'; ctx.lineWidth = 2; ctx.beginPath(); points.forEach((p, i) => { if (p) i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.stroke();
     if (hints) { ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); hints.forEach(h => { if (h) { ctx.beginPath(); ctx.arc(h.x, h.y, 10, 0, Math.PI * 2); ctx.stroke(); } }); ctx.setLineDash([]); }
-    points.forEach((p, i) => { if (p) { ctx.fillStyle = source() === 'markers' ? $<HTMLInputElement>(`marker-color-${i}`).value : initialColors[i]; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); } }); ctx.restore();
+    // Filled dot = mark found; hollow ring = no mark visible, the hand model's estimate is used.
+    points.forEach((p, i) => { if (p) { const col = source() === 'markers' ? $<HTMLInputElement>(`marker-color-${i}`).value : initialColors[i]; ctx.beginPath(); ctx.arc(p.x, p.y, p.estimated ? 7 : 5, 0, Math.PI * 2); if (p.estimated) { ctx.strokeStyle = col; ctx.lineWidth = 2.5; ctx.stroke(); } else { ctx.fillStyle = col; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.fill(); ctx.stroke(); } } }); ctx.restore();
     ctx.fillStyle = '#fff9dc'; ctx.font = '12px sans-serif'; points.forEach((p, i) => { if (p) ctx.fillText(names[i], (mirror ? raw.width - p.x : p.x) + 9, p.y - 9); });
   }
   let lastFrame: PoseFrame | null = null;
@@ -402,7 +403,7 @@ export function startTracker() {
 
       // Panel 2: per-mark status.
       if (markerMode) {
-        markerPoints.forEach((p, i) => { $(`marker-state-${i}`).classList.toggle('ok', !!p); setText($(`marker-found-${i}`), p ? '検出' : '未検出'); });
+        markerPoints.forEach((p, i) => { $(`marker-state-${i}`).classList.toggle('ok', !!p && !p.estimated); setText($(`marker-found-${i}`), !p ? '未検出' : p.estimated ? '推定' : '検出'); });
         // Per-mark 検出/未検出 is shown in each row; the message is only for colour problems (which joint, and why).
         setText($('marker-message'), !running ? 'カメラを開始してください' : markerPoints.some(Boolean) || markerReason.includes('見つかりません') ? '' : markerReason);
       }
