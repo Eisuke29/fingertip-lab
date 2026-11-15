@@ -38,8 +38,8 @@ export class PivotScene {
   private raycaster = new THREE.Raycaster();
   private glass = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
   private finger = new THREE.Group();
-  private skin = new THREE.MeshPhysicalMaterial({ color: 0xd9aa91, roughness: 0.56, metalness: 0, clearcoat: 0.13 });
-  private nailMaterial = new THREE.MeshPhysicalMaterial({ color: 0xf0d9c8, roughness: 0.29, clearcoat: 0.9 });
+  private skin = new THREE.MeshPhysicalMaterial({ color: 0xbf7451, roughness: 0.62, metalness: 0, clearcoat: 0.05 });
+  private nailMaterial = new THREE.MeshPhysicalMaterial({ color: 0xc98a6c, roughness: 0.4, clearcoat: 0.3 });
   private creaseMaterial = new THREE.MeshStandardMaterial({ color: 0xb98570, roughness: 0.8, transparent: true, opacity: 0.38 });
   private cylinder = new THREE.CylinderGeometry(0.91, 1, 1, 40, 2, true);
   private sphere = new THREE.SphereGeometry(1, 32, 24);
@@ -53,12 +53,12 @@ export class PivotScene {
   private contactShadow: THREE.Mesh;
   private ballGeometry = new THREE.SphereGeometry(1, 96, 64);
   private baseDirections: Float32Array;
-  private ballMaterial = new THREE.MeshPhysicalMaterial({ color: 0xa7c9b9, roughness: 0.22, transmission: 0.38, thickness: 38,
-    ior: 1.34, attenuationColor: new THREE.Color(0xadd1c0), attenuationDistance: 160, clearcoat: 0.85, clearcoatRoughness: 0.16, transparent: true, opacity: 0.96 });
+  private ballMaterial = new THREE.MeshPhysicalMaterial({ color: 0xc9a443, roughness: 0.22, transmission: 0.38, thickness: 38,
+    ior: 1.34, attenuationColor: new THREE.Color(0xd2ad4c), attenuationDistance: 160, clearcoat: 0.35, clearcoatRoughness: 0.3, transparent: true, opacity: 0.96 });
   private ballMesh = new THREE.Mesh(this.ballGeometry, this.ballMaterial);
   private pattern = grainTexture();
   private uniforms = { normal: { value: new THREE.Vector3(0, 0, 1) }, shift: { value: new THREE.Vector2() }, enabled: { value: 0 } };
-  private strand = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshPhysicalMaterial({ color: 0xb8d8c9, roughness: 0.2, clearcoat: 1, transparent: true, opacity: 0.88 }));
+  private strand = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshPhysicalMaterial({ color: 0xcfa94a, roughness: 0.2, clearcoat: 1, transparent: true, opacity: 0.88 }));
   private observer: ResizeObserver;
   private lastKey = '';
   private dirty = true;
@@ -72,17 +72,18 @@ export class PivotScene {
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
     this.renderer.setClearColor(0x0b0c0b);
     this.renderer.localClippingEnabled = true;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 0.95;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 0.85; // kept low so lit skin and highlights never wash out to white (white = fingertip mark)
     this.canvas = this.renderer.domElement;
     this.canvas.setAttribute('aria-label', 'PIPを支点とする二節の指と、固定された柔らかい球');
     this.canvas.tabIndex = 0; container.prepend(this.canvas);
-    this.scene.background = new THREE.Color(0x0b0c0b); // dark, so the screen does not light up the finger or show up as a white mark in the camera
+    this.scene.background = new THREE.Color(0x0b0c0b); // dark, so the screen does not light up the finger or show up as a white mark in the camera.
+    // iPad colours avoid every marker: no red/green/blue/purple hues, nothing near-white or near-black; accents are yellow (~45°).
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     const room = new RoomEnvironment();
-    this.environment = pmrem.fromScene(room, 0.04); this.scene.environment = this.environment.texture; this.scene.environmentIntensity = 0.65;
+    this.environment = pmrem.fromScene(room, 0.04); this.scene.environment = this.environment.texture; this.scene.environmentIntensity = 0.4;
     room.dispose(); pmrem.dispose();
-    this.scene.add(new THREE.HemisphereLight(0xfff5e8, 0x9cae9d, 1.2));
-    const light = new THREE.DirectionalLight(0xfff1de, 2.3); light.position.set(-230, 350, 450); this.scene.add(light);
+    this.scene.add(new THREE.HemisphereLight(0xfff5e8, 0x6e6a60, 0.55));
+    const light = new THREE.DirectionalLight(0xfff1de, 1.0); light.position.set(-230, 350, 450); this.scene.add(light);
     const fill = new THREE.DirectionalLight(0xe9f3ff, 0.9); fill.position.set(300, -80, 220); this.scene.add(fill);
     this.finger.add(this.middle, this.distal, this.joint, this.cap, this.nail, this.crease);
     this.scene.add(this.finger, this.ballMesh, this.strand);
@@ -140,7 +141,9 @@ export class PivotScene {
     const planes = [new THREE.Plane(new THREE.Vector3(0, 0, sign), 0),
       new THREE.Plane(vector(s.middleDirection), -vector(s.middleDirection).dot(vector(s.pip)) - rootGap)];
     for (const material of [this.skin, this.nailMaterial, this.creaseMaterial]) material.clippingPlanes = planes;
-    this.skin.color.set(skinColor);
+    // Keep the drawn skin clearly skin-coloured: a pale, washed-out finger on the iPad reads as the white fingertip mark.
+    const hsl = { h: 0, s: 0, l: 0 }; this.skin.color.set(skinColor).getHSL(hsl);
+    this.skin.color.setHSL(hsl.h, Math.max(hsl.s, 0.45), Math.min(hsl.l, 0.6));
     this.segment(this.middle, s.pip, s.dip, config.radius);
     const endCenter = add(s.tip, mul(s.distalDirection, -config.radius * 0.5));
     this.segment(this.distal, s.dip, endCenter, config.radius * 0.9);
