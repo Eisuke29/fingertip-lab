@@ -158,7 +158,7 @@ const ballGeo = new THREE.SphereGeometry(BALL_R, 160, 120);
 const ballRest = ballGeo.attributes.position.array.slice();
 const ballCur = ballGeo.attributes.position.array.slice();
 const ballMat = new THREE.MeshPhysicalMaterial({
-  color: 0x7fdcb4, roughness: 0.1, metalness: 0, transmission: 0.8, thickness: 0.03, ior: 1.36,
+  color: 0x46c494, roughness: 0.14, metalness: 0, transmission: 0.35, thickness: 0.03, ior: 1.36,
   attenuationColor: new THREE.Color(0x3fae86), attenuationDistance: 0.03, clearcoat: 1, clearcoatRoughness: 0.08,
   sheen: 0.15, sheenColor: new THREE.Color(0xd9fff0), emissive: 0x135c42, emissiveIntensity: 0.9,
 });
@@ -336,6 +336,9 @@ function displayedPose(thp, thd) {
   }
   return [freePose[0] + lo * (thp - freePose[0]), freePose[1] + lo * (thd - freePose[1])];
 }
+// Sphere grid layout (SphereGeometry(…, 160, 120)) for neighbour smoothing of the dent depth
+const GW = 161, GH = 121;
+const _dReq = new Float32Array(GW * GH), _dA = new Float32Array(GW * GH), _dB = new Float32Array(GW * GH);
 function deformBall(segs, dt) {
   const pos = ballGeo.attributes.position.array;
   const N = pos.length / 3;
@@ -343,46 +346,63 @@ function deformBall(segs, dt) {
   const pushed = new Uint8Array(N);
   let maxPen = 0; const cpt = V(); let any = false;
   const p = V(), q = V(), off = V();
-  // 1) where the finger is inside the rest sphere, conform the surface to the finger
+  // 1) required inward depth (along the ball radius) so that each surface point sits just under the finger.
+  //    The surface is only ever pushed toward the centre: an imprint of the finger pad, never a sleeve around it.
+  const insideFinger = (pt) => { for (const [a, b] of segs) if (closestOnSeg(a, b, pt, q).distanceToSquared(pt) < RF * RF) return true; return false; };
+  const nIn = V(), lo = V(), hi = V();
+  _dReq.fill(0);
   for (let i = 0; i < N; i++) {
+    if (!segs.length) break;
     p.set(ballRest[3 * i], ballRest[3 * i + 1], ballRest[3 * i + 2]).add(BALL_C);
-    for (const [a, b] of segs) {
-      closestOnSeg(a, b, p, q); off.copy(p).sub(q); const d = off.length();
-      if (d < RF) {
-        const pen = RF - d; if (pen > maxPen) { maxPen = pen; cpt.copy(p); }
-        p.copy(q).addScaledVector(d > 1e-6 ? off.divideScalar(d) : UP, RF); pushed[i] = 1; any = true;
-      }
-    }
-    p.sub(BALL_C);
-    target[3 * i] = p.x; target[3 * i + 1] = p.y; target[3 * i + 2] = p.z;
+    if (!insideFinger(p)) continue;
+    nIn.copy(BALL_C).sub(p).normalize();
+    lo.copy(p); let k = 0;
+    do { hi.copy(lo); lo.addScaledVector(nIn, 0.0005); k++; } while (k < 80 && insideFinger(lo));
+    for (let it = 0; it < 6; it++) { off.copy(hi).add(lo).multiplyScalar(0.5); if (insideFinger(off)) hi.copy(off); else lo.copy(off); }
+    const d = lo.distanceTo(p) + 0.0002;
+    _dReq[i] = d; pushed[i] = 1; any = true;
+    if (d > maxPen) { maxPen = d; cpt.copy(p); }
   }
+  // 2) spread the depth to the neighbours (smooth bowl instead of a cliff). Softer ball => wider bowl.
+  _dA.set(_dReq);
   if (any) {
-    const cn = cpt.clone().sub(BALL_C).normalize();            // contact normal (outward)
-    const press = maxPen;                                       // how deep the finger is in
-    const sq = Math.min(0.35, SOFT.squash * press / BALL_R);    // global squash ratio
-    const pp = V();
-    for (let i = 0; i < N; i++) {
-      pp.set(ballRest[3 * i], ballRest[3 * i + 1], ballRest[3 * i + 2]);
-      const dir = pp.clone().normalize();
-      const cosA = dir.dot(cn), ang = Math.acos(THREE.MathUtils.clamp(cosA, -1, 1)) * BALL_R; // arc distance from contact
-      // 2) soft funnel around the dent: neighbours are dragged inward along the push
-      const wide = Math.exp(-((ang / (SOFT.spread * RF)) ** 2));
-      // 3) volume-ish bulge ring further out
-      const ring = Math.exp(-(((ang - 2.4 * RF) / (1.3 * RF)) ** 2));
-      let tx = target[3 * i], ty = target[3 * i + 1], tz = target[3 * i + 2];
-      if (!pushed[i]) {
-        tx -= cn.x * press * 0.85 * wide; ty -= cn.y * press * 0.85 * wide; tz -= cn.z * press * 0.85 * wide;
-        const b = press * SOFT.bulge * ring; tx += dir.x * b; ty += dir.y * b; tz += dir.z * b;
+    const keep = 0.80 + 0.12 * (1 - STIFF);
+    let src = _dA, dst = _dB;
+    for (let it = 0; it < 14; it++) {
+      for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+        const i = y * GW + x;
+        const xl = x === 0 ? GW - 2 : x - 1, xr = x === GW - 1 ? 1 : x + 1;
+        const yu = Math.max(0, y - 1), yd = Math.min(GH - 1, y + 1);
+        const avg = (src[y * GW + xl] + src[y * GW + xr] + src[yu * GW + x] + src[yd * GW + x]) * 0.25;
+        dst[i] = Math.max(_dReq[i], Math.max(src[i], avg * keep));
       }
-      // 4) whole-body squash along the push, widening sideways (center stays fixed)
-      const along = tx * cn.x + ty * cn.y + tz * cn.z;
-      const lat = V(tx - cn.x * along, ty - cn.y * along, tz - cn.z * along);
-      const k1 = pushed[i] ? 0 : -sq * along * 0.6;               // flatten (pushed verts already sit on the finger)
-      tx += cn.x * k1 + lat.x * sq * 0.45; ty += cn.y * k1 + lat.y * sq * 0.45; tz += cn.z * k1 + lat.z * sq * 0.45;
-      target[3 * i] = tx; target[3 * i + 1] = ty; target[3 * i + 2] = tz;
+      const t = src; src = dst; dst = t;
     }
+    if (src !== _dA) _dA.set(src);
   }
-  // 5) jelly dynamics: under-damped spring toward the target (pushed vertices follow the finger immediately)
+  const press = maxPen;
+  const cn = any ? cpt.clone().sub(BALL_C).normalize() : null;
+  const sq = any ? Math.min(0.3, SOFT.squash * press / BALL_R) : 0;
+  const pp = V(), dir = V();
+  for (let i = 0; i < N; i++) {
+    pp.set(ballRest[3 * i], ballRest[3 * i + 1], ballRest[3 * i + 2]);
+    dir.copy(pp).normalize();
+    let tx = pp.x - dir.x * _dA[i], ty = pp.y - dir.y * _dA[i], tz = pp.z - dir.z * _dA[i];
+    if (any) {
+      // 3) gentle bulge ring around the bowl and whole-body squash (centre stays fixed)
+      const ang = Math.acos(THREE.MathUtils.clamp(dir.dot(cn), -1, 1)) * BALL_R;
+      const ring = _dA[i] > 0.0002 ? 0 : Math.exp(-(((ang - 3.0 * RF) / (1.4 * RF)) ** 2));
+      const bl = press * SOFT.bulge * ring; tx += dir.x * bl; ty += dir.y * bl; tz += dir.z * bl;
+      if (!pushed[i]) {
+        const along = tx * cn.x + ty * cn.y + tz * cn.z;
+        const lx = tx - cn.x * along, ly = ty - cn.y * along, lz = tz - cn.z * along;
+        const k1 = along < 0 ? -sq * along * 0.5 : 0;             // flatten the far side a little
+        tx += cn.x * k1 + lx * sq * 0.35; ty += cn.y * k1 + ly * sq * 0.35; tz += cn.z * k1 + lz * sq * 0.35;
+      }
+    }
+    target[3 * i] = tx; target[3 * i + 1] = ty; target[3 * i + 2] = tz;
+  }
+  // 4) jelly dynamics: under-damped spring toward the target (points under the finger follow it immediately)
   if (dt === 0) { ballCur.set(target); ballVel.fill(0); }
   else {
     const steps = Math.max(1, Math.ceil(dt / (1 / 240))), h = dt / steps;
