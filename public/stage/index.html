@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pivot Finger Stage</title>
+<style>
+  :root { --bg:#ebe8e3; --ink:#1d2120; --ui:rgba(255,255,255,.82); --line:rgba(0,0,0,.08); --accent:#2f6f5b; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:13px/1.4 "Hiragino Sans","Noto Sans JP",system-ui,sans-serif; overflow:hidden; }
+  canvas { display:block; }
+  #bar { position:fixed; left:50%; bottom:16px; transform:translateX(-50%); display:flex; gap:10px; align-items:center;
+         background:var(--ui); backdrop-filter:blur(12px); border:1px solid var(--line); border-radius:14px; padding:8px 10px; box-shadow:0 6px 24px rgba(0,0,0,.08); max-width:calc(100vw - 32px); flex-wrap:wrap; justify-content:center; }
+  #bar button { border:0; background:transparent; padding:6px 10px; border-radius:9px; cursor:pointer; font:inherit; color:inherit; white-space:nowrap; }
+  #bar button:hover { background:rgba(0,0,0,.05); }
+  #bar button.on { background:var(--ink); color:#fff; }
+  .seg { display:flex; gap:2px; background:rgba(0,0,0,.04); border-radius:10px; padding:2px; }
+  #scrub { width:180px; accent-color:var(--accent); }
+  #time { font-variant-numeric:tabular-nums; width:3.2em; text-align:right; opacity:.6; }
+  #manual { position:fixed; right:16px; bottom:84px; background:var(--ui); backdrop-filter:blur(12px); border:1px solid var(--line); border-radius:14px; padding:12px 14px; width:230px; }
+  #manual .mhead { display:flex; justify-content:space-between; align-items:center; font-weight:600; min-height:26px; }
+  #manual #autoBtn { border:0; background:var(--ink); color:#fff; border-radius:8px; padding:4px 10px; font:inherit; cursor:pointer; }
+  #manual:not(.manual) input { opacity:.55; }
+  @media (max-width: 640px) { #manual { left:16px; width:auto; bottom:auto; top:96px; } #scrub { width:120px; } }
+  #manual label { display:block; margin:6px 0 2px; opacity:.7; }
+  #manual input { width:100%; accent-color:var(--accent); }
+  body.capture #bar, body.capture #manual { display:none !important; }
+  #hud { position:fixed; left:20px; top:18px; background:rgba(255,255,255,.85); padding:10px 14px; border-radius:12px; display:flex; flex-direction:column; gap:8px; font:600 13px/1 "Hiragino Sans","Noto Sans JP",system-ui,sans-serif; color:#3a403e; pointer-events:none; }
+  #hud div { display:grid; grid-template-columns:44px 120px 44px; align-items:center; gap:8px; }
+  #hud span { opacity:.6; letter-spacing:.04em; }
+  #hud em { display:block; height:4px; background:rgba(0,0,0,.08); border-radius:2px; overflow:hidden; }
+  #hud i { display:block; height:100%; background:#2f6f5b; }
+  body.capture #hud { transform:scale(2); transform-origin:0 0; left:36px; top:32px; }
+  #hud b { font-variant-numeric:tabular-nums; text-align:right; font-weight:600; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div data-k="pip"><span>PIP</span><em><i></i></em><b>–</b></div>
+  <div data-k="dip"><span>DIP</span><em><i></i></em><b>–</b></div>
+</div>
+<div id="bar">
+  <button id="play" title="再生/停止">❚❚</button>
+  <input id="scrub" type="range" min="0" max="1000" value="0">
+  <span id="time">0.0</span>
+  <div class="seg" id="views">
+    <button data-view="experience" class="on">体験者の見え方</button>
+    <button data-view="structure">仕組みが見える</button>
+  </div>
+  <div class="seg" id="cams">
+    <button data-cam="auto" class="on">おまかせ</button>
+    <button data-cam="pov">体験者の目</button>
+    <button data-cam="side">横から</button>
+    <button data-cam="orbit">360°</button>
+  </div>
+  <button id="trackBtn" class="on" title="画面の絵を見る位置に合わせて描き直す（実機では前面カメラの顔追跡に相当）">頭の位置に追従</button>
+</div>
+<div id="manual">
+  <div class="mhead">角度を変える<button id="autoBtn" hidden>自動に戻す</button></div>
+  <label>第2関節（PIP）の角度 θp <span id="tpv"></span></label>
+  <input id="tp" type="range" min="30" max="180" step="0.5" value="68">
+  <label>第1関節（DIP）の曲げ θd <span id="tdv"></span></label>
+  <input id="td" type="range" min="0" max="90" step="0.5" value="10">
+</div>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.0/examples/jsm/"
+} }
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
