@@ -138,14 +138,17 @@ const vBox = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometr
   new THREE.LineBasicMaterial({ color: 0x5fb59a, transparent: true, opacity: 0.55 }));
 vBox.position.y = -0.0425; vBox.layers.set(L_VIRTUAL); scene.add(vBox);
 
-const skinMat = new THREE.MeshStandardMaterial({ color: 0xb8b8b6, roughness: 0.6, metalness: 0 });
-const vSkinMat = skinMat.clone();
-function capsule() {
-  const m = new THREE.Mesh(new THREE.CapsuleGeometry(RF, 0.02, 10, 28), vSkinMat);
+// Part colours: the real phalanx and the virtual segment it drives share a colour.
+const COL = { hand: new THREE.Color(0xb9b9b7), prox: new THREE.Color(0x4f8fe6), dist: new THREE.Color(0xf09a3e) };
+const skinMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0, vertexColors: true });
+const vMidMat = new THREE.MeshStandardMaterial({ color: COL.prox, roughness: 0.45, transparent: true, opacity: 0.82, emissive: COL.prox, emissiveIntensity: 0.18 });
+const vDistMat = new THREE.MeshStandardMaterial({ color: COL.dist, roughness: 0.45, transparent: true, opacity: 0.82, emissive: COL.dist, emissiveIntensity: 0.18 });
+function capsule(mat) {
+  const m = new THREE.Mesh(new THREE.CapsuleGeometry(RF, 0.02, 10, 28), mat);
   m.userData.len = 0.02;
   m.castShadow = true; m.layers.set(L_VIRTUAL); scene.add(m); return m;
 }
-const vMid = capsule(), vDist = capsule();
+const vMid = capsule(vMidMat), vDist = capsule(vDistMat);
 function placeCapsule(mesh, a, b, r = RF) {
   const d = b.clone().sub(a), len = d.length();
   mesh.position.copy(a).addScaledVector(d, 0.5);
@@ -178,6 +181,13 @@ thread.layers.set(L_VIRTUAL); thread.visible = false; scene.add(thread);
 // contact ring on the glass (exhibition touch feedback), real-world layer
 const ring = new THREE.Mesh(new THREE.RingGeometry(0.009, 0.0105, 64), new THREE.MeshBasicMaterial({ color: 0x8fe0c0, transparent: true, opacity: 0, toneMapped: false }));
 ring.rotation.x = -Math.PI / 2; ring.position.copy(ROOT).add(V(0, 0.0003, 0)); scene.add(ring);
+
+// pivot guide (structure view): the real proximal phalanx and the virtual middle segment are one straight line through PIP
+const guideGeo = new THREE.BufferGeometry().setFromPoints([V(), V(), V()]);
+const guide = new THREE.Line(guideGeo, new THREE.LineDashedMaterial({ color: 0x2f6f5b, dashSize: 0.004, gapSize: 0.0025, transparent: true, opacity: 0.9, depthTest: false }));
+guide.renderOrder = 10; guide.frustumCulled = false; scene.add(guide);
+const pivotDot = new THREE.Mesh(new THREE.SphereGeometry(0.0022, 20, 12), new THREE.MeshBasicMaterial({ color: 0xe0503a, depthTest: false }));
+pivotDot.renderOrder = 11; scene.add(pivotDot);
 
 // ---------- geometry of the finger (shared real / virtual) ----------
 function fingerFrame(thp, thd) {
@@ -219,6 +229,22 @@ new GLTFLoader().load('./assets/right.glb', (g) => {
   const l0 = f0.clone().cross(p0).normalize();
   const M0 = new THREE.Matrix4().makeBasis(l0, f0, p0);
   hand = { model, bones, armature, restP, restQ, Lp, Lm, Ld, M0 };
+  model.traverse((o) => {
+    if (!o.isSkinnedMesh) return;
+    const names = o.skeleton.bones.map((b) => b.name);
+    const iP = names.indexOf('index-finger-phalanx-proximal'), iD = names.indexOf('index-finger-phalanx-distal'), iT = names.indexOf('index-finger-tip');
+    const si = o.geometry.attributes.skinIndex, sw = o.geometry.attributes.skinWeight, n = si.count;
+    const col = new Float32Array(n * 3), c = new THREE.Color();
+    for (let v = 0; v < n; v++) {
+      let wP = 0, wD = 0;
+      for (let k = 0; k < 4; k++) { const b = si.getComponent(v, k), w = sw.getComponent(v, k); if (b === iP) wP += w; else if (b === iD || b === iT) wD += w; }
+      const sharpen = (w) => THREE.MathUtils.smoothstep(w, 0.35, 0.65);
+      wP = sharpen(wP); wD = sharpen(wD);
+      c.copy(COL.hand).lerp(COL.prox, wP).lerp(COL.dist, wD);
+      col.set([c.r, c.g, c.b], v * 3);
+    }
+    o.geometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  });
   console.log('[stage] hand loaded', { Lp, Lm, Ld });
   layoutBall();
   ready = true;
@@ -304,11 +330,11 @@ const ballVel = new Float32Array(ballRest.length);
 const SOFT = { spread: 2.6, squash: 0.55, bulge: 0.45, k: 520, c: 11 }; // squishiness knobs (set from STIFF)
 // Ball stiffness 0 (soft) .. 1 (hard). After the finger pad touches the ball, the displayed DIP flexion is scaled by
 // a display gain G (< 1): the harder the ball, the less the virtual finger sinks in (pseudo-haptic stiffness).
-let STIFF = 0.5, GAIN = 1;
+let STIFF = 0.3, GAIN = 1;
 function setStiffness(v) {
   STIFF = THREE.MathUtils.clamp(v, 0, 1);
   GAIN = 0.45 - 0.4 * STIFF;
-  Object.assign(SOFT, { spread: 3.2 - 1.4 * STIFF, squash: 0.8 - 0.6 * STIFF, bulge: 0.55 - 0.3 * STIFF, k: 300 + 900 * STIFF, c: 8 + 14 * STIFF });
+  Object.assign(SOFT, { spread: 3.2 - 1.4 * STIFF, squash: 0.9 - 0.6 * STIFF, bulge: 0.6 - 0.3 * STIFF, k: 260 + 900 * STIFF, c: 7 + 14 * STIFF });
 }
 setStiffness(STIFF);
 // Penetration (m) of the virtual finger (middle + distal capsules) into the undeformed ball for angles (thp, thd).
@@ -427,10 +453,12 @@ function deformBall(segs, dt) {
 const ROM = { pip: [50, 150], dip: [0, 90] };
 const K = {
   lift: [[0, 0.08], [2.6, 0], [29.4, 0], [30.8, 0.07], [31, 0.07]],
-  thp: [[0, 68], [3.4, 68], [5.2, ROM.pip[0]], [7.6, ROM.pip[1]], [9.4, 68], [13.4, 68], [14.4, 80], [15.0, 80], [16.0, 68],
-        [20, 68], [22, 55], [24.4, 85], [26, 68], [31, 68]],
-  thd: [[0, 5], [9.8, 5], [11.0, 85], [11.8, 85], [12.8, 5], [13.4, 5], [14.4, ROM.dip[1]], [15.0, ROM.dip[1]], [16.0, 5],
-        [16.6, 5], [17.6, 80], [18.2, 80], [19.6, ROM.dip[0]], [20.0, ROM.dip[0]], [20.8, 50], [26.0, 50], [26.8, 5], [31, 5]],
+  // 3.4–9.4: full range of PIP and DIP with no ball (pure mapping). Ball appears at 9.4.
+  thp: [[0, 68], [3.4, 68], [4.8, ROM.pip[0]], [6.6, ROM.pip[1]], [8.2, 68], [13.2, 68], [14.2, 75], [15.0, 75], [16.0, 68],
+        [20.0, 62], [22.6, 78], [24.8, 62], [26.4, 68], [31, 68]],
+  thd: [[0, 5], [6.6, 5], [7.6, ROM.dip[1]], [8.6, ROM.dip[0]], [10.4, 5], [11.4, 70], [12.0, 70], [12.8, 5], [13.4, 5], [14.4, 55], [15.0, 55], [16.0, 5],
+        [16.6, 5], [17.6, 68], [18.2, 68], [19.6, 0], [20.0, 60], [22.6, 30], [24.8, 60], [26.4, 20], [26.8, 5], [31, 5]],
+  ball: [[0, 0], [9.2, 0], [10.0, 1], [31, 1]],
 };
 const SCENE_AT = (t) => (t < 16.4 ? 'press' : t < 19.9 ? 'release' : 'stroke');
 const DURATION = 31;
@@ -512,8 +540,7 @@ function setView(v, fromAuto = false) {
   bezelMat.opacity = ghost ? 0.15 : 1; bezelMat.depthWrite = !ghost;
   screenMat.opacity = ghost ? 0.0 : 1;
   vFloor.visible = false; vBox.visible = ghost;
-  vSkinMat.transparent = ghost; vSkinMat.opacity = ghost ? 0.75 : 1;
-  vSkinMat.emissive.set(ghost ? 0x2a6b58 : 0x000000);
+  for (const m of [vMidMat, vDistMat]) { m.opacity = ghost ? 0.62 : 0.82; m.emissiveIntensity = ghost ? 0.35 : 0.18; }
 }
 setView('experience', true);
 
@@ -551,16 +578,24 @@ function frame(dt) {
   const contact = lift < 0.0008;
   const appear = THREE.MathUtils.clamp(1 - lift / 0.0008, 0, 1);
   // virtual finger
-  const [thpV, thdV] = contact ? displayedPose(thp, thd) : [thp, thd];   // displayed (virtual) angles
+  // Base mapping: virtual middle = point reflection of the real proximal phalanx through PIP (always collinear),
+  // virtual distal = real DIP flexion 1:1. (Pseudo-haptic / exaggeration layers can later replace these two lines.)
+  const thpV = thp, thdV = thd;
   const fr = fingerFrame(thpV, thdV);
   const vDip = ROOT.clone().addScaledVector(fr.u, hand.Lm);
   const vTip = vDip.clone().addScaledVector(fr.dDir, hand.Ld);
   placeCapsule(vMid, ROOT, vDip); placeCapsule(vDist, vDip, vTip);
+  { const mcpW = ROOT.clone().addScaledVector(UP, lift).addScaledVector(fr.proxUp, hand.Lp);
+    const g = guide.geometry.attributes.position; g.setXYZ(0, mcpW.x, mcpW.y, mcpW.z); g.setXYZ(1, ROOT.x, ROOT.y + lift, ROOT.z); g.setXYZ(2, vDip.x, vDip.y, vDip.z);
+    g.needsUpdate = true; guide.computeLineDistances();
+    guide.visible = pivotDot.visible = view === 'structure' && contact; pivotDot.position.copy(ROOT); }
   vMid.visible = vDist.visible = contact;
   ring.material.opacity += ((contact ? 0.55 : 0) - ring.material.opacity) * Math.min(1, dt * 6);
   const s = 1 + (1 - appear) * 0.4; ring.scale.setScalar(s);
   // material
-  const segs = contact ? [[vDip, vTip], [ROOT.clone().addScaledVector(fr.u, RF * 0.5), vDip]] : [];
+  const ballK = manual || window.__pose ? 1 : sample(K.ball, time);
+  ball.visible = ballK > 0.01; ball.scale.setScalar(Math.max(0.001, ballK * (1 + 0.12 * Math.sin(Math.PI * ballK))));
+  const segs = contact && ballK > 0.99 ? [[vDip, vTip], [ROOT.clone().addScaledVector(fr.u, RF * 0.5), vDip]] : [];
   const res = deformBall(segs, dt);
   // thread (release scene)
   const padNow = vDip.clone().addScaledVector(fr.dDir, hand.Ld * 0.62).addScaledVector(fr.nD, RF);
@@ -621,6 +656,8 @@ window.stage = {
   get ready() { return ready; },
   setHeadTrack(v) { headTrack = v; },
   setStiffness,
+  penGrid() { const B = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90]; let o = 'thp/thd ' + B.join(' ') + '|'; for (let a = 50; a <= 150; a += 5) o += a + ': ' + B.map((b) => (penetrationAt(a * DEG, b * DEG) * 1000).toFixed(0).padStart(3)).join(' ') + '|'; return o; },
+  penScan() { const out = []; for (let t = 10; t < DURATION; t += 0.1) { const a = sample(K.thp, t) * DEG, b = sample(K.thd, t) * DEG; out.push([+t.toFixed(1), +(penetrationAt(a, b) * 1000).toFixed(1)]); } return JSON.stringify(out.filter((x) => x[1] > 0).reduce((m, x) => (x[1] > m[1] ? x : m), [0, 0])) + ' R=' + BALL_R * 1000; },
   camPose(px, py, pz, tx, ty, tz, fov = 35) { controls.autoRotate = false; camera.position.set(px, py, pz); controls.target.set(tx, ty, tz); camera.fov = fov; camera.updateProjectionMatrix(); camera.lookAt(controls.target); camera.updateMatrixWorld(true); },
   ROOT: ROOT.toArray(), EYE: EYE.toArray(), SIDE: SIDE_DIR.toArray(), DURATION,
   setView, setCam: (n) => setCam(n, true),

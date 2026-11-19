@@ -31,6 +31,10 @@
   #hud span { opacity:.6; letter-spacing:.04em; }
   #hud em { display:block; height:4px; background:rgba(0,0,0,.08); border-radius:2px; overflow:hidden; }
   #hud i { display:block; height:100%; background:#2f6f5b; }
+  #hud [data-k=pip] i { background:#4f8fe6; } #hud [data-k=dip] i { background:#f09a3e; }
+  #hud .legend { list-style:none; margin:4px 0 0; padding:6px 0 0; border-top:1px solid rgba(0,0,0,.08); display:flex; flex-direction:column; gap:4px; font-weight:500; font-size:12px; }
+  #hud .legend li { display:flex; align-items:center; gap:7px; }
+  #hud .legend s { width:10px; height:10px; border-radius:3px; display:inline-block; }
   body.capture #hud { transform:scale(2); transform-origin:0 0; left:36px; top:32px; }
   #hud b { font-variant-numeric:tabular-nums; text-align:right; font-weight:600; }
 </style>
@@ -39,6 +43,11 @@
 <div id="hud">
   <div data-k="pip"><span>PIP</span><em><i></i></em><b>–</b></div>
   <div data-k="dip"><span>DIP</span><em><i></i></em><b>–</b></div>
+  <ul class="legend">
+    <li><s style="background:#4f8fe6"></s>基節 → 仮想の中節</li>
+    <li><s style="background:#f09a3e"></s>末節 → 仮想の末節</li>
+    <li><s style="background:#e0503a;border-radius:50%"></s>支点（PIP）</li>
+  </ul>
 </div>
 <div id="bar">
   <button id="play" title="再生/停止">❚❚</button>
@@ -63,7 +72,7 @@
   <label>第1関節（DIP）の曲げ θd <span id="tdv"></span></label>
   <input id="td" type="range" min="0" max="90" step="0.5" value="10">
   <label class="stiff">ボールの硬さ <span id="stv"></span></label>
-  <input id="stiff" type="range" min="0" max="100" step="1" value="50">
+  <input id="stiff" type="range" min="0" max="100" step="1" value="30">
   <div class="ends"><span>やわらかい</span><span>かたい</span></div>
 </div>
 <script type="importmap">
