@@ -301,7 +301,41 @@ function closestOnSeg(a, b, p, out) {
 }
 const mat = { anchor: null, threadState: 'none', snapT: 0, pen: 0 };
 const ballVel = new Float32Array(ballRest.length);
-const SOFT = { spread: 2.6, squash: 0.55, bulge: 0.45, k: 520, c: 11 }; // squishiness knobs
+const SOFT = { spread: 2.6, squash: 0.55, bulge: 0.45, k: 520, c: 11 }; // squishiness knobs (set from STIFF)
+// Ball stiffness 0 (soft) .. 1 (hard). After the finger pad touches the ball, the displayed DIP flexion is scaled by
+// a display gain G (< 1): the harder the ball, the less the virtual finger sinks in (pseudo-haptic stiffness).
+let STIFF = 0.5, GAIN = 1;
+function setStiffness(v) {
+  STIFF = THREE.MathUtils.clamp(v, 0, 1);
+  GAIN = 0.45 - 0.4 * STIFF;
+  Object.assign(SOFT, { spread: 3.2 - 1.4 * STIFF, squash: 0.8 - 0.6 * STIFF, bulge: 0.55 - 0.3 * STIFF, k: 300 + 900 * STIFF, c: 8 + 14 * STIFF });
+}
+setStiffness(STIFF);
+// Penetration (m) of the virtual finger (middle + distal capsules) into the undeformed ball for angles (thp, thd).
+const _pq = V();
+function penetrationAt(thp, thd) {
+  const fr = fingerFrame(thp, thd);
+  const a = ROOT.clone().addScaledVector(fr.u, RF * 0.5);
+  const vDip = ROOT.clone().addScaledVector(fr.u, hand.Lm), vTip = vDip.clone().addScaledVector(fr.dDir, hand.Ld);
+  const d1 = closestOnSeg(a, vDip, BALL_C, _pq).distanceTo(BALL_C);
+  const d2 = closestOnSeg(vDip, vTip, BALL_C, _pq).distanceTo(BALL_C);
+  return Math.max(0, BALL_R + RF - Math.min(d1, d2));
+}
+// Pseudo-haptic stiffness: remember the last pose that did not touch the ball; while touching, show a pose between it
+// and the real pose so that the shown penetration is GAIN x the real one (PIP and DIP are both scaled).
+let freePose = null;
+function displayedPose(thp, thd) {
+  const pen = penetrationAt(thp, thd);
+  if (pen === 0) { freePose = [thp, thd]; return [thp, thd]; }
+  if (!freePose || penetrationAt(freePose[0], freePose[1]) > 0) return [thp, thd];
+  const want = GAIN * pen;
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 16; i++) {
+    const m = (lo + hi) / 2;
+    if (penetrationAt(freePose[0] + m * (thp - freePose[0]), freePose[1] + m * (thd - freePose[1])) < want) lo = m; else hi = m;
+  }
+  return [freePose[0] + lo * (thp - freePose[0]), freePose[1] + lo * (thd - freePose[1])];
+}
 function deformBall(segs, dt) {
   const pos = ballGeo.attributes.position.array;
   const N = pos.length / 3;
@@ -474,8 +508,11 @@ controls.addEventListener('start', () => { if (camMode !== 'orbit' && camMode !=
 $('trackBtn').onclick = () => { headTrack = !headTrack; $('trackBtn').classList.toggle('on', headTrack); $('trackBtn').textContent = headTrack ? '頭の位置に追従' : '目の位置を固定'; };
 function setManual(on) { manual = on; $('manual').classList.toggle('manual', on); $('autoBtn').hidden = !on; }
 for (const id of ['tp', 'td']) $(id).addEventListener('input', () => { if (!manual) setManual(true); });
+$('stiff').addEventListener('input', (e) => { setStiffness(e.target.value / 100); $('stv').textContent = stiffLabel(); });
+const stiffLabel = () => (STIFF < 0.25 ? 'とてもやわらかい' : STIFF < 0.6 ? 'やわらかめ' : STIFF < 0.85 ? 'かため' : 'かたい');
+$('stv').textContent = stiffLabel();
 $('autoBtn').onclick = () => { setManual(false); playing = true; $('play').textContent = '❚❚'; };
-function resetMaterial() { mat.anchor = null; mat.threadState = 'none'; }
+function resetMaterial() { mat.anchor = null; mat.threadState = 'none'; freePose = null; }
 
 // ---------- frame ----------
 let last = performance.now();
@@ -494,7 +531,8 @@ function frame(dt) {
   const contact = lift < 0.0008;
   const appear = THREE.MathUtils.clamp(1 - lift / 0.0008, 0, 1);
   // virtual finger
-  const fr = fingerFrame(thp, thd);
+  const [thpV, thdV] = contact ? displayedPose(thp, thd) : [thp, thd];   // displayed (virtual) angles
+  const fr = fingerFrame(thpV, thdV);
   const vDip = ROOT.clone().addScaledVector(fr.u, hand.Lm);
   const vTip = vDip.clone().addScaledVector(fr.dDir, hand.Ld);
   placeCapsule(vMid, ROOT, vDip); placeCapsule(vDist, vDip, vTip);
@@ -562,6 +600,7 @@ window.stage = {
   probe2() { poseHand(68*DEG, 10*DEG, 0); const o = {}; for (const n of ['wrist','index-finger-phalanx-proximal','index-finger-phalanx-intermediate','index-finger-phalanx-distal','index-finger-tip','middle-finger-phalanx-proximal','middle-finger-phalanx-intermediate','middle-finger-tip']) o[n] = hand.bones[n].getWorldPosition(V()).toArray().map((x) => +x.toFixed(4)); o.ROOT = ROOT.toArray(); o.H = H.toArray().map((x)=>+x.toFixed(3)); return JSON.stringify(o); },
   get ready() { return ready; },
   setHeadTrack(v) { headTrack = v; },
+  setStiffness,
   camPose(px, py, pz, tx, ty, tz, fov = 35) { controls.autoRotate = false; camera.position.set(px, py, pz); controls.target.set(tx, ty, tz); camera.fov = fov; camera.updateProjectionMatrix(); camera.lookAt(controls.target); camera.updateMatrixWorld(true); },
   ROOT: ROOT.toArray(), EYE: EYE.toArray(), SIDE: SIDE_DIR.toArray(), DURATION,
   setView, setCam: (n) => setCam(n, true),

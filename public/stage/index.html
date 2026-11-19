@@ -19,7 +19,9 @@
   #manual { position:fixed; right:16px; bottom:84px; background:var(--ui); backdrop-filter:blur(12px); border:1px solid var(--line); border-radius:14px; padding:12px 14px; width:230px; }
   #manual .mhead { display:flex; justify-content:space-between; align-items:center; font-weight:600; min-height:26px; }
   #manual #autoBtn { border:0; background:var(--ink); color:#fff; border-radius:8px; padding:4px 10px; font:inherit; cursor:pointer; }
-  #manual:not(.manual) input { opacity:.55; }
+  #manual:not(.manual) input:not(#stiff) { opacity:.55; }
+  #manual label.stiff { margin-top:12px; padding-top:10px; border-top:1px solid var(--line); }
+  #manual .ends { display:flex; justify-content:space-between; font-size:11px; opacity:.5; }
   @media (max-width: 640px) { #manual { left:16px; width:auto; bottom:auto; top:96px; } #scrub { width:120px; } }
   #manual label { display:block; margin:6px 0 2px; opacity:.7; }
   #manual input { width:100%; accent-color:var(--accent); }
@@ -60,6 +62,9 @@
   <input id="tp" type="range" min="30" max="180" step="0.5" value="68">
   <label>第1関節（DIP）の曲げ θd <span id="tdv"></span></label>
   <input id="td" type="range" min="0" max="90" step="0.5" value="10">
+  <label class="stiff">ボールの硬さ <span id="stv"></span></label>
+  <input id="stiff" type="range" min="0" max="100" step="1" value="50">
+  <div class="ends"><span>やわらかい</span><span>かたい</span></div>
 </div>
 <script type="importmap">
 { "imports": {
