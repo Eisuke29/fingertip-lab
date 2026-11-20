@@ -5,58 +5,85 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pivot Finger Stage</title>
 <style>
-  :root { --bg:#ebe8e3; --ink:#1d2120; --ui:rgba(255,255,255,.82); --line:rgba(0,0,0,.08); --accent:#2f6f5b; }
+  :root { --bg:#ebe8e3; --ink:#1d2120; --sub:#6b726f; --ui:rgba(255,255,255,.9); --line:rgba(0,0,0,.08); --accent:#2f6f5b; --soft:rgba(0,0,0,.045); }
   html,body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:13px/1.4 "Hiragino Sans","Noto Sans JP",system-ui,sans-serif; overflow:hidden; }
   canvas { display:block; }
-  #bar { position:fixed; left:50%; bottom:16px; transform:translateX(-50%); display:flex; gap:10px; align-items:center;
-         background:var(--ui); backdrop-filter:blur(12px); border:1px solid var(--line); border-radius:14px; padding:8px 10px; box-shadow:0 6px 24px rgba(0,0,0,.08); max-width:calc(100vw - 32px); flex-wrap:wrap; justify-content:center; }
-  #bar button { border:0; background:transparent; padding:6px 10px; border-radius:9px; cursor:pointer; font:inherit; color:inherit; white-space:nowrap; }
-  #bar button:hover { background:rgba(0,0,0,.05); }
-  #bar button.on { background:var(--ink); color:#fff; }
-  .seg { display:flex; gap:2px; background:rgba(0,0,0,.04); border-radius:10px; padding:2px; }
-  #scrub { width:180px; accent-color:var(--accent); }
-  #time { font-variant-numeric:tabular-nums; width:3.2em; text-align:right; opacity:.6; }
-  #manual { position:fixed; right:16px; bottom:84px; background:var(--ui); backdrop-filter:blur(12px); border:1px solid var(--line); border-radius:14px; padding:12px 14px; width:230px; }
-  #manual .mhead { display:flex; justify-content:space-between; align-items:center; font-weight:600; min-height:26px; }
-  #manual #autoBtn { border:0; background:var(--ink); color:#fff; border-radius:8px; padding:4px 10px; font:inherit; cursor:pointer; }
+  button { font:inherit; color:inherit; }
+  .card { background:var(--ui); backdrop-filter:blur(14px); border:1px solid var(--line); border-radius:16px; box-shadow:0 8px 28px rgba(0,0,0,.08); }
+
+  /* ---------- bottom dock ---------- */
+  #dock { position:fixed; left:16px; bottom:16px; padding:10px 14px 12px; display:flex; flex-direction:column; gap:10px; max-width:calc(100vw - 300px); box-sizing:border-box; }
+  #playrow { display:flex; align-items:center; gap:10px; }
+  #play { width:34px; height:34px; border-radius:50%; border:0; background:var(--ink); color:#fff; cursor:pointer; font-size:12px; flex:none; }
+  #scrub { flex:1; min-width:120px; accent-color:var(--accent); }
+  #time { font-variant-numeric:tabular-nums; width:3.4em; text-align:right; color:var(--sub); flex:none; }
+  #groups { display:flex; gap:18px; align-items:flex-end; }
+  .group { display:flex; flex-direction:column; gap:4px; flex:none; }
+  .group > label { font-size:11px; font-weight:600; letter-spacing:.06em; color:var(--sub); padding-left:4px; }
+  .seg { display:flex; gap:2px; background:var(--soft); border-radius:10px; padding:3px; }
+  .seg button { border:0; background:transparent; padding:6px 11px; border-radius:8px; cursor:pointer; white-space:nowrap; }
+  .seg button:hover { background:rgba(0,0,0,.05); }
+  .seg button.on { background:var(--ink); color:#fff; }
+  #faceBtn { border:1px solid var(--accent); color:var(--accent); background:#fff; border-radius:9px; padding:6px 10px; cursor:pointer; white-space:nowrap; margin-left:6px; }
+  #faceBtn.on { background:var(--accent); color:#fff; }
+  .row { display:flex; align-items:center; }
+  .switch { display:flex; align-items:center; gap:8px; cursor:pointer; padding:6px 4px; user-select:none; }
+  .switch i { width:34px; height:20px; border-radius:10px; background:rgba(0,0,0,.18); position:relative; transition:background .15s; flex:none; }
+  .switch i::after { content:""; position:absolute; left:2px; top:2px; width:16px; height:16px; border-radius:50%; background:#fff; transition:left .15s; box-shadow:0 1px 3px rgba(0,0,0,.2); }
+  .switch.on i { background:var(--accent); } .switch.on i::after { left:16px; }
+
+  /* ---------- right: controls ---------- */
+  #manual { position:fixed; right:16px; bottom:16px; width:250px; padding:12px 14px 14px; box-sizing:border-box; }
+  #manual .mhead { display:flex; justify-content:space-between; align-items:center; font-weight:700; min-height:26px; }
+  #manual .mhead button { border:0; background:var(--ink); color:#fff; border-radius:8px; padding:4px 10px; cursor:pointer; }
+  #manual .sec { margin-top:10px; padding-top:10px; border-top:1px solid var(--line); }
+  #manual label { display:flex; justify-content:space-between; margin:6px 0 2px; color:var(--sub); }
+  #manual label span { color:var(--ink); font-variant-numeric:tabular-nums; }
+  #manual input[type=range] { width:100%; accent-color:var(--accent); }
   #manual:not(.manual) input:not(#stiff) { opacity:.55; }
-  #manual label.stiff { margin-top:12px; padding-top:10px; border-top:1px solid var(--line); }
-  #manual .objrow { display:flex; justify-content:space-between; align-items:center; margin-top:10px; opacity:.85; }
-  #manual .objrow .seg button { border:0; background:transparent; padding:3px 9px; border-radius:7px; font:inherit; cursor:pointer; }
-  #manual .objrow .seg button.on { background:var(--ink); color:#fff; }
-  #manual .ends { display:flex; justify-content:space-between; font-size:11px; opacity:.5; }
-  #views { padding:3px; } #views button { padding:7px 14px; font-weight:600; }
+  #manual .objrow { display:flex; justify-content:space-between; align-items:center; color:var(--sub); }
+  #manual .ends { display:flex; justify-content:space-between; font-size:11px; color:var(--sub); }
   #manualToggle { display:none; }
-  @media (max-width: 640px) {
-    #scrub { width:110px; }
-    #hud { transform:scale(.82); transform-origin:0 0; left:10px; top:10px; } #hud .legend { display:none !important; }
-    #manualToggle { display:block; position:fixed; right:16px; top:12px; border:1px solid var(--line); background:var(--ui); border-radius:10px; padding:6px 10px; font:inherit; }
-    #manual { left:16px; width:auto; bottom:auto; top:52px; display:none; } #manual.open { display:block; }
-  }
-  #manual label { display:block; margin:6px 0 2px; opacity:.7; }
-  #manual input { width:100%; accent-color:var(--accent); }
-  body.capture #bar, body.capture #manual { display:none !important; }
-  #hud { position:fixed; left:20px; top:18px; background:rgba(255,255,255,.85); padding:10px 14px; border-radius:12px; display:flex; flex-direction:column; gap:8px; font:600 13px/1 "Hiragino Sans","Noto Sans JP",system-ui,sans-serif; color:#3a403e; pointer-events:none; }
-  #hud div { display:grid; grid-template-columns:44px 120px 44px; align-items:center; gap:8px; }
-  #hud span { opacity:.6; letter-spacing:.04em; }
+
+  /* ---------- top-left: angles + legend ---------- */
+  #hud { position:fixed; left:16px; top:16px; padding:10px 14px; display:flex; flex-direction:column; gap:8px; font:600 13px/1 "Hiragino Sans","Noto Sans JP",system-ui,sans-serif; color:#3a403e; pointer-events:none; }
+  #hud div { display:grid; grid-template-columns:40px 120px 44px; align-items:center; gap:8px; }
+  #hud span { color:var(--sub); letter-spacing:.04em; }
   #hud em { display:block; height:4px; background:rgba(0,0,0,.08); border-radius:2px; overflow:hidden; }
-  #hud i { display:block; height:100%; background:#2f6f5b; }
+  #hud i { display:block; height:100%; }
   #hud [data-k=pip] i { background:#4f8fe6; } #hud [data-k=dip] i { background:#f09a3e; }
-  #hud .legend { list-style:none; margin:4px 0 0; padding:6px 0 0; border-top:1px solid rgba(0,0,0,.08); display:flex; flex-direction:column; gap:4px; font-weight:500; font-size:12px; }
+  #hud b { font-variant-numeric:tabular-nums; text-align:right; font-weight:600; }
+  #hud .legend { list-style:none; margin:2px 0 0; padding:7px 0 0; border-top:1px solid var(--line); display:flex; flex-direction:column; gap:4px; font-weight:500; font-size:12px; }
   #hud .legend li { display:flex; align-items:center; gap:7px; }
   #hud .legend s { width:10px; height:10px; border-radius:3px; display:inline-block; }
-  body.capture #hud { transform:scale(2); transform-origin:0 0; left:36px; top:32px; }
-  #hud b { font-variant-numeric:tabular-nums; text-align:right; font-weight:600; }
-  /* 2D screen panel: the canvas draws the image; this element is the tablet bezel + caption around it */
+
+  /* ---------- top-right: the 2D screen (canvas draws the image; this is the bezel + caption) ---------- */
   #panel2d { position:fixed; border:9px solid #141618; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.18); cursor:zoom-in; }
-  #panel2d.big { cursor:zoom-out; box-shadow:0 0 0 100vmax rgba(235,232,227,.55), 0 10px 40px rgba(0,0,0,.25); }
-  #panel2d span { position:absolute; left:-9px; right:-9px; top:-34px; text-align:center; font:600 12px/1.2 "Hiragino Sans","Noto Sans JP",system-ui,sans-serif; color:#3a403e;
-                  background:rgba(255,255,255,.85); border-radius:8px; padding:5px 6px; }
+  #panel2d.big { cursor:zoom-out; box-shadow:0 0 0 100vmax rgba(235,232,227,.6), 0 10px 40px rgba(0,0,0,.25); }
+  #panel2d span { position:absolute; left:-9px; right:-9px; top:-32px; text-align:center; font:600 12px/1.2 "Hiragino Sans","Noto Sans JP",system-ui,sans-serif; color:#3a403e; background:var(--ui); border:1px solid var(--line); border-radius:8px; padding:5px 6px; }
+
+  #faceVideo { position:fixed; left:16px; bottom:16px; width:160px; border-radius:12px; transform:scaleX(-1); box-shadow:0 6px 20px rgba(0,0,0,.15); }
+  #faceMsg { position:fixed; left:50%; top:16px; transform:translateX(-50%); padding:8px 12px; }
+
+  /* capture (scripted video) / clean (no text at all) */
+  body.capture #dock, body.capture #manual, body.capture #manualToggle { display:none !important; }
+  body.capture #hud { transform:scale(2); transform-origin:0 0; left:36px; top:32px; }
   body.capture #panel2d span { font-size:20px; top:-46px; }
+  body.clean #hud, body.clean #panel2d span { display:none !important; }
+
+  /* ---------- narrow screens ---------- */
+  @media (max-width: 760px) {
+    #dock { left:8px; right:8px; bottom:8px; max-width:none; padding:8px 10px 10px; }
+    #groups { flex-wrap:wrap; gap:8px 12px; } .seg button { padding:6px 9px; }
+    #hud { transform:scale(.82); transform-origin:0 0; left:8px; top:8px; } #hud .legend { display:none !important; }
+    #manualToggle { display:block; position:fixed; right:12px; top:10px; padding:6px 12px; cursor:pointer; }
+    #manual { left:8px; right:8px; width:auto; bottom:auto; top:52px; display:none; } #manual.open { display:block; }
+    #faceVideo { width:110px; bottom:auto; top:120px; }
+  }
 </style>
 </head>
 <body>
-<div id="hud">
+<div id="hud" class="card">
   <div data-k="pip"><span>PIP</span><em><i></i></em><b>–</b></div>
   <div data-k="dip"><span>DIP</span><em><i></i></em><b>–</b></div>
   <ul class="legend">
@@ -66,41 +93,68 @@
     <li><s style="background:#2f6f5b;border-radius:50%"></s>画面の絵を決める目</li>
   </ul>
 </div>
+
+<video id="faceVideo" hidden muted playsinline></video>
+<div id="faceMsg" class="card" hidden></div>
 <div id="panel2d" title="クリックで拡大／縮小"><span>iPadに映る2D画面</span></div>
-<div id="bar">
-  <button id="play" title="再生/停止">❚❚</button>
-  <input id="scrub" type="range" min="0" max="1000" value="0">
-  <span id="time">0.0</span>
-  <div class="seg" id="views">
-    <button data-view="experience" class="on" title="スペースキーで切り替え">実際の表示</button>
-    <button data-view="structure" title="スペースキーで切り替え">仕組み</button>
+
+<div id="dock" class="card">
+  <div id="playrow">
+    <button id="play" title="再生／停止">❚❚</button>
+    <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="時間">
+    <span id="time">0.0</span>
   </div>
-  <div class="seg" id="cams">
-    <button data-cam="auto" class="on">おまかせ</button>
-    <button data-cam="pov">体験者の目</button>
-    <button data-cam="side">横から</button>
-    <button data-cam="orbit">360°</button>
+  <div id="groups">
+    <div class="group"><label>視点</label>
+      <div class="seg" id="cams">
+        <button data-cam="auto" class="on">おまかせ</button>
+        <button data-cam="pov">体験者の目</button>
+        <button data-cam="side">横から</button>
+        <button data-cam="orbit">360°</button>
+      </div>
+    </div>
+    <div class="group"><label>見え方（Space）</label>
+      <div class="seg" id="views">
+        <button data-view="experience" class="on">実際</button>
+        <button data-view="structure">仕組み</button>
+      </div>
+    </div>
+    <div class="group"><label>画面の描き方</label>
+      <div class="row">
+        <div class="seg" id="smode">
+          <button data-mode="fixed" class="on" title="ふつうのタブレット：決めた目の位置で1枚の絵に決まる">固定</button>
+          <button data-mode="track" title="前面カメラで目の位置を測り、見ている位置に合わせて画面の絵を描き直す">視線追従</button>
+        </div>
+        <button id="faceBtn" hidden title="パソコンのカメラで自分の頭の位置を測り（MediaPipe、映像は端末内で処理）、視点と画面を動かす">自分の顔で試す</button>
+      </div>
+    </div>
+    <div class="group"><label>2D画面</label>
+      <div class="switch on" id="panelBtn" role="switch" aria-checked="true"><i></i><span>表示</span></div>
+    </div>
   </div>
-  <button id="panelBtn" class="on" title="iPadに実際に映る2Dの画面を表示">2D画面</button>
 </div>
-<button id="manualToggle" onclick="document.getElementById('manual').classList.toggle('open')">角度</button>
-<div id="manual">
-  <div class="mhead">角度を変える<button id="autoBtn" hidden>自動に戻す</button></div>
+
+<button id="manualToggle" class="card">操作</button>
+<div id="manual" class="card">
+  <div class="mhead">操作<button id="autoBtn" hidden>自動に戻す</button></div>
   <label>第2関節（PIP）の角度 θp <span id="tpv"></span></label>
   <input id="tp" type="range" min="40" max="120" step="0.5" value="68">
   <label>第1関節（DIP）の曲げ θd <span id="tdv"></span></label>
   <input id="td" type="range" min="0" max="90" step="0.5" value="10">
-  <div class="objrow">さわるもの <span class="seg" id="objs"><button data-obj="ball" class="on">ボール</button><button data-obj="string">糸</button></span></div>
-  <label class="stiff">ボールの硬さ <span id="stv"></span></label>
-  <input id="stiff" type="range" min="0" max="100" step="1" value="30">
-  <div class="ends"><span>やわらかい</span><span>かたい</span></div>
+  <div class="sec objrow">さわるもの <span class="seg" id="objs"><button data-obj="ball" class="on">ボール</button><button data-obj="string">糸</button></span></div>
+  <div class="sec">
+    <label>ボールの硬さ <span id="stv"></span></label>
+    <input id="stiff" type="range" min="0" max="100" step="1" value="30">
+    <div class="ends"><span>やわらかい</span><span>かたい</span></div>
+  </div>
 </div>
+<script>document.getElementById('manualToggle').onclick = () => document.getElementById('manual').classList.toggle('open');</script>
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="./main.js?v=20261120d"></script>
+<script type="module" src="./main.js?v=20261120f"></script>
 </body>
 </html>

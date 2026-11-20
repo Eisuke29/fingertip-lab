@@ -15,6 +15,7 @@ const DEG = Math.PI / 180;
 const params = new URLSearchParams(location.search);
 const CAPTURE = params.has('capture');
 if (CAPTURE) document.body.classList.add('capture');
+if (params.has('clean')) document.body.classList.add('clean');
 
 // ---------- dimensions (meters) ----------
 const PAD = { w: 0.1785, l: 0.2476, t: 0.0061, bezel: 0.0090 };
@@ -166,9 +167,9 @@ quadScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicM
 let panelOn = !new URLSearchParams(location.search).has('nopanel'), panelBig = false;
 function panelRect() {
   const W = innerWidth, Hh = innerHeight, mobile = W < 640;
-  const barH = CAPTURE ? 0 : (mobile ? 150 : 110);               // keep the enlarged panel above the control bar
+  const barH = CAPTURE ? 0 : (mobile ? 150 : 130);               // keep the enlarged panel above the control bar
   let h = panelBig ? Math.round(Hh - barH - 70) : Math.round(Hh * (mobile ? 0.26 : 0.42));
-  if (!panelBig && !mobile && !CAPTURE) h = Math.min(h, Hh - 84 - 300 - 48);      // keep clear of the angle panel
+  if (!panelBig && !mobile && !CAPTURE) h = Math.min(h, Hh - 16 - 330 - 60);      // keep clear of the control card (bottom right)
   h = Math.max(120, h);
   const w = Math.round(h * SCREEN.w / SCREEN.l);
   const x = panelBig ? Math.round((W - w) / 2) : W - w - (mobile ? 14 : 30);
@@ -189,6 +190,17 @@ const sightLines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.
 { const c = [V(-SCREEN.w / 2, 0, SCREEN.l / 2), V(SCREEN.w / 2, 0, SCREEN.l / 2), V(SCREEN.w / 2, 0, -SCREEN.l / 2), V(-SCREEN.w / 2, 0, -SCREEN.l / 2)];
   const pts = []; for (const k of c) pts.push(EYE, k); sightLines.geometry.setFromPoints(pts); }
 eyeDot.position.copy(EYE); scene.add(eyeDot, sightLines); eyeDot.visible = sightLines.visible = false;
+const SCREEN_CORNERS = [V(-SCREEN.w / 2, 0, SCREEN.l / 2), V(SCREEN.w / 2, 0, SCREEN.l / 2), V(SCREEN.w / 2, 0, -SCREEN.l / 2), V(-SCREEN.w / 2, 0, -SCREEN.l / 2)];
+function updateSight(eye) { const pts = []; for (const k of SCREEN_CORNERS) pts.push(eye, k); sightLines.geometry.setFromPoints(pts); eyeDot.position.copy(eye); }
+// front camera (top bezel). In eye-tracking mode it measures where the viewer's eyes are (e.g. MediaPipe Face Landmarker).
+const frontCam = new THREE.Mesh(new THREE.CircleGeometry(0.0016, 24), new THREE.MeshBasicMaterial({ color: 0x1b1f22 }));
+frontCam.rotation.x = -Math.PI / 2; frontCam.position.set(0, 0.0004, -PAD.l / 2 + 0.0045); scene.add(frontCam);
+const frontLed = new THREE.Mesh(new THREE.RingGeometry(0.0019, 0.0026, 24), new THREE.MeshBasicMaterial({ color: 0x5fd39a, transparent: true, opacity: 0, toneMapped: false }));
+frontLed.rotation.x = -Math.PI / 2; frontLed.position.copy(frontCam.position); scene.add(frontLed);
+// Screen mode: 'fixed' = an ordinary tablet (one image, made for the fixed visitor eye)
+//              'track' = the image is re-rendered for the viewer's current eye position (front-camera eye tracking)
+let screenMode = 'fixed';
+const curEye = V().copy(EYE);
 
 // ---------- virtual world (inside the screen) ----------
 const VBG = new THREE.Color(0x0a0c0c);
@@ -774,6 +786,35 @@ let viewOverride = null;
 setView('experience', true, true);
 addEventListener('keydown', (e) => { if (e.code === 'Space' && !(e.target instanceof HTMLInputElement)) { e.preventDefault(); setView(view === 'structure' ? 'experience' : 'structure'); } });
 
+// ---------- face tracking (optional, the visitor's own webcam) ----------
+const face = { on: false, lm: null, video: null, base: null, off: V(), lastT: -1 };
+async function startFace() {
+  const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3';
+  const { FilesetResolver, FaceLandmarker } = await import(`${MP}/vision_bundle.mjs`);
+  const fs = await FilesetResolver.forVisionTasks(`${MP}/wasm`);
+  face.lm = await FaceLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task', delegate: 'GPU' }, runningMode: 'VIDEO', numFaces: 1 });
+  const v = document.getElementById('faceVideo');
+  v.srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false });
+  await v.play(); face.video = v; face.base = null; face.on = true;
+}
+function stopFace() {
+  face.on = false; if (face.video?.srcObject) { face.video.srcObject.getTracks().forEach((t) => t.stop()); face.video.srcObject = null; }
+}
+const ENV_RIGHT = envToDev(V(1, 0, 0)), EYE_FWD = EYE.clone().sub(V(0, 0, 0)).normalize();
+function updateFace() {
+  if (!face.on || !face.video || face.video.readyState < 2 || face.video.currentTime === face.lastT) return;
+  face.lastT = face.video.currentTime;
+  const r = face.lm.detectForVideo(face.video, performance.now());
+  const L = r.faceLandmarks?.[0]; if (!L) return;
+  const a = L[33], b = L[263];                                   // outer eye corners
+  const x = (a.x + b.x) / 2, y = (a.y + b.y) / 2, ipd = Math.hypot(a.x - b.x, a.y - b.y);
+  if (!face.base) face.base = { x, y, ipd };
+  // the webcam is not mirrored: moving to your right moves the face left in the image
+  const tgt = V().addScaledVector(ENV_RIGHT, (face.base.x - x) * 0.6).addScaledVector(ENV_UP, (face.base.y - y) * 0.45)
+    .addScaledVector(EYE_FWD, (face.base.ipd / ipd - 1) * 0.35);
+  face.off.lerp(tgt, 0.35);
+}
+
 // ---------- UI ----------
 let playing = !CAPTURE, time = 0, manual = false, ready = false;
 const $ = (id) => document.getElementById(id);
@@ -874,7 +915,10 @@ function render() {
   camera.updateMatrixWorld(true);
   // the screen image: rendered once for the fixed visitor eye, independent of the 3D camera
   scene.background = VBG; scene.fog = null; scene.environmentIntensity = 0.12;
-  if (panelOn || ghostK < 0.99) renderScreen(screen2D, EYE);
+  if (screenMode === 'track') { const e = camera.getWorldPosition(V()); if (e.y > 0) { if (e.y < 0.05) e.y = 0.05; curEye.copy(e); } }
+  else curEye.copy(EYE);
+  updateSight(curEye); frontLed.material.opacity = screenMode === 'track' ? 0.9 : 0;
+  if (panelOn || ghostK < 0.99) renderScreen(screen2D, curEye);
   renderer.setRenderTarget(null);
   scene.background = GALLERY; scene.fog = new THREE.Fog(GALLERY, 2.2, 6); scene.environmentIntensity = 0.55;
   renderer.render(scene, camera);
@@ -898,7 +942,9 @@ function tick(now) {
   }
   if (ghostK !== ghostTarget) { ghostK = THREE.MathUtils.clamp(ghostK + Math.sign(ghostTarget - ghostK) * dt / 0.5, 0, 1); applyGhost(); }
   if (pendingSeek !== null) { seekTo(pendingSeek); pendingSeek = null; }
-  if (camMode === 'auto') applyAutoCam(time, dt); else controls.update();
+  updateFace();
+  if (face.on) { camera.position.copy(EYE).add(face.off); controls.target.copy(CAMS.pov.target); camera.fov = 30; camera.updateProjectionMatrix(); camera.lookAt(controls.target); }
+  else if (camMode === 'auto') applyAutoCam(time, dt); else controls.update();
   frame(dt);
   render();
   if (!CAPTURE) requestAnimationFrame(tick);
@@ -907,6 +953,20 @@ if (!CAPTURE) requestAnimationFrame(tick);
 
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); layoutPanel(); });
 $('panel2d').onclick = () => { panelBig = !panelBig; layoutPanel(); };
+function setScreenMode(m) {
+  screenMode = m; document.querySelectorAll('#smode button').forEach((x) => x.classList.toggle('on', x.dataset.mode === m));
+  $('faceBtn').hidden = m !== 'track'; if (m !== 'track' && face.on) { stopFace(); $('faceBtn').classList.remove('on'); }
+}
+for (const b of document.querySelectorAll('#smode button')) b.onclick = () => setScreenMode(b.dataset.mode);
+$('faceBtn').onclick = async () => {
+  if (face.on) { stopFace(); $('faceBtn').classList.remove('on'); $('faceVideo').hidden = true; setCam('auto'); return; }
+  $('faceBtn').textContent = '準備中…';
+  try { await startFace(); $('faceBtn').classList.add('on'); $('faceVideo').hidden = false; camMode = 'face'; document.querySelectorAll('#cams button').forEach((x) => x.classList.remove('on')); }
+  catch (err) { console.warn('[stage] face tracking failed', err); alertBox('カメラを開けませんでした（' + (err.message || err) + '）'); }
+  $('faceBtn').textContent = '自分の顔で試す';
+};
+function alertBox(msg) { const el = $('faceMsg'); el.textContent = msg; el.hidden = false; setTimeout(() => { el.hidden = true; }, 4000); }
+setScreenMode('fixed');
 $('panelBtn').onclick = () => { panelOn = !panelOn; panelBig = false; $('panelBtn').classList.toggle('on', panelOn); layoutPanel(); };
 $('panelBtn').classList.toggle('on', panelOn);
 layoutPanel();
@@ -916,6 +976,7 @@ window.stage = {
   get ready() { return ready; },
   setHeadTrack() {},   // kept for old scripts; the display no longer follows the viewer
   setStiffness,
+  setScreenMode: (m) => setScreenMode(m), setHud(on) { document.getElementById('hud').style.display = on ? '' : 'none'; },
   setPanel(on, big = false) { panelOn = on; panelBig = big; layoutPanel(); },
   // read-only handles for automated testing
   dbg: () => ({ vRoot, PIP_H, groupMinY, VGROUPS, THREE, scene, camera, hand, device, envG, ball, vMid, vDist, ROOT, H, UP, RF, BALL_R, BALL_C, EYE, TILT, ENV_UP, PAD, SCREEN, fingerFrame, K, sample, DEG, strA, strB, str }),
