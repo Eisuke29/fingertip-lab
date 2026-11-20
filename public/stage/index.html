@@ -21,6 +21,9 @@
   #manual #autoBtn { border:0; background:var(--ink); color:#fff; border-radius:8px; padding:4px 10px; font:inherit; cursor:pointer; }
   #manual:not(.manual) input:not(#stiff) { opacity:.55; }
   #manual label.stiff { margin-top:12px; padding-top:10px; border-top:1px solid var(--line); }
+  #manual .objrow { display:flex; justify-content:space-between; align-items:center; margin-top:10px; opacity:.85; }
+  #manual .objrow .seg button { border:0; background:transparent; padding:3px 9px; border-radius:7px; font:inherit; cursor:pointer; }
+  #manual .objrow .seg button.on { background:var(--ink); color:#fff; }
   #manual .ends { display:flex; justify-content:space-between; font-size:11px; opacity:.5; }
   @media (max-width: 640px) { #manual { left:16px; width:auto; bottom:auto; top:96px; } #scrub { width:120px; } }
   #manual label { display:block; margin:6px 0 2px; opacity:.7; }
@@ -71,6 +74,7 @@
   <input id="tp" type="range" min="30" max="180" step="0.5" value="68">
   <label>第1関節（DIP）の曲げ θd <span id="tdv"></span></label>
   <input id="td" type="range" min="0" max="90" step="0.5" value="10">
+  <div class="objrow">さわるもの <span class="seg" id="objs"><button data-obj="ball" class="on">ボール</button><button data-obj="string">糸</button></span></div>
   <label class="stiff">ボールの硬さ <span id="stv"></span></label>
   <input id="stiff" type="range" min="0" max="100" step="1" value="30">
   <div class="ends"><span>やわらかい</span><span>かたい</span></div>

@@ -46,6 +46,11 @@ scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 scene.environmentIntensity = 0.55;
 
 const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.01, 20);
+// Showcase tilt: the tablet leans back by TILT on a stand. Gravity "up" in the device frame:
+const TILT = 35 * Math.PI / 180;
+const ENV_UP = new THREE.Vector3(0, Math.cos(TILT), -Math.sin(TILT));
+camera.up.copy(ENV_UP);
+const envG = new THREE.Group(); envG.rotation.x = -TILT;
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.target.copy(ROOT).add(V(0, -0.01, 0));
@@ -55,30 +60,33 @@ controls.minDistance = 0.12; controls.maxDistance = 2.0;
 const L_VIRTUAL = 1, L_SCREENLIGHT = 2;
 
 // ---------- lights (real world) ----------
-scene.add(new THREE.HemisphereLight(0xffffff, 0xd9d2c7, 0.9));
+scene.add(envG);
+envG.add(new THREE.HemisphereLight(0xffffff, 0xd9d2c7, 0.9));
 const key = new THREE.DirectionalLight(0xffffff, 2.2);
 key.position.set(-0.35, 0.9, 0.45);
 key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
 Object.assign(key.shadow.camera, { left: -0.35, right: 0.35, top: 0.35, bottom: -0.35, near: 0.1, far: 2.5 });
 key.shadow.bias = -0.0004; key.shadow.radius = 4;
-scene.add(key);
-const rim = new THREE.DirectionalLight(0xfff4e8, 0.7); rim.position.set(0.6, 0.4, -0.6); scene.add(rim);
+envG.add(key);
+const rim = new THREE.DirectionalLight(0xfff4e8, 0.7); rim.position.set(0.6, 0.4, -0.6); envG.add(rim);
 
 // ---------- environment: gallery floor + pedestal ----------
 const PED_H = 0.92;
 const woodMat = new THREE.MeshStandardMaterial({ color: 0xd8c3a2, roughness: 0.72, transparent: true });
 const pedestal = new THREE.Mesh(new RoundedBoxGeometry(0.46, PED_H, 0.40, 3, 0.006), woodMat);
-pedestal.position.set(0, -PAD.t - PED_H / 2, 0.02);
+// env-frame height of the tablet's lower edge -> pedestal top just below it
+const PED_TOP = -(PAD.t * Math.cos(TILT) + (PAD.l / 2) * Math.sin(TILT)) - 0.012;
+pedestal.position.set(0, PED_TOP - PED_H / 2, 0.06);
 pedestal.receiveShadow = true; pedestal.castShadow = true;
-scene.add(pedestal);
+envG.add(pedestal);
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshStandardMaterial({ color: 0xdedad3, roughness: 0.35, metalness: 0 }));
-floor.rotation.x = -Math.PI / 2; floor.position.y = -PAD.t - PED_H; floor.receiveShadow = true;
-scene.add(floor);
+floor.rotation.x = -Math.PI / 2; floor.position.y = PED_TOP - PED_H; floor.receiveShadow = true;
+envG.add(floor);
 // a couple of distant blurred-ish plinths for gallery feel
 for (const [x, z, h] of [[-1.4, -1.6, 1.0], [1.7, -2.2, 0.8], [-2.4, 0.4, 0.9]]) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(0.45, h, 0.45), new THREE.MeshStandardMaterial({ color: 0xf3f1ed, roughness: 0.9 }));
-  m.position.set(x, floor.position.y + h / 2, z); m.receiveShadow = true; scene.add(m);
+  m.position.set(x, floor.position.y + h / 2, z); m.receiveShadow = true; envG.add(m);
 }
 
 // ---------- tablet ----------
@@ -89,6 +97,22 @@ body.position.y = -PAD.t / 2; body.castShadow = true; body.receiveShadow = true;
 const bezelMat = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.2, metalness: 0, transparent: true });
 const bezel = new THREE.Mesh(new RoundedBoxGeometry(PAD.w - 0.0016, 0.0004, PAD.l - 0.0016, 2, 0.0002), bezelMat);
 bezel.position.y = -0.0003; device.add(bezel);
+
+// showcase stand
+const standMat = new THREE.MeshStandardMaterial({ color: 0x9a9ea2, metalness: 0.7, roughness: 0.35, transparent: true });
+const standPlate = new THREE.Mesh(new RoundedBoxGeometry(PAD.w * 0.62, 0.004, PAD.l * 0.6, 2, 0.0015), standMat);
+standPlate.position.set(0, -PAD.t - 0.0022, -0.01); standPlate.castShadow = true; device.add(standPlate);
+const standLip = new THREE.Mesh(new RoundedBoxGeometry(PAD.w * 0.75, 0.012, 0.006, 2, 0.0015), standMat);
+standLip.position.set(0, -PAD.t + 0.003, PAD.l / 2 + 0.0035); standLip.castShadow = true; device.add(standLip);
+{ // leg from the plate's upper part down to the pedestal (env frame)
+  const pDev = V(0, -PAD.t - 0.004, -0.08), c = Math.cos(TILT), sn = Math.sin(TILT);
+  const yE = pDev.y * c - pDev.z * sn, zE = pDev.y * sn + pDev.z * c;
+  const h = yE - PED_TOP;
+  const leg = new THREE.Mesh(new RoundedBoxGeometry(0.05, h, 0.006, 2, 0.002), standMat);
+  leg.position.set(0, PED_TOP + h / 2, zE - 0.004); leg.castShadow = true; envG.add(leg);
+  const foot = new THREE.Mesh(new RoundedBoxGeometry(0.12, 0.006, 0.16, 2, 0.002), standMat);
+  foot.position.set(0, PED_TOP + 0.003, zE + 0.05); foot.castShadow = true; foot.receiveShadow = true; envG.add(foot);
+}
 
 // screen: render target filled from the visitor's eye (off-axis projection)
 const RT_W = 1024, RT_H = Math.round(1024 * SCREEN.l / SCREEN.w);
@@ -189,6 +213,81 @@ guide.renderOrder = 10; guide.frustumCulled = false; scene.add(guide);
 const pivotDot = new THREE.Mesh(new THREE.SphereGeometry(0.0022, 20, 12), new THREE.MeshBasicMaterial({ color: 0xe0503a, depthTest: false }));
 pivotDot.renderOrder = 11; scene.add(pivotDot);
 
+// ---------- taut thread (cut task) ----------
+// A thread stretched across the finger's path inside the screen. STRING.strength = 0: cut on first touch.
+// (Later: >0 lets the finger push the thread aside and it only snaps beyond a stretch threshold.)
+const STRING = { strength: 0, segs: 28, radius: 0.0009 };
+const stringMat = new THREE.MeshStandardMaterial({ color: 0xff5d6c, roughness: 0.45, emissive: 0xff5d6c, emissiveIntensity: 0.35 });
+const stringMeshes = [0, 1].map(() => { const m = new THREE.Mesh(new THREE.BufferGeometry(), stringMat); m.layers.set(L_VIRTUAL); m.castShadow = true; m.frustumCulled = false; scene.add(m); return m; });
+const anchorMat = new THREE.MeshStandardMaterial({ color: 0x6c7377, metalness: 0.6, roughness: 0.4 });
+const anchors = [0, 1].map(() => { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.0025, 0.0025, 0.012, 16), anchorMat); m.layers.set(L_VIRTUAL); scene.add(m); return m; });
+let strA = V(), strB = V();
+const str = { cut: false, cutT: 0, ropes: null };
+function layoutString() {
+  const fr = fingerFrame(68 * DEG, 35 * DEG);
+  const vDip = ROOT.clone().addScaledVector(fr.u, hand.Lm);
+  // just outside the finger pad at DIP 40° -> touched while flexing, clear of the relaxed finger
+  const c = vDip.clone().addScaledVector(fr.dDir, hand.Ld * 0.6).addScaledVector(fr.nD, RF + 0.003);
+  // across the screen (mostly left-right for the visitor) while still crossing the finger plane at c
+  const lat = SIDE_DIR.clone();   // crosses the finger plane at right angles -> only the finger pad can reach it
+  strA = c.clone().addScaledVector(lat, -0.05); strB = c.clone().addScaledVector(lat, 0.05);
+  anchors[0].position.copy(strA); anchors[1].position.copy(strB);
+  for (const a of anchors) a.quaternion.setFromUnitVectors(UP, ENV_UP);
+}
+function resetString() { str.cut = false; str.cutT = 0; str.ropes = null; }
+function ropeTube(mesh, pts) {
+  mesh.geometry.dispose();
+  mesh.geometry = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), Math.max(8, pts.length * 2), STRING.radius, 8, false);
+}
+function updateString(dt, show, fingerSegs) {
+  for (const m of [...stringMeshes, ...anchors]) m.visible = show > 0.01;
+  if (show <= 0.01) return;
+  const sc = Math.max(0.001, show);
+  for (const a of anchors) a.scale.setScalar(sc);
+  if (!str.cut) {
+    // touch test: thread segment vs finger capsules
+    let hit = null;
+    if (show > 0.99) for (let k = 1; k < 40; k++) {
+      const pt = strA.clone().lerp(strB, k / 40);
+      for (const [a, b] of fingerSegs) if (closestOnSeg(a, b, pt, _pq).distanceTo(pt) < RF + STRING.radius) { hit = k / 40; break; }
+      if (hit !== null) break;
+    }
+    if (hit !== null && STRING.strength === 0) {
+      str.cut = true; str.cutT = 0;
+      const n = STRING.segs, cutAt = hit, g = V();
+      const mk = (from, to, frac) => { // rope from anchor (fixed) to the cut end
+        const pts = []; for (let i = 0; i <= n; i++) pts.push(from.clone().lerp(to, i / n));
+        return { p: pts, q: pts.map((v) => v.clone()), rest: from.distanceTo(to) / n * 0.97 };
+      };
+      const cp = strA.clone().lerp(strB, cutAt);
+      str.ropes = [mk(strA, cp), mk(strB, cp)];
+    } else {
+      const pts = []; const sag = 0.0004 * show;
+      for (let i = 0; i <= 12; i++) { const t = i / 12; pts.push(strA.clone().lerp(strB, t * sc + (1 - sc) * 0.5).addScaledVector(ENV_UP, -sag * Math.sin(Math.PI * t))); }
+      ropeTube(stringMeshes[0], pts); stringMeshes[1].visible = false;
+      return;
+    }
+  }
+  // cut halves: verlet ropes, fixed at the anchors, falling under (env) gravity
+  str.cutT += dt;
+  const G = ENV_UP.clone().multiplyScalar(-2.5), steps = Math.max(1, Math.ceil(dt / (1 / 240))), h = dt / steps;
+  for (const r of str.ropes) {
+    for (let st = 0; st < steps; st++) {
+      for (let i = 1; i < r.p.length; i++) {
+        const v = r.p[i].clone().sub(r.q[i]).multiplyScalar(0.985);
+        r.q[i].copy(r.p[i]); r.p[i].add(v).addScaledVector(G, h * h);
+      }
+      for (let it = 0; it < 12; it++) for (let i = 0; i < r.p.length - 1; i++) {
+        const a = r.p[i], b = r.p[i + 1], d = b.clone().sub(a), L = d.length(), diff = (L - r.rest) / L;
+        if (i === 0) b.addScaledVector(d, -diff); else { a.addScaledVector(d, 0.5 * diff); b.addScaledVector(d, -0.5 * diff); }
+      }
+      r.p[0].copy(r === str.ropes[0] ? strA : strB);
+    }
+  }
+  ropeTube(stringMeshes[0], str.ropes[0].p); ropeTube(stringMeshes[1], str.ropes[1].p);
+  stringMeshes[1].visible = true;
+}
+
 // ---------- geometry of the finger (shared real / virtual) ----------
 function fingerFrame(thp, thd) {
   const proxUp = H.clone().multiplyScalar(Math.cos(thp)).addScaledVector(UP, Math.sin(thp)); // PIP -> MCP
@@ -247,6 +346,7 @@ new GLTFLoader().load('./assets/right.glb', (g) => {
   });
   console.log('[stage] hand loaded', { Lp, Lm, Ld });
   layoutBall();
+  layoutString();
   ready = true;
 });
 
@@ -334,7 +434,8 @@ let STIFF = 0.3, GAIN = 1;
 function setStiffness(v) {
   STIFF = THREE.MathUtils.clamp(v, 0, 1);
   GAIN = 0.45 - 0.4 * STIFF;
-  Object.assign(SOFT, { spread: 3.2 - 1.4 * STIFF, squash: 0.9 - 0.6 * STIFF, bulge: 0.6 - 0.3 * STIFF, k: 260 + 900 * STIFF, c: 7 + 14 * STIFF });
+  // natural response (base). Exaggeration (whole-body squash, big wobble) belongs to a later layer.
+  Object.assign(SOFT, { spread: 2.6 - 1.0 * STIFF, squash: 0, bulge: 0.18, k: 700 + 900 * STIFF, c: 46 + 30 * STIFF });
 }
 setStiffness(STIFF);
 // Penetration (m) of the virtual finger (middle + distal capsules) into the undeformed ball for angles (thp, thd).
@@ -452,16 +553,18 @@ function deformBall(segs, dt) {
 // PIP: interior angle between proximal and middle phalanx (180 = straight). DIP: flexion (0 = straight along the glass).
 const ROM = { pip: [50, 150], dip: [0, 90] };
 const K = {
-  lift: [[0, 0.08], [2.6, 0], [29.4, 0], [30.8, 0.07], [31, 0.07]],
-  // 3.4–9.4: full range of PIP and DIP with no ball (pure mapping). Ball appears at 9.4.
-  thp: [[0, 68], [3.4, 68], [4.8, ROM.pip[0]], [6.6, ROM.pip[1]], [8.2, 68], [13.2, 68], [14.2, 75], [15.0, 75], [16.0, 68],
-        [20.0, 62], [22.6, 78], [24.8, 62], [26.4, 68], [31, 68]],
-  thd: [[0, 5], [6.6, 5], [7.6, ROM.dip[1]], [8.6, ROM.dip[0]], [10.4, 5], [11.4, 70], [12.0, 70], [12.8, 5], [13.4, 5], [14.4, 55], [15.0, 55], [16.0, 5],
-        [16.6, 5], [17.6, 68], [18.2, 68], [19.6, 0], [20.0, 60], [22.6, 30], [24.8, 60], [26.4, 20], [26.8, 5], [31, 5]],
-  ball: [[0, 0], [9.2, 0], [10.0, 1], [31, 1]],
+  lift: [[0, 0.08], [2.6, 0], [33.2, 0], [34.8, 0.07], [36, 0.07]],
+  // 3.4–9.4: full range of PIP and DIP with no object (pure mapping). Ball 9.4–26.8, thread 27–33.
+  thp: [[0, 68], [3.4, 68], [4.8, ROM.pip[0]], [6.6, ROM.pip[1]], [8.2, 68], [13.2, 68], [14.2, 73], [15.0, 73], [16.0, 68],
+        [20.0, 62], [22.6, 78], [24.8, 62], [26.4, 68], [36, 68]],
+  thd: [[0, 5], [6.6, 5], [7.6, ROM.dip[1]], [8.6, ROM.dip[0]], [10.4, 5], [11.4, 55], [12.0, 55], [12.8, 5], [13.4, 5], [14.4, 42], [15.0, 42], [16.0, 5],
+        [16.6, 5], [17.6, 55], [18.2, 55], [19.6, 0], [20.0, 50], [22.6, 22], [24.8, 50], [26.4, 20], [26.8, 5],
+        [28.4, 5], [29.8, 58], [30.4, 58], [31.4, 5], [36, 5]],
+  ball: [[0, 0], [9.2, 0], [10.0, 1], [26.6, 1], [27.2, 0], [36, 0]],
+  string: [[0, 0], [27.2, 0], [27.9, 1], [36, 1]],
 };
-const SCENE_AT = (t) => (t < 16.4 ? 'press' : t < 19.9 ? 'release' : 'stroke');
-const DURATION = 31;
+const SCENE_AT = (t) => (t < 16.4 ? 'press' : t < 19.9 ? 'release' : t < 26.8 ? 'stroke' : 'cut');
+const DURATION = 36;
 function sample(keys, t) {
   if (t <= keys[0][0]) return keys[0][1];
   for (let i = 1; i < keys.length; i++) {
@@ -486,7 +589,8 @@ const SHOTS = [
   [13.2, 16.4, 'experience', (u) => ({ orbit: [-28 + 6 * u, 32, 0.20, 0.006, -0.01, 0] })],
   [16.4, 19.9, 'experience', (u) => ({ orbit: [-22 + 4 * u, 26, 0.18, 0.006, -0.01, 0] })],
   [19.9, 26.8, 'experience', () => ({ pov: 27 })],
-  [26.8, 31.01, 'structure', (u) => ({ orbit: [20 + 200 * u, 24, 0.30, 0.006, -0.02, 0] })],
+  [26.8, 31.8, 'experience', (u) => ({ orbit: [-24 + 6 * u, 30, 0.19, 0.006, -0.012, 0] })],
+  [31.8, 36.01, 'structure', (u) => ({ orbit: [20 + 200 * u, 24, 0.30, 0.006, -0.02, 0] })],
 ];
 function shotAt(t) {
   const i = Math.max(0, SHOTS.findIndex((s) => t >= s[0] && t < s[1]));
@@ -536,6 +640,7 @@ function setView(v, fromAuto = false) {
   const ghost = v === 'structure';
   camera.layers.set(0); if (ghost) camera.layers.enable(L_VIRTUAL);
   woodMat.opacity = ghost ? 0.18 : 1; woodMat.depthWrite = !ghost;
+  standMat.opacity = ghost ? 0.2 : 1; standMat.depthWrite = !ghost;
   bodyMat.opacity = ghost ? 0.25 : 1; bodyMat.depthWrite = !ghost;
   bezelMat.opacity = ghost ? 0.15 : 1; bezelMat.depthWrite = !ghost;
   screenMat.opacity = ghost ? 0.0 : 1;
@@ -558,8 +663,10 @@ for (const id of ['tp', 'td']) $(id).addEventListener('input', () => { if (!manu
 $('stiff').addEventListener('input', (e) => { setStiffness(e.target.value / 100); $('stv').textContent = stiffLabel(); });
 const stiffLabel = () => (STIFF < 0.25 ? 'とてもやわらかい' : STIFF < 0.6 ? 'やわらかめ' : STIFF < 0.85 ? 'かため' : 'かたい');
 $('stv').textContent = stiffLabel();
+for (const b of document.querySelectorAll('#objs button')) b.onclick = () => { manualObj = b.dataset.obj; resetString(); document.querySelectorAll('#objs button').forEach((x) => x.classList.toggle('on', x === b)); if (!manual) setManual(true); };
 $('autoBtn').onclick = () => { setManual(false); playing = true; $('play').textContent = '❚❚'; };
-function resetMaterial() { mat.anchor = null; mat.threadState = 'none'; freePose = null; }
+let manualObj = 'ball';
+function resetMaterial() { mat.anchor = null; mat.threadState = 'none'; freePose = null; resetString(); }
 
 // ---------- frame ----------
 let last = performance.now();
@@ -593,10 +700,18 @@ function frame(dt) {
   ring.material.opacity += ((contact ? 0.55 : 0) - ring.material.opacity) * Math.min(1, dt * 6);
   const s = 1 + (1 - appear) * 0.4; ring.scale.setScalar(s);
   // material
-  const ballK = manual || window.__pose ? 1 : sample(K.ball, time);
+  const ballK = manual || window.__pose ? (manualObj === 'ball' ? 1 : 0) : sample(K.ball, time);
+  const strK = manual || window.__pose ? (manualObj === 'string' ? 1 : 0) : sample(K.string, time);
   ball.visible = ballK > 0.01; ball.scale.setScalar(Math.max(0.001, ballK * (1 + 0.12 * Math.sin(Math.PI * ballK))));
   const segs = contact && ballK > 0.99 ? [[vDip, vTip], [ROOT.clone().addScaledVector(fr.u, RF * 0.5), vDip]] : [];
   const res = deformBall(segs, dt);
+  const fSegs = contact ? [[vDip, vTip], [ROOT.clone().addScaledVector(fr.u, RF * 0.5), vDip]] : [];
+  if (!manual && strK < 0.01) resetString();
+  if (manual && str.cut && str.cutT > 2.5) {                  // manual mode: re-tie the thread once the finger is away
+    let near = false; for (let k = 1; k < 40 && !near; k++) { const pt = strA.clone().lerp(strB, k / 40); for (const [a, b] of fSegs) if (closestOnSeg(a, b, pt, _pq).distanceTo(pt) < RF * 2) near = true; }
+    if (!near) resetString();
+  }
+  updateString(dt, strK, fSegs);
   // thread (release scene)
   const padNow = vDip.clone().addScaledVector(fr.dDir, hand.Ld * 0.62).addScaledVector(fr.nD, RF);
   if (res.touching) { mat.anchor = res.point.clone(); mat.threadState = 'stuck'; }
@@ -656,6 +771,7 @@ window.stage = {
   get ready() { return ready; },
   setHeadTrack(v) { headTrack = v; },
   setStiffness,
+  strDebug() { const o = []; for (const d of [0, 5, 20, 35, 40, 45, 60]) { const fr = fingerFrame(68 * DEG, d * DEG); const vDip = ROOT.clone().addScaledVector(fr.u, hand.Lm), vTip = vDip.clone().addScaledVector(fr.dDir, hand.Ld); const segs = [[vDip, vTip], [ROOT.clone().addScaledVector(fr.u, RF * 0.5), vDip]]; const m = segs.map(([a, b]) => { let mn = 1; for (let k = 1; k < 40; k++) { const pt = strA.clone().lerp(strB, k / 40); mn = Math.min(mn, closestOnSeg(a, b, pt, _pq).distanceTo(pt)); } return +(mn * 1000).toFixed(1); }); o.push(d + ':' + m.join('/')); } return o.join('  ') + '  RF=' + RF * 1000; },
   penGrid() { const B = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90]; let o = 'thp/thd ' + B.join(' ') + '|'; for (let a = 50; a <= 150; a += 5) o += a + ': ' + B.map((b) => (penetrationAt(a * DEG, b * DEG) * 1000).toFixed(0).padStart(3)).join(' ') + '|'; return o; },
   penScan() { const out = []; for (let t = 10; t < DURATION; t += 0.1) { const a = sample(K.thp, t) * DEG, b = sample(K.thd, t) * DEG; out.push([+t.toFixed(1), +(penetrationAt(a, b) * 1000).toFixed(1)]); } return JSON.stringify(out.filter((x) => x[1] > 0).reduce((m, x) => (x[1] > m[1] ? x : m), [0, 0])) + ' R=' + BALL_R * 1000; },
   camPose(px, py, pz, tx, ty, tz, fov = 35) { controls.autoRotate = false; camera.position.set(px, py, pz); controls.target.set(tx, ty, tz); camera.fov = fov; camera.updateProjectionMatrix(); camera.lookAt(controls.target); camera.updateMatrixWorld(true); },
