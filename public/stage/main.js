@@ -139,7 +139,7 @@ shadowCatch.rotation.x = -Math.PI / 2; shadowCatch.position.y = 0.0008; shadowCa
 // screen corners (world) for the off-axis projection: pa = lower-left, pb = lower-right, pc = upper-left (as seen by visitor at +z)
 const pa = V(-SCREEN.w / 2, 0, SCREEN.l / 2), pb = V(SCREEN.w / 2, 0, SCREEN.l / 2), pc = V(-SCREEN.w / 2, 0, -SCREEN.l / 2);
 const screenCam = new THREE.PerspectiveCamera();
-screenCam.layers.set(L_VIRTUAL); screenCam.layers.enable(L_SCREENLIGHT);
+screenCam.layers.set(L_VIRTUAL); screenCam.layers.enable(L_SCREENLIGHT); screenCam.layers.enable(3);
 function updateScreenCamera(eye) {
   const vr = pb.clone().sub(pa).normalize(), vu = pc.clone().sub(pa).normalize(), vn = vr.clone().cross(vu).normalize();
   const va = pa.clone().sub(eye), vb = pb.clone().sub(eye), vc = pc.clone().sub(eye);
@@ -183,17 +183,41 @@ function layoutPanel() {
   el.classList.toggle('big', panelBig);
 }
 
+// eye marker and sight lines to the screen corners ("see-through hand" view)
+const eyeDot = new THREE.Mesh(new THREE.SphereGeometry(0.008, 24, 16), new THREE.MeshBasicMaterial({ color: 0x2f6f5b, transparent: true }));
+const sightLines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x2f6f5b, transparent: true, opacity: 0.5 }));
+{ const c = [V(-SCREEN.w / 2, 0, SCREEN.l / 2), V(SCREEN.w / 2, 0, SCREEN.l / 2), V(SCREEN.w / 2, 0, -SCREEN.l / 2), V(-SCREEN.w / 2, 0, -SCREEN.l / 2)];
+  const pts = []; for (const k of c) pts.push(EYE, k); sightLines.geometry.setFromPoints(pts); }
+eyeDot.position.copy(EYE); scene.add(eyeDot, sightLines); eyeDot.visible = sightLines.visible = false;
+
 // ---------- virtual world (inside the screen) ----------
 const VBG = new THREE.Color(0x0a0c0c);
-const vKey = new THREE.SpotLight(0xffffff, 6, 0, 0.55, 0.6, 1.2);
-vKey.position.set(-0.06, 0.25, 0.12); vKey.target.position.set(0.02, -0.04, 0);
+const vKey = new THREE.SpotLight(0xffffff, 7, 0, 0.7, 0.5, 1.2);
+vKey.position.set(-0.05, 0.22, -0.08); vKey.target.position.set(0.02, -0.06, 0.02);
 vKey.castShadow = true; vKey.shadow.mapSize.set(1024, 1024); vKey.shadow.bias = -0.0003;
-const vFill = new THREE.HemisphereLight(0xcfe9ff, 0x101010, 0.9);
+const vFill = new THREE.HemisphereLight(0xcfe9ff, 0x202424, 0.7);
 for (const l of [vKey, vFill]) { l.layers.set(L_SCREENLIGHT); scene.add(l); }
 scene.add(vKey.target);
 const vFloor = new THREE.Mesh(new THREE.PlaneGeometry(SCREEN.w, SCREEN.l), new THREE.MeshStandardMaterial({ color: 0x15191a, roughness: 0.9 }));
 vFloor.rotation.x = -Math.PI / 2; vFloor.position.y = -0.085; vFloor.receiveShadow = true; vFloor.layers.set(L_VIRTUAL);
 vFloor.material.color.set(0x0b0d0d); scene.add(vFloor);
+// Inside of the screen: a shallow box (floor + walls with a faint grid) so the flat image reads as a window into
+// a space. Layer 3 = seen only by the screen camera (not drawn in the 3D room, even in the structure view).
+const L_SCREENONLY = 3, BOX_D = 0.085;
+const gridTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d');
+  g.fillStyle = '#14181a'; g.fillRect(0, 0, 256, 256); g.strokeStyle = 'rgba(160,190,185,0.16)'; g.lineWidth = 2;
+  for (let i = 0; i <= 256; i += 32) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 256); g.stroke(); g.beginPath(); g.moveTo(0, i); g.lineTo(256, i); g.stroke(); }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; return t; })();
+function boxFace(w, h, rep2, pos, rotX, rotY) {
+  const tex = gridTex.clone(); tex.needsUpdate = true; tex.repeat.set(w / 0.02, h / 0.02);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, color: 0xffffff }));
+  m.position.copy(pos); m.rotation.set(rotX, rotY, 0); m.receiveShadow = true; m.layers.set(L_SCREENONLY); scene.add(m); return m;
+}
+boxFace(SCREEN.w, SCREEN.l, 0, V(0, -BOX_D, 0), -Math.PI / 2, 0);                                   // floor
+boxFace(SCREEN.w, BOX_D, 0, V(0, -BOX_D / 2, -SCREEN.l / 2), 0, 0);                                 // far wall
+boxFace(SCREEN.w, BOX_D, 0, V(0, -BOX_D / 2, SCREEN.l / 2), 0, Math.PI);                            // near wall
+boxFace(SCREEN.l, BOX_D, 0, V(-SCREEN.w / 2, -BOX_D / 2, 0), 0, Math.PI / 2);                       // left wall
+boxFace(SCREEN.l, BOX_D, 0, V(SCREEN.w / 2, -BOX_D / 2, 0), 0, -Math.PI / 2);                       // right wall
 // outline of the virtual volume (structure view)
 const vBox = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(SCREEN.w, 0.085, SCREEN.l)),
   new THREE.LineBasicMaterial({ color: 0x5fb59a, transparent: true, opacity: 0.55 }));
@@ -203,8 +227,8 @@ vBox.position.y = -0.0425; vBox.layers.set(L_VIRTUAL); scene.add(vBox);
 const COL = { hand: new THREE.Color(0xb9b9b7), prox: new THREE.Color(0x4f8fe6), dist: new THREE.Color(0xf09a3e) };
 const skinMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0, vertexColors: true });
 const BELOW_GLASS = [new THREE.Plane(new THREE.Vector3(0, -1, 0), 0)];   // keep y <= 0
-const vMidMat = new THREE.MeshStandardMaterial({ color: COL.prox, roughness: 0.45, transparent: true, opacity: 0.82, emissive: COL.prox, emissiveIntensity: 0.18, clippingPlanes: BELOW_GLASS });
-const vDistMat = new THREE.MeshStandardMaterial({ color: COL.dist, roughness: 0.45, transparent: true, opacity: 0.82, emissive: COL.dist, emissiveIntensity: 0.18, clippingPlanes: BELOW_GLASS });
+const vMidMat = new THREE.MeshStandardMaterial({ color: COL.prox, roughness: 0.55, transparent: true, opacity: 1, emissive: COL.prox, emissiveIntensity: 0.05, clippingPlanes: BELOW_GLASS });
+const vDistMat = new THREE.MeshStandardMaterial({ color: COL.dist, roughness: 0.55, transparent: true, opacity: 1, emissive: COL.dist, emissiveIntensity: 0.05, clippingPlanes: BELOW_GLASS });
 function capsule(mat) {
   const m = new THREE.Mesh(new THREE.CapsuleGeometry(RF, 0.02, 10, 28), mat);
   m.userData.len = 0.02;
@@ -219,13 +243,26 @@ function placeCapsule(mesh, a, b, r = RF) {
 }
 
 // jelly ball
-const ballGeo = new THREE.SphereGeometry(BALL_R, 160, 120);
+// Soft body: a closed surface of point masses joined by springs along the mesh edges, kept round by internal pressure
+// (volume) and a weak shape memory. The centre is fixed. The finger is a hard capsule; the surface can't enter it.
+const ballGeo = (() => { const g0 = new THREE.IcosahedronGeometry(BALL_R, 16); g0.deleteAttribute('normal'); g0.deleteAttribute('uv'); return mergeVertices(g0, 1e-7); })();
+ballGeo.computeVertexNormals();
 const ballRest = ballGeo.attributes.position.array.slice();
 const ballCur = ballGeo.attributes.position.array.slice();
+const BIDX = ballGeo.index.array, BN = ballRest.length / 3;
+const BEDGES = (() => { const set = new Set(), out = [];
+  for (let f = 0; f < BIDX.length; f += 3) for (const [a, b] of [[BIDX[f], BIDX[f + 1]], [BIDX[f + 1], BIDX[f + 2]], [BIDX[f + 2], BIDX[f]]]) {
+    const k = a < b ? a * 1e6 + b : b * 1e6 + a; if (!set.has(k)) { set.add(k); out.push(a, b); } }
+  const e = new Uint32Array(out), L0 = new Float32Array(out.length / 2);
+  for (let i = 0; i < L0.length; i++) { const a = e[2 * i] * 3, b = e[2 * i + 1] * 3; L0[i] = Math.hypot(ballRest[a] - ballRest[b], ballRest[a + 1] - ballRest[b + 1], ballRest[a + 2] - ballRest[b + 2]); }
+  return { e, L0 }; })();
+function meshVolume(x) { let v = 0; for (let f = 0; f < BIDX.length; f += 3) { const a = BIDX[f] * 3, b = BIDX[f + 1] * 3, c = BIDX[f + 2] * 3;
+  v += x[a] * (x[b + 1] * x[c + 2] - x[b + 2] * x[c + 1]) - x[a + 1] * (x[b] * x[c + 2] - x[b + 2] * x[c]) + x[a + 2] * (x[b] * x[c + 1] - x[b + 1] * x[c]); } return v / 6; }
+const BALL_V0 = meshVolume(ballRest), BALL_A0 = 4 * Math.PI * BALL_R * BALL_R / BN;
 const ballMat = new THREE.MeshPhysicalMaterial({
-  color: 0x46c494, roughness: 0.14, metalness: 0, transmission: 0.35, thickness: 0.03, ior: 1.36,
+  color: 0x3fb98a, roughness: 0.22, metalness: 0, transmission: 0.15, thickness: 0.03, ior: 1.36,
   attenuationColor: new THREE.Color(0x3fae86), attenuationDistance: 0.03, clearcoat: 1, clearcoatRoughness: 0.08,
-  sheen: 0.15, sheenColor: new THREE.Color(0xd9fff0), emissive: 0x135c42, emissiveIntensity: 0.9,
+  sheen: 0.2, sheenColor: new THREE.Color(0xd9fff0), emissive: 0x135c42, emissiveIntensity: 0.12,
 });
 const ball = new THREE.Mesh(ballGeo, ballMat);
 ball.castShadow = true; ball.layers.set(L_VIRTUAL); scene.add(ball);
@@ -541,13 +578,13 @@ function closestOnSeg(a, b, p, out) {
 }
 const mat = { anchor: null, threadState: 'none', snapT: 0, pen: 0 };
 const ballVel = new Float32Array(ballRest.length);
-const SOFT = { spread: 2.6, squash: 0.55, bulge: 0.45, k: 520, c: 11 }; // squishiness knobs (set from STIFF)
-// Ball softness knob 0 (soft) .. 1 (firm): only changes how the ball surface responds (the finger is never altered).
+// Ball softness knob 0 (soft) .. 1 (firm): changes the material only (the finger is never altered).
+//   ks: surface stretch stiffness, kp: internal pressure, kt: shape memory, c: damping (all per unit mass)
+const SOFT = { ks: 260, kp: 220, kt: 220, c: 9 };
 let STIFF = 0.3;
 function setStiffness(v) {
   STIFF = THREE.MathUtils.clamp(v, 0, 1);
-  // natural response (base). Exaggeration (whole-body squash, big wobble) belongs to a later layer.
-  Object.assign(SOFT, { spread: 2.6 - 1.0 * STIFF, squash: 0, bulge: 0.18, k: 700 + 900 * STIFF, c: 46 + 30 * STIFF });
+  Object.assign(SOFT, { ks: 120 + 480 * STIFF, kp: 160 + 420 * STIFF, kt: 120 + 700 * STIFF, c: 7 + 16 * STIFF });
 }
 setStiffness(STIFF);
 // Penetration (m) of the virtual finger (middle + distal capsules) into the undeformed ball for angles (thp, thd).
@@ -560,98 +597,63 @@ function penetrationAt(thp, thd) {
   const d2 = closestOnSeg(vDip, vTip, BALL_C, _pq).distanceTo(BALL_C);
   return Math.max(0, BALL_R + RF - Math.min(d1, d2));
 }
-// Sphere grid layout (SphereGeometry(…, 160, 120)) for neighbour smoothing of the dent depth
-const GW = 161, GH = 121;
-const _dReq = new Float32Array(GW * GH), _dA = new Float32Array(GW * GH), _dB = new Float32Array(GW * GH);
+const _acc = new Float32Array(BN * 3), _an = new Float32Array(BN * 3);
 function deformBall(segs, dt) {
+  const x = ballCur, v = ballVel, r0 = ballRest;
+  const C = BALL_C;
+  let touching = false; const cpt = V(); let nTouch = 0, maxPen = 0;
+  if (dt === 0) { x.set(r0); v.fill(0); }
+  const steps = Math.max(1, Math.ceil(dt * 1440)), h = dt / Math.max(1, steps);
+  const q = V(), pw = V(), d = V();
+  const { e, L0 } = BEDGES;
+  const bb = new THREE.Box3(); for (const [sa, sb] of segs) { bb.expandByPoint(sa); bb.expandByPoint(sb); } bb.expandByScalar(RF);
+  for (let st = 0; st < steps && dt > 0; st++) {
+    _acc.fill(0);
+    // surface springs (strain based)
+    for (let i = 0; i < L0.length; i++) {
+      const a = e[2 * i] * 3, b = e[2 * i + 1] * 3;
+      const dx = x[b] - x[a], dy = x[b + 1] - x[a + 1], dz = x[b + 2] - x[a + 2], L = Math.hypot(dx, dy, dz) || 1e-9;
+      const f = SOFT.ks * (L - L0[i]) / L0[i] / L;
+      _acc[a] += f * dx; _acc[a + 1] += f * dy; _acc[a + 2] += f * dz; _acc[b] -= f * dx; _acc[b + 1] -= f * dy; _acc[b + 2] -= f * dz;
+    }
+    // internal pressure along the area-weighted vertex normals
+    _an.fill(0);
+    for (let f = 0; f < BIDX.length; f += 3) {
+      const ia = BIDX[f] * 3, ib = BIDX[f + 1] * 3, ic = BIDX[f + 2] * 3;
+      const ux = x[ib] - x[ia], uy = x[ib + 1] - x[ia + 1], uz = x[ib + 2] - x[ia + 2], wx = x[ic] - x[ia], wy = x[ic + 1] - x[ia + 1], wz = x[ic + 2] - x[ia + 2];
+      const nx = (uy * wz - uz * wy) / 6, ny = (uz * wx - ux * wz) / 6, nz = (ux * wy - uy * wx) / 6;   // (area normal)/3
+      for (const k of [ia, ib, ic]) { _an[k] += nx; _an[k + 1] += ny; _an[k + 2] += nz; }
+    }
+    const P = SOFT.kp * (BALL_V0 / meshVolume(x) - 1) / BALL_A0;
+    for (let i = 0; i < BN * 3; i++) {
+      const a = _acc[i] + P * _an[i] + SOFT.kt * (r0[i] - x[i]) - SOFT.c * v[i];
+      v[i] += a * h; x[i] += v[i] * h;
+    }
+    // finger contact: the finger is rigid, the surface is pushed out of it (no velocity into the finger)
+    if (segs.length) for (let i = 0; i < BN; i++) {
+      pw.set(x[3 * i] + C.x, x[3 * i + 1] + C.y, x[3 * i + 2] + C.z);
+      if (pw.x < bb.min.x || pw.x > bb.max.x || pw.y < bb.min.y || pw.y > bb.max.y || pw.z < bb.min.z || pw.z > bb.max.z) continue;
+      for (const [sa, sb] of segs) {
+        closestOnSeg(sa, sb, pw, q); d.copy(pw).sub(q); const dist = d.length();
+        if (dist < RF) {
+          const n = dist > 1e-7 ? d.divideScalar(dist) : d.set(0, 1, 0);
+          if (RF - dist > maxPen) maxPen = RF - dist;
+          pw.copy(q).addScaledVector(n, RF);
+          const vn = v[3 * i] * n.x + v[3 * i + 1] * n.y + v[3 * i + 2] * n.z;
+          if (vn < 0) { v[3 * i] -= vn * n.x; v[3 * i + 1] -= vn * n.y; v[3 * i + 2] -= vn * n.z; }
+          v[3 * i] *= 0.9; v[3 * i + 1] *= 0.9; v[3 * i + 2] *= 0.9;                 // a little friction on the pad
+          x[3 * i] = pw.x - C.x; x[3 * i + 1] = pw.y - C.y; x[3 * i + 2] = pw.z - C.z;
+          if (st === steps - 1) { touching = true; nTouch++; cpt.add(pw); }
+        }
+      }
+    }
+  }
+  if (nTouch) cpt.divideScalar(nTouch);
   const pos = ballGeo.attributes.position.array;
-  const N = pos.length / 3;
-  const target = new Float32Array(pos.length);
-  const pushed = new Uint8Array(N);
-  let maxPen = 0; const cpt = V(); let any = false;
-  const p = V(), q = V(), off = V();
-  // 1) required inward depth (along the ball radius) so that each surface point sits just under the finger.
-  //    The surface is only ever pushed toward the centre: an imprint of the finger pad, never a sleeve around it.
-  const insideFinger = (pt) => { for (const [a, b] of segs) if (closestOnSeg(a, b, pt, q).distanceToSquared(pt) < RF * RF) return true; return false; };
-  const nIn = V(), lo = V(), hi = V();
-  _dReq.fill(0);
-  for (let i = 0; i < N; i++) {
-    if (!segs.length) break;
-    p.set(ballRest[3 * i], ballRest[3 * i + 1], ballRest[3 * i + 2]).add(BALL_C);
-    if (!insideFinger(p)) continue;
-    nIn.copy(BALL_C).sub(p).normalize();
-    lo.copy(p); let k = 0;
-    do { hi.copy(lo); lo.addScaledVector(nIn, 0.0005); k++; } while (k < 33 && insideFinger(lo));   // depth cap ~0.75 R
-    for (let it = 0; it < 6; it++) { off.copy(hi).add(lo).multiplyScalar(0.5); if (insideFinger(off)) hi.copy(off); else lo.copy(off); }
-    const d = lo.distanceTo(p) + 0.0002;
-    _dReq[i] = d; pushed[i] = 1; any = true;
-    if (d > maxPen) { maxPen = d; cpt.copy(p); }
-  }
-  // 2) spread the depth to the neighbours (smooth bowl instead of a cliff). Softer ball => wider bowl.
-  _dA.set(_dReq);
-  if (any) {
-    const keep = 0.80 + 0.12 * (1 - STIFF);
-    let src = _dA, dst = _dB;
-    for (let it = 0; it < 14; it++) {
-      for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
-        const i = y * GW + x;
-        const xl = x === 0 ? GW - 2 : x - 1, xr = x === GW - 1 ? 1 : x + 1;
-        const yu = Math.max(0, y - 1), yd = Math.min(GH - 1, y + 1);
-        const avg = (src[y * GW + xl] + src[y * GW + xr] + src[yu * GW + x] + src[yd * GW + x]) * 0.25;
-        dst[i] = Math.max(_dReq[i], Math.max(src[i], avg * keep));
-      }
-      const t = src; src = dst; dst = t;
-    }
-    if (src !== _dA) _dA.set(src);
-  }
-  const press = maxPen;
-  const cn = any ? cpt.clone().sub(BALL_C).normalize() : null;
-  const sq = any ? Math.min(0.3, SOFT.squash * press / BALL_R) : 0;
-  const pp = V(), dir = V();
-  for (let i = 0; i < N; i++) {
-    pp.set(ballRest[3 * i], ballRest[3 * i + 1], ballRest[3 * i + 2]);
-    dir.copy(pp).normalize();
-    let tx = pp.x - dir.x * _dA[i], ty = pp.y - dir.y * _dA[i], tz = pp.z - dir.z * _dA[i];
-    if (any) {
-      // 3) gentle bulge ring around the bowl and whole-body squash (centre stays fixed)
-      const ang = Math.acos(THREE.MathUtils.clamp(dir.dot(cn), -1, 1)) * BALL_R;
-      const ring = _dA[i] > 0.0002 ? 0 : Math.exp(-(((ang - 3.0 * RF) / (1.4 * RF)) ** 2));
-      const bl = press * SOFT.bulge * ring; tx += dir.x * bl; ty += dir.y * bl; tz += dir.z * bl;
-      if (!pushed[i]) {
-        const along = tx * cn.x + ty * cn.y + tz * cn.z;
-        const lx = tx - cn.x * along, ly = ty - cn.y * along, lz = tz - cn.z * along;
-        const k1 = along < 0 ? -sq * along * 0.5 : 0;             // flatten the far side a little
-        tx += cn.x * k1 + lx * sq * 0.35; ty += cn.y * k1 + ly * sq * 0.35; tz += cn.z * k1 + lz * sq * 0.35;
-      }
-    }
-    target[3 * i] = tx; target[3 * i + 1] = ty; target[3 * i + 2] = tz;
-  }
-  // 3b) nothing of the final surface may stay inside the finger: push such points further toward the centre
-  if (any) for (let i = 0; i < N; i++) {
-    if (pushed[i]) continue;
-    p.set(target[3 * i], target[3 * i + 1], target[3 * i + 2]).add(BALL_C);
-    if (!insideFinger(p)) continue;
-    nIn.copy(BALL_C).sub(p).normalize(); let k = 0;
-    while (k < 30 && insideFinger(p)) { p.addScaledVector(nIn, 0.0004); k++; }
-    p.addScaledVector(nIn, 0.0002).sub(BALL_C);
-    target[3 * i] = p.x; target[3 * i + 1] = p.y; target[3 * i + 2] = p.z; pushed[i] = 1;
-  }
-  // 4) jelly dynamics: under-damped spring toward the target (points under the finger follow it immediately)
-  if (dt === 0) { ballCur.set(target); ballVel.fill(0); }
-  else {
-    const steps = Math.max(1, Math.ceil(dt / (1 / 240))), h = dt / steps;
-    for (let sIt = 0; sIt < steps; sIt++) {
-      for (let i = 0; i < pos.length; i++) {
-        if (pushed[(i / 3) | 0]) { ballCur[i] = target[i]; ballVel[i] = 0; continue; }
-        ballVel[i] += ((target[i] - ballCur[i]) * SOFT.k - ballVel[i] * SOFT.c) * h;
-        ballCur[i] += ballVel[i] * h;
-      }
-    }
-  }
-  pos.set(ballCur);
+  pos.set(x);
   ballGeo.attributes.position.needsUpdate = true;
   ballGeo.computeVertexNormals();
-  return { touching: any, pen: maxPen, point: any ? cpt : null };
+  return { touching, pen: maxPen, point: touching ? cpt : null };
 }
 
 // ---------- timeline ----------
@@ -745,8 +747,9 @@ function setCam(name, instant = false) {
 
 
 // ---------- view mode ----------
-// 'experience' (what the visitor actually sees) <-> 'structure' (device made see-through, virtual space revealed).
-// ghostK animates 0..1 so the screen image visibly "opens up" into the space behind the glass.
+// The tablet is an ordinary display: everything virtual exists ONLY inside the one flat screen image.
+// 'experience' = as seen; 'structure' = "see-through hand": the real hand turns translucent so the screen image under it
+// is visible, and the eye the image is made for is marked. Virtual objects are never placed in the 3D room.
 let view = 'experience', ghostK = 0, ghostTarget = 0;
 function setView(v, fromAuto = false, instant = false) {
   view = v; if (!fromAuto && camMode === 'auto') viewOverride = v;
@@ -756,15 +759,16 @@ function setView(v, fromAuto = false, instant = false) {
 }
 function applyGhost() {
   const g = ghostK, ghost = g > 0.01, lerp = THREE.MathUtils.lerp;
-  camera.layers.set(0); if (ghost) camera.layers.enable(L_VIRTUAL);
+  camera.layers.set(0); if (ghost) camera.layers.enable(L_VIRTUAL);   // structure view: the virtual space behind the glass
   woodMat.opacity = lerp(1, 0.18, g); woodMat.depthWrite = !ghost;
   standMat.opacity = lerp(1, 0.2, g); standMat.depthWrite = !ghost;
   bodyMat.opacity = lerp(1, 0.25, g); bodyMat.depthWrite = !ghost;
   bezelMat.opacity = lerp(1, 0.15, g); bezelMat.depthWrite = !ghost;
   screenMat.opacity = 1 - g;
   shadowCatch.material.opacity = lerp(0.35, 0.07, g);
+  eyeDot.visible = sightLines.visible = ghost; eyeDot.material.opacity = g; sightLines.material.opacity = 0.5 * g;
   vFloor.visible = false; vBox.visible = ghost; vBox.material.opacity = 0.55 * g;
-  for (const m of [vMidMat, vDistMat]) { m.opacity = lerp(0.82, 0.62, g); m.emissiveIntensity = lerp(0.18, 0.35, g); }
+  for (const m of [vMidMat, vDistMat]) { m.opacity = lerp(1, 0.62, g); m.emissiveIntensity = lerp(0.05, 0.35, g); }
 }
 let viewOverride = null;
 setView('experience', true, true);
