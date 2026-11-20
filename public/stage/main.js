@@ -153,6 +153,33 @@ function updateScreenCamera(eye) {
 }
 // plane UVs: (0,0) bottom-left of PlaneGeometry; after rotation.x=-90°, v=0 is +z (visitor side) => matches pa..pc
 
+// ---------- 2D screen panel: the flat image the tablet actually displays ----------
+// Rendered for the fixed visitor eye (EYE), independent of the 3D camera, and drawn into a corner of the canvas.
+const P2_H = 1000;
+const screen2D = new THREE.WebGLRenderTarget(Math.round(P2_H * SCREEN.w / SCREEN.l), P2_H, { samples: 4 });
+screen2D.texture.colorSpace = THREE.SRGBColorSpace;
+const quadScene = new THREE.Scene(), quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+quadScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ map: screen2D.texture, toneMapped: false })));
+let panelOn = !new URLSearchParams(location.search).has('nopanel'), panelBig = false;
+function panelRect() {
+  const W = innerWidth, Hh = innerHeight, mobile = W < 640;
+  const barH = CAPTURE ? 0 : (mobile ? 150 : 110);               // keep the enlarged panel above the control bar
+  let h = panelBig ? Math.round(Hh - barH - 70) : Math.round(Hh * (mobile ? 0.26 : 0.42));
+  if (!panelBig && !mobile && !CAPTURE) h = Math.min(h, Hh - 84 - 300 - 48);      // keep clear of the angle panel
+  h = Math.max(120, h);
+  const w = Math.round(h * SCREEN.w / SCREEN.l);
+  const x = panelBig ? Math.round((W - w) / 2) : W - w - (mobile ? 14 : 30);
+  const y = panelBig ? 50 : (mobile ? 96 : 40);
+  return { x, y, w, h };
+}
+function layoutPanel() {
+  const el = document.getElementById('panel2d'); if (!el) return;
+  el.hidden = !panelOn; if (!panelOn) return;
+  const r = panelRect();
+  Object.assign(el.style, { left: r.x - 9 + 'px', top: r.y - 9 + 'px', width: r.w + 'px', height: r.h + 'px' });
+  el.classList.toggle('big', panelBig);
+}
+
 // ---------- virtual world (inside the screen) ----------
 const VBG = new THREE.Color(0x0a0c0c);
 const vKey = new THREE.SpotLight(0xffffff, 6, 0, 0.55, 0.6, 1.2);
@@ -212,7 +239,7 @@ thread.layers.set(L_VIRTUAL); thread.visible = false; scene.add(thread);
 
 // contact ring on the glass (exhibition touch feedback), real-world layer
 const ring = new THREE.Mesh(new THREE.RingGeometry(0.009, 0.0105, 64), new THREE.MeshBasicMaterial({ color: 0x8fe0c0, transparent: true, opacity: 0, toneMapped: false }));
-ring.rotation.x = -Math.PI / 2; ring.position.copy(ROOT).add(V(0, 0.0003, 0)); scene.add(ring);
+ring.rotation.x = -Math.PI / 2; ring.position.copy(ROOT).add(V(0, -0.0004, 0)); ring.layers.set(L_VIRTUAL); scene.add(ring);
 
 // pivot guide (structure view): the real proximal phalanx and the virtual middle segment are one straight line through PIP
 const guideGeo = new THREE.BufferGeometry().setFromPoints([V(), V(), V()]);
@@ -837,19 +864,25 @@ function frame(dt) {
 }
 
 let headTrack = true; // screen content follows the viewing camera (head-tracked display); false = fixed visitor eye
+function renderScreen(rt, eye) { updateScreenCamera(eye); renderer.setRenderTarget(rt); renderer.render(scene, screenCam); }
 function render() {
   camera.updateMatrixWorld(true);
   const eye = headTrack ? camera.getWorldPosition(V()) : EYE.clone();
   const behind = eye.y < 0;
   if (eye.y < 0.05) eye.y = 0.05;                                // grazing views: keep the screen eye at a sane height
-  updateScreenCamera(eye);
-  // screen pass (virtual world, dark backdrop)
-  if (ghostK < 0.99 && !behind) {
-    scene.background = VBG; scene.fog = null; scene.environmentIntensity = 0.12;
-    renderer.setRenderTarget(screenRT); renderer.render(scene, screenCam); renderer.setRenderTarget(null);
-    scene.background = GALLERY; scene.fog = new THREE.Fog(GALLERY, 2.2, 6); scene.environmentIntensity = 0.55;
-  }
+  // screen passes (virtual world, dark backdrop)
+  scene.background = VBG; scene.fog = null; scene.environmentIntensity = 0.12;
+  if (panelOn) renderScreen(screen2D, EYE);                      // the flat image the tablet shows (visitor eye)
+  if (ghostK < 0.99 && !behind) renderScreen(screenRT, eye);     // the same, for the current viewpoint (head tracking)
+  renderer.setRenderTarget(null);
+  scene.background = GALLERY; scene.fog = new THREE.Fog(GALLERY, 2.2, 6); scene.environmentIntensity = 0.55;
   renderer.render(scene, camera);
+  if (panelOn) {
+    const r = panelRect(), y = innerHeight - r.y - r.h;
+    renderer.setScissorTest(true); renderer.setViewport(r.x, y, r.w, r.h); renderer.setScissor(r.x, y, r.w, r.h);
+    renderer.render(quadScene, quadCam);
+    renderer.setScissorTest(false); renderer.setViewport(0, 0, innerWidth, innerHeight);
+  }
 }
 
 function tick(now) {
@@ -871,13 +904,18 @@ function tick(now) {
 }
 if (!CAPTURE) requestAnimationFrame(tick);
 
-addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); layoutPanel(); });
+$('panel2d').onclick = () => { panelBig = !panelBig; layoutPanel(); };
+$('panelBtn').onclick = () => { panelOn = !panelOn; panelBig = false; $('panelBtn').classList.toggle('on', panelOn); layoutPanel(); };
+$('panelBtn').classList.toggle('on', panelOn);
+layoutPanel();
 
 // deterministic hooks for video capture / screenshots
 window.stage = {
   get ready() { return ready; },
   setHeadTrack(v) { headTrack = v; },
   setStiffness,
+  setPanel(on, big = false) { panelOn = on; panelBig = big; layoutPanel(); },
   // read-only handles for automated testing
   dbg: () => ({ vRoot, PIP_H, groupMinY, VGROUPS, THREE, scene, camera, hand, device, envG, ball, vMid, vDist, ROOT, H, UP, RF, BALL_R, BALL_C, EYE, TILT, ENV_UP, PAD, SCREEN, fingerFrame, K, sample, DEG, strA, strB, str }),
   penScan() { const out = []; for (let t = 10; t < DURATION; t += 0.1) { const a = sample(K.thp, t) * DEG, b = sample(K.thd, t) * DEG; out.push([+t.toFixed(1), +(penetrationAt(a, b) * 1000).toFixed(1)]); } return JSON.stringify(out.filter((x) => x[1] > 0).reduce((m, x) => (x[1] > m[1] ? x : m), [0, 0])) + ' R=' + BALL_R * 1000; },

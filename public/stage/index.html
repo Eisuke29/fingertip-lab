@@ -29,7 +29,7 @@
   #manualToggle { display:none; }
   @media (max-width: 640px) {
     #scrub { width:110px; }
-    #hud { transform:scale(.82); transform-origin:0 0; left:10px; top:10px; } #hud .legend { display:none; }
+    #hud { transform:scale(.82); transform-origin:0 0; left:10px; top:10px; } #hud .legend { display:none !important; }
     #manualToggle { display:block; position:fixed; right:16px; top:12px; border:1px solid var(--line); background:var(--ui); border-radius:10px; padding:6px 10px; font:inherit; }
     #manual { left:16px; width:auto; bottom:auto; top:52px; display:none; } #manual.open { display:block; }
   }
@@ -47,6 +47,12 @@
   #hud .legend s { width:10px; height:10px; border-radius:3px; display:inline-block; }
   body.capture #hud { transform:scale(2); transform-origin:0 0; left:36px; top:32px; }
   #hud b { font-variant-numeric:tabular-nums; text-align:right; font-weight:600; }
+  /* 2D screen panel: the canvas draws the image; this element is the tablet bezel + caption around it */
+  #panel2d { position:fixed; border:9px solid #141618; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.18); cursor:zoom-in; }
+  #panel2d.big { cursor:zoom-out; box-shadow:0 0 0 100vmax rgba(235,232,227,.55), 0 10px 40px rgba(0,0,0,.25); }
+  #panel2d span { position:absolute; left:-9px; right:-9px; top:-34px; text-align:center; font:600 12px/1.2 "Hiragino Sans","Noto Sans JP",system-ui,sans-serif; color:#3a403e;
+                  background:rgba(255,255,255,.85); border-radius:8px; padding:5px 6px; }
+  body.capture #panel2d span { font-size:20px; top:-46px; }
 </style>
 </head>
 <body>
@@ -59,6 +65,7 @@
     <li><s style="background:#e0503a;border-radius:50%"></s>支点（PIP）</li>
   </ul>
 </div>
+<div id="panel2d" title="クリックで拡大／縮小"><span>iPadに映る2D画面</span></div>
 <div id="bar">
   <button id="play" title="再生/停止">❚❚</button>
   <input id="scrub" type="range" min="0" max="1000" value="0">
@@ -73,6 +80,7 @@
     <button data-cam="side">横から</button>
     <button data-cam="orbit">360°</button>
   </div>
+  <button id="panelBtn" class="on" title="iPadに実際に映る2Dの画面を表示">2D画面</button>
   <button id="trackBtn" class="on" title="画面の絵を見る位置に合わせて描き直す（実機では前面カメラの顔追跡に相当）">頭の位置に追従</button>
 </div>
 <button id="manualToggle" onclick="document.getElementById('manual').classList.toggle('open')">角度</button>
