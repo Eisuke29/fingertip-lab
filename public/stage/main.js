@@ -158,6 +158,9 @@ function updateScreenCamera(eye) {
 const P2_H = 1000;
 const screen2D = new THREE.WebGLRenderTarget(Math.round(P2_H * SCREEN.w / SCREEN.l), P2_H, { samples: 4 });
 screen2D.texture.colorSpace = THREE.SRGBColorSpace;
+// The tablet shows ONE flat image (made for the visitor eye). The 3D screen uses exactly that image, so the
+// display looks the same from every viewing angle, like a real screen.
+screenMat.map = screen2D.texture; screenRT.dispose();
 const quadScene = new THREE.Scene(), quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 quadScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ map: screen2D.texture, toneMapped: false })));
 let panelOn = !new URLSearchParams(location.search).has('nopanel'), panelBig = false;
@@ -776,7 +779,6 @@ $('scrub').oninput = (e) => { pendingSeek = e.target.value / 1000 * DURATION; pl
 for (const b of document.querySelectorAll('#views button')) b.onclick = () => setView(b.dataset.view);
 for (const b of document.querySelectorAll('#cams button')) b.onclick = () => setCam(b.dataset.cam);
 controls.addEventListener('start', () => { if (camMode !== 'orbit' && camMode !== 'free') { camAnim = null; setCam('free'); } });
-$('trackBtn').onclick = () => { headTrack = !headTrack; $('trackBtn').classList.toggle('on', headTrack); $('trackBtn').textContent = headTrack ? '頭の位置に追従' : '目の位置を固定'; };
 function setManual(on) { manual = on; $('manual').classList.toggle('manual', on); $('autoBtn').hidden = !on; }
 for (const id of ['tp', 'td']) $(id).addEventListener('input', () => { if (!manual) setManual(true); });
 $('stiff').addEventListener('input', (e) => { setStiffness(e.target.value / 100); $('stv').textContent = stiffLabel(); });
@@ -863,17 +865,12 @@ function frame(dt) {
   wasTouching = res.touching;
 }
 
-let headTrack = true; // screen content follows the viewing camera (head-tracked display); false = fixed visitor eye
 function renderScreen(rt, eye) { updateScreenCamera(eye); renderer.setRenderTarget(rt); renderer.render(scene, screenCam); }
 function render() {
   camera.updateMatrixWorld(true);
-  const eye = headTrack ? camera.getWorldPosition(V()) : EYE.clone();
-  const behind = eye.y < 0;
-  if (eye.y < 0.05) eye.y = 0.05;                                // grazing views: keep the screen eye at a sane height
-  // screen passes (virtual world, dark backdrop)
+  // the screen image: rendered once for the fixed visitor eye, independent of the 3D camera
   scene.background = VBG; scene.fog = null; scene.environmentIntensity = 0.12;
-  if (panelOn) renderScreen(screen2D, EYE);                      // the flat image the tablet shows (visitor eye)
-  if (ghostK < 0.99 && !behind) renderScreen(screenRT, eye);     // the same, for the current viewpoint (head tracking)
+  if (panelOn || ghostK < 0.99) renderScreen(screen2D, EYE);
   renderer.setRenderTarget(null);
   scene.background = GALLERY; scene.fog = new THREE.Fog(GALLERY, 2.2, 6); scene.environmentIntensity = 0.55;
   renderer.render(scene, camera);
@@ -913,7 +910,7 @@ layoutPanel();
 // deterministic hooks for video capture / screenshots
 window.stage = {
   get ready() { return ready; },
-  setHeadTrack(v) { headTrack = v; },
+  setHeadTrack() {},   // kept for old scripts; the display no longer follows the viewer
   setStiffness,
   setPanel(on, big = false) { panelOn = on; panelBig = big; layoutPanel(); },
   // read-only handles for automated testing
