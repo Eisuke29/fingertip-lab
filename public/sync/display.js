@@ -97,7 +97,9 @@ export class Display {
     const dot = new THREE.Mesh(new THREE.CircleGeometry(1.4, 24), new THREE.MeshBasicMaterial({ color: 0xff4d4d }));
     dot.position.set(P.x, P.y, 0.1); this.root.add(dot);
     // light from the upper front
-    this.sun.position.set(P.x + 70, P.y + 160, 260); this.sun.target.position.set(P.x, P.y + 30, -D);
+    if (this.cfg.sideLight) { // from the left: the virtual finger's shadow falls sideways on the back wall and shows its length
+      this.sun.position.set(P.x - 230, P.y + 60, 150); this.sun.target.position.set(P.x + 20, P.y + 10, -D);
+    } else { this.sun.position.set(P.x + 70, P.y + 160, 260); this.sun.target.position.set(P.x, P.y + 30, -D); }
   }
 
   setPose(thp, thd, ok) { this.pose = { thp, thd, ok }; }

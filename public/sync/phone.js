@@ -9,7 +9,7 @@ const SIM = params.has('sim');
 const HOST = params.get('peer');
 
 const S = {
-  stage: 'place', msg: '', progress: 0, W: 0, H: 0, video: null, stream: null,
+  stage: 'idle', msg: '', jt: null, progress: 0, W: 0, H: 0, video: null, stream: null,
   fps: 0, frameTimes: [], procMs: 0, stillN: 0, prevSmall: null,
   glassCand: null, glassStable: 0, glass: null, below: 0,
   bg: new T.Background(), bgBusy: false, bgFrames: 0, bgRef: null,
@@ -61,9 +61,9 @@ function onFrame(now) {
   wctx.drawImage(v, 0, 0, S.W, S.H); n++;
   stats();
   if (S.bgBusy) bgFrame();
-  else if (S.stage === 'place' && !S.adjust && n % 10 === 0) placeStep();
+  else if (!S.bg.ready && n % 10 === 0) liveGlass();
   if (S.bg.ready && S.cal) trackFrame(now);
-  if (S.stage === 'joints' && !S.adjust && S.bg.ready && n % 6 === 0) jointStep();
+  if (S.jt && n % 3 === 0) jointTry();
   S.procMs = performance.now() - t0;
   if (S.raw && link?.connected) link.send({ type: 'pose', t: now, thp: S.raw.thp, thd: S.raw.thd, fthp: S.filt?.thp ?? null, fthd: S.filt?.thd ?? null, ok: S.ok, sp: +S.raw.scoreP.toFixed(3), sd: +S.raw.scoreD.toFixed(3), proc: +S.procMs.toFixed(1) });
   if (S.collect && S.raw) S.collect.push({ thp: S.raw.thp, thd: S.raw.thd, ok: S.ok });
@@ -85,53 +85,51 @@ function stats() {
   let mean = 0; for (const l of L) mean += l; S.mean = mean / L.length;
 }
 
-// stage 1: find the glass line, wait until the view is still, then take the background automatically
-function placeStep() {
+// The iPad drives the steps; the phone only reports and acts on commands.
+const ack = (what, ok, msg) => link?.send({ type: 'ack', what, ok, msg });
+
+// before the background is taken: keep looking for the glass line so the iPad can show it
+function liveGlass() {
   const g = T.detectGlass(wctx.getImageData(0, 0, S.W, S.H));
-  if (!g) { S.glassCand = null; S.glassStable = 0; S.msg = '画面の線が見つかりません。iPhoneを ○ の真左に横向きで置き、画面を横から映してください'; S.progress = 0; return; }
-  const c = S.glassCand;
-  const ang = (q) => Math.atan2(q.b.y - q.a.y, q.b.x - q.a.x);
-  const same = c && Math.abs(ang(c) - ang(g)) < 0.01 && Math.abs(c.below - g.below) < 3;
-  S.glassStable = same ? S.glassStable + 1 : 0; S.glassCand = g; S.below = g.below;
-  const tol = 0.07 * S.H;
-  if (g.below > tol) { S.msg = 'iPhoneを少し下げてください（画面の表面が見えています）'; S.progress = 0.2; return; }
-  if (g.below < -tol) { S.msg = 'iPhoneを少し上げてください（画面が手前の縁に隠れています）'; S.progress = 0.2; return; }
-  if (S.stillN < 30 || S.glassStable < 3) { S.msg = '手を映さないで、iPhoneを動かさずに待ってください'; S.progress = 0.3 + 0.4 * Math.min(1, S.stillN / 30); return; }
-  captureBackground(g);
+  S.glassCand = g; S.below = g ? g.below : 0;
 }
-function captureBackground(glass) {
-  S.glass = { a: glass.a, b: glass.b };
-  S.bgBusy = true; S.bg.reset(); S.bgFrames = -4; S.bgRef = null; S.cal = null; S.model = null;
+function captureBackground() {
+  const g = S.glassCand || S.glass;
+  if (!g) { ack('bg', false, '画面の線が見つかりません'); return; }
+  S.glass = { a: g.a, b: g.b };
+  S.bgBusy = true; S.bg.reset(); S.bgFrames = -4; S.bgRef = null; S.cal = null; S.model = null; S.raw = null; S.ok = false;
   if (sim) sim.state.handIn = false;
-  S.msg = '背景を撮っています。手を映さないでください';
 }
 function bgFrame() {
   if (S.bgFrames < 0) { S.bgFrames++; return; }
   if (!S.bgRef) S.bgRef = S.prevSmall.slice();
-  else { let d = 0; for (let k = 0; k < S.bgRef.length; k++) d += Math.abs(S.prevSmall[k] - S.bgRef[k]); if (d / S.bgRef.length > 6) { S.bgBusy = false; S.bg.reset(); S.msg = '動きがありました。もう一度撮ります'; S.stillN = 0; return; } }
-  S.bg.add(wctx.getImageData(0, 0, S.W, S.H)); S.bgFrames++; S.progress = 0.7 + 0.3 * S.bgFrames / 30;
+  else { let d = 0; for (let k = 0; k < S.bgRef.length; k++) d += Math.abs(S.prevSmall[k] - S.bgRef[k]); if (d / S.bgRef.length > 6) { S.bgBusy = false; S.bg.reset(); S.glass = null; ack('bg', false, '動きがありました'); return; } }
+  S.bg.add(wctx.getImageData(0, 0, S.W, S.H)); S.bgFrames++;
   if (S.bgFrames >= 30) {
-    S.bg.finish(); S.bgBusy = false; S.stage = 'joints'; S.calStable = 0; S.progress = 0;
-    if (sim) { setTimeout(() => { sim.state.handIn = true; sim.state.manual = { thp: 70, thd: 45 }; }, 800); }
+    S.bg.finish(); S.bgBusy = false; S.stage = 'bg';
+    ack('bg', true, '');
+    if (sim) setTimeout(() => { sim.state.handIn = true; sim.state.manual = { thp: 70, thd: 45 }; }, 300);
   }
 }
 
-// stage 2: propose / refine the joints until they stay put, then confirm automatically
+// joints: try for up to ~2 s; succeed when the joints stay put, both joints are bent and the fit is good
 function fullField() { return T.foreground(wctx.getImageData(0, 0, S.W, S.H), { x0: 0, y0: 0, w: S.W, h: S.H }, S.bg); }
-function jointStep() {
+function startJoints() { S.jt = { n: 0, last: null, good: 0, why: '指が見えません' }; S.cal = null; S.model = null; S.raw = null; S.ok = false; }
+function jointTry() {
+  const J = S.jt; J.n++;
   const f = fullField(), prop = T.proposeJoints(f, S.glass);
-  if (!prop) { S.msg = '人差し指の中節の背を ○ に当て、両方の関節を曲げて止めてください'; S.calStable = 0; S.progress = 0; return; }
-  const ref = T.refineJoints(f, { glass: S.glass, pipC: prop.pipC, dipC: prop.dipC, T: prop.T, side: prop.side });
-  ref.T = T.measureThickness(f, ref.glass, ref.pipC, ref.dipC, ref.side) || prop.T;
-  const last = S.lastCand; S.lastCand = ref;
-  const moved = last ? Math.max(T.vec.len(T.vec.sub(ref.pipC, last.pipC)), T.vec.len(T.vec.sub(ref.dipC, last.dipC))) : 99;
-  if (!S.cal || moved > 1.5) { S.cal = ref; S.model = null; S.prev = {}; }
-  const bent = S.raw && S.raw.thd >= 12 && S.raw.thp > 25 && S.raw.thp < 160;
-  const good = moved < 3 && S.ok && bent;
-  S.calStable = good ? S.calStable + 1 : 0;
-  S.progress = Math.min(1, S.calStable / 6);
-  S.msg = !bent ? '第1関節（DIP）と第2関節（PIP）を、どちらもはっきり曲げてください' : good ? 'そのまま止めてください…' : '指を ○ に当てたまま止めてください';
-  if (S.calStable >= 6) { S.stage = 'done'; S.msg = '合いました'; S.progress = 1; if (sim) sim.state.manual = null; S.fP.reset(); S.fD.reset(); }
+  if (prop) {
+    const ref = T.refineJoints(f, { glass: S.glass, pipC: prop.pipC, dipC: prop.dipC, T: prop.T, side: prop.side });
+    ref.T = T.measureThickness(f, ref.glass, ref.pipC, ref.dipC, ref.side) || prop.T;
+    const moved = J.last ? Math.max(T.vec.len(T.vec.sub(ref.pipC, J.last.pipC)), T.vec.len(T.vec.sub(ref.dipC, J.last.dipC))) : 99;
+    J.last = ref;
+    if (!S.cal || moved > 1.5) { S.cal = ref; S.model = null; S.prev = {}; }
+    const bent = S.raw && S.raw.thd >= 12 && S.raw.thp > 25 && S.raw.thp < 160;
+    J.why = !S.raw ? '指が見えません' : !bent ? '関節の曲げが足りません' : !S.ok ? '指の形が合いません' : moved >= 3 ? '指が動いています' : '';
+    J.good = !J.why ? J.good + 1 : 0;
+  } else J.why = '指が見えません';
+  if (J.good >= 3) { S.jt = null; S.stage = 'cal'; S.fP.reset(); S.fD.reset(); ack('joints', true, ''); return; }
+  if (J.n >= 24) { S.jt = null; if (!S.ok) { S.cal = null; S.model = null; } ack('joints', false, J.why); }
 }
 
 function trackFrame(now) {
@@ -156,7 +154,7 @@ function drawOverlay(c, canvas, k) {
     c.beginPath(); c.moveTo(glass.a.x - g.x * 3000, glass.a.y - g.y * 3000); c.lineTo(glass.a.x + g.x * 3000, glass.a.y + g.y * 3000); c.stroke(); c.setLineDash([]);
   }
   // centre cross: the glass line should pass through it
-  if (S.stage === 'place') { c.strokeStyle = 'rgba(255,255,255,.5)'; c.lineWidth = lw(2); const cx = S.W / 2, cy = S.H / 2, r = lw(18);
+  if (!S.bg.ready) { c.strokeStyle = 'rgba(255,255,255,.5)'; c.lineWidth = lw(2); const cx = S.W / 2, cy = S.H / 2, r = lw(18);
     c.beginPath(); c.moveTo(cx - r, cy); c.lineTo(cx + r, cy); c.moveTo(cx, cy - r); c.lineTo(cx, cy + r); c.stroke(); }
   const m = S.cal ? (S.model || (S.model = T.buildModel(S.cal))) : null;
   if (m && S.raw && S.bg.ready) {
@@ -180,7 +178,7 @@ function drawOverlay(c, canvas, k) {
     c.strokeStyle = h.col; c.lineWidth = lw(3); c.beginPath(); c.arc(h.p.x, h.p.y, lw(16), 0, 7); c.stroke();
     c.fillStyle = h.col; c.beginPath(); c.arc(h.p.x, h.p.y, lw(5), 0, 7); c.fill();
   }
-  $('#msg').textContent = S.msg || (S.stage === 'done' ? (S.ok ? '計測中' : '指を見失っています') : '');
+  $('#msg').textContent = !link?.connected ? 'iPadに接続中…' : S.bgBusy ? '背景を撮影中' : S.jt ? '指を合わせ中' : S.cal ? (S.ok ? '計測中' : '指を見失っています') : 'iPadの指示に従ってください';
   $('#meta').textContent = `${S.fps} fps・処理 ${S.procMs.toFixed(1)} ms`;
   $('#linkDot').className = 'dot ' + (link?.connected ? 'ok' : 'warn');
 }
@@ -194,8 +192,8 @@ function handles() {
 // ---------------- messages from the iPad ----------------
 function sendStatus(force) {
   if (!link?.connected) return;
-  link.send({ type: 'status', stage: S.stage, msg: S.msg, progress: S.progress, fps: S.fps, proc: +S.procMs.toFixed(1), W: S.W, H: S.H,
-    glass: !!S.glass, bg: S.bg.ready, cal: !!S.cal, below: S.below, still: S.stillN > 20, adjust: S.adjust,
+  link.send({ type: 'status', stage: S.stage, fps: S.fps, proc: +S.procMs.toFixed(1), W: S.W, H: S.H, busy: S.bgBusy || !!S.jt,
+    glassFound: !!(S.glass || S.glassCand), below: S.below / (S.H || 1), bg: S.bg.ready, cal: !!S.cal, still: S.stillN > 20, adjust: S.adjust,
     res: S.cal ? Math.atan(1 / (0.55 * (S.model || T.buildModel(S.cal)).Lp)) * 180 / Math.PI : null, sim: SIM });
 }
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
@@ -204,10 +202,11 @@ async function onData(m) {
   if (m.type === 'drag') return onDrag(m);
   if (m.type !== 'cmd') return;
   switch (m.name) {
-    case 'bg-now': captureBackground(S.glassCand || S.glass || { a: { x: S.W * 0.1, y: S.H / 2 }, b: { x: S.W * 0.9, y: S.H / 2 } }); break;
-    case 'redo': S.stage = 'place'; S.bg.reset(); S.cal = null; S.model = null; S.glass = null; S.glassStable = 0; S.stillN = 0; S.raw = null; S.filt = null; S.ok = false; break;
-    case 'rejoint': S.stage = 'joints'; S.cal = null; S.model = null; S.calStable = 0; S.raw = null; S.ok = false; if (sim) sim.state.manual = { thp: 70, thd: 45 }; break;
-    case 'adjust': S.adjust = !!m.on; if (!S.adjust && S.cal && S.stage !== 'done') { S.stage = 'done'; } break;
+    case 'bg': captureBackground(); break;
+    case 'joints': if (!S.bg.ready) { ack('joints', false, '背景がありません'); break; } startJoints(); break;
+    case 'go': if (sim) sim.state.manual = null; break;
+    case 'reset': S.stage = 'idle'; S.bg.reset(); S.cal = null; S.model = null; S.glass = null; S.jt = null; S.raw = null; S.filt = null; S.ok = false; if (sim) { sim.state.handIn = false; sim.state.manual = null; } break;
+    case 'adjust': S.adjust = !!m.on; break;
     case 'preview': S.preview = !!m.on; break;
     case 'lat': S.lat = !!m.on; S.latLo = 255; S.latHi = 0; S.latWhite = null; if (sim) sim.state.flash = m.on ? false : null; break;
     case 'simflash': if (sim && S.lat) sim.state.flash = !!m.white; break;
