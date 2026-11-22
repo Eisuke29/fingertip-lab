@@ -48,6 +48,8 @@ async function start() {
     try { await navigator.wakeLock?.request('screen'); } catch {}
     link = await client(room, { onOpen: () => { link.call(peerIdOf(room)); sendStatus(); }, onData, onClose: () => {}, onError: () => {}, onState: (t) => { S.linkState = t; } }, 'phone');
     link.setStream(prev.captureStream(15));
+    S.hostAt = performance.now();
+    setInterval(() => { if (link.connected && performance.now() - S.hostAt > 5000) { S.linkState = 'iPadから応答がありません。つなぎ直しています'; S.hostAt = performance.now(); link.reconnect(); } }, 1000);
     v.requestVideoFrameCallback(onFrame);
   } catch (e) { $('#startErr').textContent = `開始できません：${e.message || e}`; }
 }
@@ -203,7 +205,7 @@ function drawPreview() {
   }
   if (rectCtx && S.rect) { const w = 300, h = w * S.rect.H / S.rect.W; c.drawImage(rectCtx.canvas, prev.width - w - 8, 8, w, h); c.strokeStyle = '#fff'; c.lineWidth = 1; c.strokeRect(prev.width - w - 8, 8, w, h); }
   vctx.drawImage(prev, 0, 0, view.width, view.height);
-  $('#msg').textContent = !link?.connected ? (S.linkState || 'iPadに接続中…') : S.stage === 'cal' ? 'iPadの位置を測っています' : S.bgBusy ? '背景を撮影中' : S.jt ? '指を合わせ中' : S.cal && S.bg.ready ? (S.ok ? '計測中' : '指を見失っています') : 'iPadの指示に従ってください';
+  $('#msg').textContent = !link?.connected || performance.now() - S.hostAt > 3000 ? (S.linkState || 'iPadに接続中…') : S.stage === 'cal' ? 'iPadの位置を測っています' : S.bgBusy ? '背景を撮影中' : S.jt ? '指を合わせ中' : S.cal && S.bg.ready ? (S.ok ? '計測中' : '指を見失っています') : 'iPadの指示に従ってください';
   $('#meta').textContent = `${S.fps} fps・処理 ${S.procMs.toFixed(1)} ms`;
   $('#linkDot').className = 'dot ' + (link?.connected ? 'ok' : 'warn');
 }
@@ -230,6 +232,7 @@ function sendStatus() {
 }
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 async function onData(m) {
+  S.hostAt = performance.now();
   if (m.type === 'ping') { link.send({ type: 'pong', t0: m.t0, t1: performance.now() }); return; }
   if (m.type === 'shown') { const w = showWait; showWait = null; w?.(); return; }
   if (m.type === 'monitor') { link.call(m.id); return; }

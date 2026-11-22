@@ -17,7 +17,7 @@ const P = { status: null, pose: null, poseAt: 0, rtt: null, offset: null, pings:
 const display = new Display($('#display'));
 const eye = new EyeTracker();
 let link = null, eyeOn = false;
-const phoneOn = () => !!link?.has('phone');
+const phoneOn = () => !!link?.has('phone') && performance.now() - (P.phoneAt || 0) < 4000; // only if the iPhone is actually talking
 
 // ---------------- geometry of this screen ----------------
 const Wmm = () => innerWidth * st.mmPerPx, Hmm = () => innerHeight * st.mmPerPx;
@@ -28,9 +28,9 @@ async function startLink() {
   $('#roomCode').textContent = st.room;
   try {
     link = await host(st.room, {
-      onReady: showQR,
+      onReady: () => { P.linkErr = null; showQR(); },
       onOpen: (c) => {
-        if (c.role === 'phone') c.send({ type: 'finger', Lm: st.Lm, dia: st.dia });
+        if (c.role === 'phone') { c.openedAt = performance.now(); P.phoneAt = performance.now(); c.send({ type: 'finger', Lm: st.Lm, dia: st.dia }); }
         else { forwardVideo(c.peer); sendUI(); }
         render();
       },
@@ -50,6 +50,7 @@ async function showQR() {
   render();
 }
 function onPhone(m) {
+  P.phoneAt = performance.now();
   if (m.type === 'pose') { P.pose = m; P.poseAt = performance.now(); if (++P.nPose % 2 === 0) link.send(m, 'monitor'); return; }
   if (m.type === 'show') return showOnScreen(m);
   if (m.type === 'pong') {
@@ -72,7 +73,15 @@ function onMonitor(m) {
   if (m.type === 'press') { const v = stageView(); const b = v?.btns.filter(Boolean)[m.i]; if (b && !b.disabled) b.fn(); }
   else if (m.type === 'goto') tryGoto(m.i);
 }
-setInterval(() => { if (phoneOn()) link.send({ type: 'ping', t0: performance.now() }, 'phone'); }, 1000);
+setInterval(() => {
+  if (!link) return;
+  if (link.peer.destroyed) { location.reload(); return; }
+  if (link.peer.disconnected) { try { link.peer.reconnect(); } catch {} }
+  link.send({ type: 'ping', t0: performance.now() }, 'phone');
+  // a phone link that has gone silent is dead: close it so the iPhone reconnects
+  for (const c of link.conns) if (c.role === 'phone' && performance.now() - (P.phoneAt || 0) > 6000 && performance.now() - (c.openedAt || 0) > 6000) { try { c.close(); } catch {} link.conns.delete(c); }
+  render();
+}, 1000);
 const cmd = (name, extra = {}) => link?.send({ type: 'cmd', name, ...extra }, 'phone');
 
 // ---------------- what this screen shows for the camera (black / dot / grid) ----------------
@@ -105,8 +114,8 @@ const run = (what, extra) => () => { P.ack[what] = null; P.busy = true; cmd(what
 function stageView() {
   const s = P.status, a = P.ack;
   switch (P.stage) {
-    case 0: return { inst: `iPhoneの「横カメラ」に番号 ${st.room} を入れる`,
-      res: P.linkErr ? ng(`通信の準備に失敗（${P.linkErr}）`) : phoneOn() && s ? ok(`つながりました（${s.fps} fps）`) : '待っています',
+    case 0: return { inst: phoneOn() && s ? 'iPhoneとつながりました' : `iPhoneの「横カメラ」に番号 ${st.room} を入れる`,
+      res: phoneOn() && s ? ok(`カメラ ${s.fps} fps`) : P.linkErr ? ng(`通信が切れています（${P.linkErr}）。再接続中`) : '待っています',
       btns: [next(phoneOn() && !!s)] };
     case 1: {
       const i = a.cal?.info;
