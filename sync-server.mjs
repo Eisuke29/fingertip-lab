@@ -14,7 +14,7 @@ import { WebSocketServer } from 'ws';
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUB = path.join(ROOT, 'public');
 const CERTS = path.join(ROOT, 'certs');
-const HTTP_PORT = 8080, HTTPS_PORT = 8443;
+const HTTP_PORT = +(process.env.SYNC_HTTP_PORT || 8080), HTTPS_PORT = +(process.env.SYNC_HTTPS_PORT || 8443); // tests use other ports
 
 const lanIPs = () => Object.values(os.networkInterfaces()).flat().filter((a) => a && a.family === 'IPv4' && !a.internal).map((a) => a.address);
 
