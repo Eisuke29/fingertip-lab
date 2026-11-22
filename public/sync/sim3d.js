@@ -1,8 +1,9 @@
 // Synthetic side camera in 3D (for tests without hardware): an iPad screen tilted in front of a freely placed
 // camera, showing what the iPad shows (black / calibration dot / grid / scene), and a finger at known angles.
+import { drawPattern } from './pattern.js';
 const THREE_URL = 'https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.module.js';
 
-export async function createSim3D({ width = 1280, height = 720, fps = 30, Wmm = 227, Hmm = 158, pip = { x: 0, y: 0 } } = {}) {
+export async function createSim3D({ width = 1920, height = 1080, fps = 30, Wmm = 227, Hmm = 158, pip = { x: 0, y: 0 } } = {}) {
   const THREE = await import(THREE_URL);
   const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
   renderer.setSize(width, height, false); renderer.setPixelRatio(1);
@@ -16,7 +17,7 @@ export async function createSim3D({ width = 1280, height = 720, fps = 30, Wmm = 
   const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(-60, 40, 300); scene.add(sun);
 
   // screen texture
-  const sc = document.createElement('canvas'); sc.width = 1135; sc.height = 790; const sx = sc.getContext('2d');
+  const sc = document.createElement('canvas'); sc.width = 2360; sc.height = 1640; const sx = sc.getContext('2d');
   const tex = new THREE.CanvasTexture(sc); tex.colorSpace = THREE.SRGBColorSpace;
   const screen = new THREE.Mesh(new THREE.PlaneGeometry(Wmm, Hmm), new THREE.MeshBasicMaterial({ map: tex }));
   scene.add(screen);
@@ -26,13 +27,8 @@ export async function createSim3D({ width = 1280, height = 720, fps = 30, Wmm = 
   back.position.set(pip.x + 110, pip.y, 60); back.rotation.y = -Math.PI / 2; scene.add(back);
   const pxmm = sc.width / Wmm, toPx = (x, y) => [(x + Wmm / 2) * pxmm, (Hmm / 2 - y) * pxmm];
   function drawScreen(state) {
-    sx.fillStyle = '#000'; sx.fillRect(0, 0, sc.width, sc.height);
-    if (state.kind === 'dot') { const [x, y] = toPx(state.x, state.y); sx.fillStyle = '#fff'; sx.beginPath(); sx.arc(x, y, (state.r || 7) * pxmm, 0, 7); sx.fill(); }
-    else if (state.kind === 'grid') {
-      sx.strokeStyle = '#9fe'; sx.lineWidth = 2;
-      for (let x = -100; x <= 100; x += 20) { const [a] = toPx(x, 0); sx.beginPath(); sx.moveTo(a, 0); sx.lineTo(a, sc.height); sx.stroke(); }
-      for (let y = -60; y <= 60; y += 20) { const [, b] = toPx(0, y); sx.beginPath(); sx.moveTo(0, b); sx.lineTo(sc.width, b); sx.stroke(); }
-    } else if (state.kind === 'scene') { sx.fillStyle = '#3c4048'; sx.fillRect(0, 0, sc.width, sc.height); const [x, y] = toPx(pip.x, pip.y); sx.strokeStyle = '#ff4d4d'; sx.lineWidth = 6; sx.beginPath(); sx.arc(x, y, 10 * pxmm, 0, 7); sx.stroke(); }
+    if (state.kind === 'scene') { sx.fillStyle = '#3c4048'; sx.fillRect(0, 0, sc.width, sc.height); const [x, y] = toPx(pip.x, pip.y); sx.strokeStyle = '#ff4d4d'; sx.lineWidth = 6; sx.beginPath(); sx.arc(x, y, 10 * pxmm, 0, 7); sx.stroke(); }
+    else drawPattern(sx, sc.width, sc.height, state, Math.round(Wmm / 0.1924), Math.round(Hmm / 0.1924), 0.1924);
     tex.needsUpdate = true;
   }
   drawScreen({ kind: 'black' });

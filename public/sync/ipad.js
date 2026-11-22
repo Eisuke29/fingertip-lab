@@ -4,6 +4,7 @@
 import { Display } from './display.js';
 import { EyeTracker } from './eye.js';
 import { connect } from './wslink.js';
+import { drawPattern } from './pattern.js';
 
 const $ = (s) => document.querySelector(s);
 const STORE = 'syncIpad.v5';
@@ -66,16 +67,9 @@ function show(m, reply = true) {
   P.screenKind = m.kind;
   if (m.kind === 'scene') cc.hidden = true;
   else {
-    cc.hidden = false; cc.width = innerWidth; cc.height = innerHeight;
-    const k = 1 / st.mmPerPx, X = (x) => (x + Wmm() / 2) * k, Y = (y) => (Hmm() / 2 - y) * k;
-    cx.fillStyle = '#000'; cx.fillRect(0, 0, cc.width, cc.height);
-    if (m.kind === 'dot') { cx.fillStyle = '#fff'; cx.beginPath(); cx.arc(X(m.x), Y(m.y), (m.r || 7) * k, 0, 7); cx.fill(); }
-    if (m.kind === 'grid') {
-      cx.strokeStyle = '#ffffff'; cx.lineWidth = 2;
-      for (let x = -100; x <= 100; x += 20) { cx.beginPath(); cx.moveTo(X(x), 0); cx.lineTo(X(x), cc.height); cx.stroke(); }
-      for (let y = -60; y <= 60; y += 20) { cx.beginPath(); cx.moveTo(0, Y(y)); cx.lineTo(cc.width, Y(y)); cx.stroke(); }
-      cx.strokeStyle = '#ff4d4d'; cx.lineWidth = 4; cx.beginPath(); cx.arc(X(0), Y(0), 10 * k, 0, 7); cx.stroke();
-    }
+    cc.hidden = false; const dpr = devicePixelRatio || 1;
+    cc.width = Math.round(innerWidth * dpr); cc.height = Math.round(innerHeight * dpr);
+    drawPattern(cx, cc.width, cc.height, m, innerWidth, innerHeight, st.mmPerPx);
   }
   if (reply) requestAnimationFrame(() => requestAnimationFrame(() => link.send({ type: 'shown', kind: m.kind, to: 'phone' })));
 }

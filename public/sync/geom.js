@@ -71,7 +71,8 @@ const rms = (pose, src, dst) => Math.sqrt(src.reduce((a, s, i) => { const p = pr
 export function estimatePose(src, dst, W, Hh) {
   const Hm = homography(src, dst); if (!Hm) return null;
   const cx = W / 2, cy = Hh / 2, f0 = 0.78 * W;
-  const cost = (f) => { const p = poseForF(Hm, f, cx, cy); return rms(p, src, dst) + 0.6 * ((f - f0) / f0) ** 2; };
+  const prior = src.length > 50 ? 0.02 : 0.6; // with many points the data decide the focal length
+  const cost = (f) => { const p = poseForF(Hm, f, cx, cy); return rms(p, src, dst) + prior * ((f - f0) / f0) ** 2; };
   let lo = 0.45 * W, hi = 1.6 * W;
   for (let it = 0; it < 60; it++) { const m1 = lo + (hi - lo) * 0.382, m2 = lo + (hi - lo) * 0.618; if (cost(m1) < cost(m2)) hi = m2; else lo = m1; }
   const f = (lo + hi) / 2, pose = poseForF(Hm, f, cx, cy);
@@ -106,11 +107,12 @@ export function makeRect(pose, x0, yPip, opt = {}) {
     uPip: (yPip - y0) * s, vGlass: z1 * s };
 }
 // warp a region of the rectified image from the camera frame (ImageData). out: ImageData of size w x h.
-export function warp(rect, frame, x0, y0, w, h, out) {
+// frame may be a crop of the camera image starting at (ox, oy) (see srcBox) to keep reads small at Full HD.
+export function warp(rect, frame, x0, y0, w, h, out, ox = 0, oy = 0) {
   const src = frame.data, FW = frame.width, FH = frame.height, d = out.data;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const k = (y + y0) * rect.W + (x + x0), o = (y * w + x) * 4;
-    const sx = rect.mapX[k], sy = rect.mapY[k];
+    const sx = rect.mapX[k] - ox, sy = rect.mapY[k] - oy;
     const ix = Math.floor(sx), iy = Math.floor(sy);
     if (ix < 0 || iy < 0 || ix >= FW - 1 || iy >= FH - 1) { d[o] = d[o + 1] = d[o + 2] = 0; d[o + 3] = 255; continue; }
     const ax = sx - ix, ay = sy - iy, i = (iy * FW + ix) * 4, j = i + FW * 4;
@@ -146,4 +148,42 @@ export function findDot(on, off, W, H) {
   }
   if (n < 4 || sw <= 0) return null;
   return { x: sx / sw, y: sy / sw, n, peak: best };
+}
+
+// the part of the camera image needed to warp a region of the rectified image
+export function srcBox(rect, x0, y0, w, h, W, H) {
+  let a = Infinity, b = Infinity, c = -Infinity, e = -Infinity;
+  const step = Math.max(1, Math.floor(Math.min(w, h) / 8));
+  const look = (x, y) => { const k = y * rect.W + x, px = rect.mapX[k], py = rect.mapY[k]; if (px < a) a = px; if (px > c) c = px; if (py < b) b = py; if (py > e) e = py; };
+  for (let x = x0; x < x0 + w; x += step) { look(x, y0); look(x, y0 + h - 1); }
+  for (let y = y0; y < y0 + h; y += step) { look(x0, y); look(x0 + w - 1, y); }
+  look(x0 + w - 1, y0 + h - 1);
+  const bx = Math.max(0, Math.floor(a) - 2), by = Math.max(0, Math.floor(b) - 2);
+  const bx1 = Math.min(W, Math.ceil(c) + 3), by1 = Math.min(H, Math.ceil(e) + 3);
+  return { x: bx, y: by, w: Math.max(1, bx1 - bx), h: Math.max(1, by1 - by) };
+}
+
+// ---------- structured light (Gray code) ----------
+export const grayBits = (n) => Math.ceil(Math.log2(Math.max(2, n)));
+// a partial Gray code (the top `depth` bits of a `B`-bit code) -> centre of the cell it names, in px
+export function grayCellCentre(g, depth, B) {
+  let bin = 0, prev = 0;
+  for (let i = depth - 1; i >= 0; i--) { const gb = (g >> i) & 1, bb = prev ^ gb; bin = (bin << 1) | bb; prev = bb; }
+  const cell = 1 << (B - depth);
+  return { c: bin * cell + cell / 2, cell };
+}
+// robust homography: RANSAC on random 4-point sets, then least squares on the inliers
+export function ransacHomography(src, dst, thr = 3, iters = 300) {
+  const n = src.length; if (n < 4) return null;
+  let best = null, bestIn = -1;
+  const err = (H, i) => { const p = applyH(H, src[i].x, src[i].y); return Math.hypot(p.x - dst[i].x, p.y - dst[i].y); };
+  for (let it = 0; it < iters; it++) {
+    const idx = new Set(); while (idx.size < 4) idx.add((Math.random() * n) | 0);
+    const I = [...idx], H = homography(I.map((i) => src[i]), I.map((i) => dst[i])); if (!H) continue;
+    let cnt = 0; for (let i = 0; i < n; i += Math.max(1, (n / 400) | 0)) if (err(H, i) < thr) cnt++;
+    if (cnt > bestIn) { bestIn = cnt; best = H; }
+  }
+  if (!best) return null;
+  const inl = []; for (let i = 0; i < n; i++) if (err(best, i) < thr) inl.push(i);
+  return { inliers: inl };
 }

@@ -51,7 +51,7 @@ async function start() {
     addEventListener('devicemotion', (e) => { const g = e.accelerationIncludingGravity; if (g && g.x != null) S.gravity = S.gravity ? S.gravity.map((v, i) => v * 0.9 + [g.x, g.y, g.z][i] * 0.1) : [g.x, g.y, g.z]; });
     let stream;
     if (SIM) { const { createSim3D } = await import('./sim3d.js'); sim = await createSim3D(); stream = sim.stream; sim.setScreen({ kind: 'scene' }); }
-    else stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60 } }, audio: false });
+    else stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } }, audio: false });
     const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.srcObject = stream; await v.play();
     S.video = v; resize();
     $('#start').style.display = 'none';
@@ -118,35 +118,71 @@ function show(state) { // ask the iPad to show something; resolves when it says 
   if (sim) sim.setScreen(state);
   return new Promise((res) => { showWait = res; link.send({ type: 'show', to: 'ipad', ...state }); setTimeout(() => { if (showWait === res) { showWait = null; res(); } }, 1500); });
 }
-function lumaFull() { const d = wctx.getImageData(0, 0, S.W, S.H).data, L = new Float32Array(S.W * S.H); for (let i = 0, k = 0; k < L.length; i += 4, k++) L[k] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; return L; }
-async function avgLuma(k) { let acc = null; for (let i = 0; i < k; i++) { await nextFrames(1); const L = lumaFull(); if (!acc) acc = L; else for (let j = 0; j < L.length; j++) acc[j] += L[j]; } for (let j = 0; j < acc.length; j++) acc[j] /= k; return acc; }
+// luma of the camera frame at 1/2 resolution (for decoding the patterns)
+const half = document.createElement('canvas'), hctx = half.getContext('2d', { willReadFrequently: true });
+function lumaHalf() {
+  half.width = S.W >> 1; half.height = S.H >> 1; hctx.drawImage(S.video, 0, 0, half.width, half.height);
+  const d = hctx.getImageData(0, 0, half.width, half.height).data, L = new Float32Array(half.width * half.height);
+  for (let i = 0, k = 0; k < L.length; i += 4, k++) L[k] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+  return L;
+}
+async function grab(k = 1) { let acc = null; for (let i = 0; i < k; i++) { await nextFrames(1); const L = lumaHalf(); if (!acc) acc = L; else for (let j = 0; j < L.length; j++) acc[j] += L[j]; } if (k > 1) for (let j = 0; j < acc.length; j++) acc[j] /= k; return acc; }
+async function showGrab(state, k = 1) { await show(state); await nextFrames(2); return grab(k); }
+
+// The iPad shows Gray-code stripes (each with its inverse). Every camera pixel that sees the screen decodes
+// which screen column and row it looks at -> thousands of correspondences -> camera pose.
 async function calibrate(m) {
-  S.busy = '点を測っています';
+  S.busy = 'しま模様で測っています';
   while (placing) await nextFrames(1); // let the placement blinking stop first
   S.screen = m; S.pose = null; S.rect = null; S.bg.reset(); S.cal = null; S.raw = null; S.ok = false; S.showGrid = false; S.calPts = null;
   if (sim) sim.state.handIn = false;
-  const dots = G.dotLayout(m.Wmm, m.Hmm, m.pip);
-  await show({ kind: 'black' }); await nextFrames(6);
-  const off = await avgLuma(3), src = [], dst = [];
-  for (let i = 0; i < dots.length; i++) {
-    S.busy = `点 ${i + 1}/${dots.length} を測っています`;
-    await show({ kind: 'dot', i, x: dots[i].x, y: dots[i].y }); await nextFrames(4);
-    const on = await avgLuma(2), p = G.findDot(on, off, S.W, S.H);
-    if (p) { src.push(dots[i]); dst.push(p); }
+  const w = m.w, h = m.h, mm = m.mmPerPx, Bx = G.grayBits(w), By = G.grayBits(h), MIN = 2; // finest stripe 4 px (0.8 mm)
+  const white = await showGrab({ kind: 'white' }, 2), black = await showGrab({ kind: 'black' }, 2);
+  const N = white.length, amp = new Float32Array(N);
+  for (let k = 0; k < N; k++) amp[k] = white[k] - black[k];
+  const code = { x: new Uint32Array(N), y: new Uint32Array(N) }, depth = { x: new Uint8Array(N), y: new Uint8Array(N) }, dead = { x: new Uint8Array(N), y: new Uint8Array(N) };
+  const total = (Bx - MIN) + (By - MIN); let done = 0;
+  for (const [axis, B] of [['x', Bx], ['y', By]]) {
+    for (let bit = B - 1; bit >= MIN; bit--) {
+      S.busy = `しま模様 ${++done}/${total}`;
+      const P = await showGrab({ kind: 'gray', axis, bit }), I = await showGrab({ kind: 'gray', axis, bit, inv: true });
+      const c = code[axis], dp = depth[axis], dd = dead[axis];
+      for (let k = 0; k < N; k++) {
+        if (dd[k] || amp[k] < 40) continue;
+        const d = P[k] - I[k];
+        if (Math.abs(d) < 0.25 * amp[k]) { dd[k] = 1; continue; } // too fine to see here: stop at the previous bit
+        c[k] = (c[k] << 1) | (d > 0 ? 1 : 0); dp[k]++;
+      }
+    }
   }
   await show({ kind: 'grid' }); S.busy = null;
-  if (src.length < 6) { ack('cal', false, `点が ${src.length}/${dots.length} 個しか見えません`, { n: src.length, of: dots.length }); return; }
-  const pose = G.estimatePose(src, dst, S.W, S.H);
-  if (!pose || pose.rms > 4) { ack('cal', false, `点の位置が計算と合いません（ずれ ${pose ? pose.rms.toFixed(1) : '?'} 画素）`, { n: src.length, of: dots.length }); return; }
+  // one correspondence per decoded cell: average of the camera pixels that see it
+  const HW = S.W >> 1, cells = new Map();
+  for (let k = 0; k < N; k++) {
+    if (amp[k] < 40 || depth.x[k] < 4 || depth.y[k] < 4) continue;
+    const cx = G.grayCellCentre(code.x[k], depth.x[k], Bx), cy = G.grayCellCentre(code.y[k], depth.y[k], By);
+    if (cx.cell > 16 || cy.cell > 16) continue; // cell larger than ~3 mm: too coarse
+    const key = cx.c * 4096 + cy.c; let e = cells.get(key);
+    if (!e) cells.set(key, e = { px: cx.c, py: cy.c, u: 0, v: 0, n: 0 });
+    e.u += (k % HW + 0.5) * 2; e.v += (((k / HW) | 0) + 0.5) * 2; e.n++;
+  }
+  const src = [], dst = [];
+  for (const e of cells.values()) { if (e.n < 2) continue; src.push({ x: (e.px - w / 2) * mm, y: (h / 2 - e.py) * mm }); dst.push({ x: e.u / e.n, y: e.v / e.n }); }
+  if (src.length < 30) { ack('cal', false, `iPadの画面が読み取れません（使えた点 ${src.length}）`, { n: src.length }); return; }
+  const rs = G.ransacHomography(src, dst, 3);
+  const isrc = rs ? rs.inliers.map((i) => src[i]) : [], idst = rs ? rs.inliers.map((i) => dst[i]) : [];
+  if (isrc.length < 30) { ack('cal', false, `読み取れた点が合いません（${isrc.length}/${src.length}）`, { n: isrc.length }); return; }
+  const pose = G.estimatePose(isrc, idst, S.W, S.H);
+  if (!pose || pose.rms > 3) { ack('cal', false, `計算が合いません（ずれ ${pose ? pose.rms.toFixed(1) : '?'} 画素）`, { n: isrc.length }); return; }
   S.pose = pose; S.showGrid = true;
-  S.calPts = src.map((s, i) => ({ seen: dst[i], pred: G.project(pose, [s.x, s.y, 0]) }));
-  S.rect = G.makeRect(pose, m.pip.x, m.pip.y);
+  const step = Math.max(1, Math.floor(isrc.length / 80));
+  S.calPts = []; for (let i = 0; i < isrc.length; i += step) S.calPts.push({ seen: idst[i], pred: G.project(pose, [isrc[i].x, isrc[i].y, 0]) });
+  S.rect = G.makeRect(pose, m.pip.x, m.pip.y); S.rectBox = null; S.roiKey = '';
   rectBuf = new ImageData(S.rect.W, S.rect.H);
   const C = pose.C, dx = C[0] - m.pip.x, dy = C[1] - m.pip.y, dist = Math.hypot(dx, dy, C[2]);
-  // the bending-plane box must be inside the picture
   const corners = [[S.rect.y0, S.rect.z0], [S.rect.y1, S.rect.z0], [S.rect.y1, S.rect.z1], [S.rect.y0, S.rect.z1]].map(([y, z]) => G.project(pose, [m.pip.x, y, z]));
   const inside = corners.every((p) => p && p.x >= 0 && p.y >= 0 && p.x <= S.W && p.y <= S.H);
-  S.calInfo = { rms: pose.rms, n: src.length, of: dots.length, fW: pose.f / S.W, dist, C, inside,
+  S.calInfo = { rms: pose.rms, n: isrc.length, of: src.length, fW: pose.f / S.W, dist, C, inside,
     elev: Math.atan2(C[2], Math.hypot(dx, dy)) * 180 / Math.PI, side: Math.atan2(Math.abs(dy), Math.abs(dx)) * 180 / Math.PI, scale: S.rect.s,
     tiltCam: tiltFromCamera(pose) };
   ack('cal', true, '', S.calInfo);
@@ -163,7 +199,7 @@ function tiltFromCamera(pose) {
 }
 
 // ---------------- 2. background of the rectified bending plane ----------------
-function rectFull() { const fr = wctx.getImageData(0, 0, S.W, S.H); return G.warp(S.rect, fr, 0, 0, S.rect.W, S.rect.H, rectBuf); }
+function rectFull() { const bx = S.rectBox || (S.rectBox = G.srcBox(S.rect, 0, 0, S.rect.W, S.rect.H, S.W, S.H)); const fr = wctx.getImageData(bx.x, bx.y, bx.w, bx.h); return G.warp(S.rect, fr, 0, 0, S.rect.W, S.rect.H, rectBuf, bx.x, bx.y); }
 function captureBackground() {
   if (!S.rect) { ack('bg', false, '先にiPadの位置を測ってください'); return; }
   S.showGrid = false; S.bgBusy = true; S.bg.reset(); S.bgFrames = -6; S.bgRef = null; S.cal = null; S.model = null; S.raw = null; S.ok = false;
@@ -207,8 +243,10 @@ function trackFrame(now) {
   if (!S.model) S.model = T.buildModel(S.cal);
   const m = S.model, roi = T.roiFor(m, S.rect.W, S.rect.H);
   if (!S.roiBuf || S.roiBuf.width !== roi.w || S.roiBuf.height !== roi.h) S.roiBuf = new ImageData(roi.w, roi.h);
-  const fr = wctx.getImageData(0, 0, S.W, S.H);
-  G.warp(S.rect, fr, roi.x0, roi.y0, roi.w, roi.h, S.roiBuf);
+  const key = `${roi.x0},${roi.y0},${roi.w},${roi.h}`;
+  if (S.roiKey !== key) { S.roiKey = key; S.roiBox = G.srcBox(S.rect, roi.x0, roi.y0, roi.w, roi.h, S.W, S.H); }
+  const bx = S.roiBox, fr = wctx.getImageData(bx.x, bx.y, bx.w, bx.h);
+  G.warp(S.rect, fr, roi.x0, roi.y0, roi.w, roi.h, S.roiBuf, bx.x, bx.y);
   const f = T.foreground(S.roiBuf, roi, S.bg);
   const r = T.track(f, m, S.prev);
   const okP = r.scoreP > T.SCORE_OK, okD = r.scoreD > T.SCORE_OK;
@@ -269,7 +307,7 @@ function drawPreview() {
       c.setLineDash([8, 6]); for (let i = 0; i < 4; i++) line(q[i], q[i + 1], TGT, 2); c.setLineDash([]); }
     const ci = S.calInfo;
     if (S.step === 2 && ci) {
-      lines.push([`点のずれ ${ci.rms.toFixed(2)} 画素（目標 1.5 以下）・${ci.n}/${ci.of} 点`, ci.rms <= 1.5 && ci.n >= 7 ? OK : NG]);
+      lines.push([`点のずれ ${ci.rms.toFixed(2)} 画素（目標 1.0 以下）・使えた点 ${ci.n}`, ci.rms <= 1.0 && ci.n >= 200 ? OK : NG]);
       lines.push(['確認：ピンクの線が iPad の白い格子に重なっているか', TGT]);
       lines.push([`距離 ${(ci.dist / 10).toFixed(0)} cm（15〜30）・見下ろし ${ci.elev.toFixed(0)}°（0〜35）`, ci.dist >= 150 && ci.dist <= 300 && ci.elev <= 35 ? OK : WARN]);
       if (!ci.inside) lines.push(['黄色の枠（指を測る範囲）が映像からはみ出しています → iPhoneを離すか向きを直す', NG]);

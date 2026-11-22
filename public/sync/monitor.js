@@ -67,17 +67,17 @@ function stepView() {
       btns: [next(live.ipad() && ip?.tapped && live.phone())] };
     case 2: return {
       why: 'iPhoneから見たiPadの位置と傾きを測る（指の角度の基準になる）',
-      todo: '映像の黄色い枠に ○ が入るようにiPhoneを置いて固定 → 手を離して［測る］（iPadに点が順に光る・約10秒）',
+      todo: '映像の黄色い枠に ○ が入るようにiPhoneを置いて固定 → 手を離して［測る］（iPadにしま模様が順に出る・約5秒）',
       checks: [chk(ci ? 'ok' : s?.ring ? 'ok' : 'ng', '○ が映っている'),
-        chk(!ci ? 'na' : ci.rms <= 1.5 ? 'ok' : 'ng', '点のずれ 1.5 画素以下', ci ? `${ci.rms.toFixed(2)} 画素` : ''),
-        chk(!ci ? 'na' : ci.n >= 7 ? 'ok' : 'ng', '9点中7点以上見えた', ci ? `${ci.n}/${ci.of}` : ''),
+        chk(!ci ? 'na' : ci.rms <= 1.0 ? 'ok' : 'ng', '点のずれ 1.0 画素以下', ci ? `${ci.rms.toFixed(2)} 画素` : ''),
+        chk(!ci ? 'na' : ci.n >= 200 ? 'ok' : 'ng', 'iPadの画面を読み取れた点 200 以上', ci ? `${ci.n}（${ci.of}中）` : ''),
         chk(!ci ? 'na' : ci.inside ? 'ok' : 'ng', '指を測る範囲（黄色の点線）が映像に入っている'),
         chk(!ci ? 'na' : 'warn', '映像のピンクの線がiPadの白い格子に重なる（目で確認）'),
         chk(!ci || ci.tiltCam == null || ip?.tilt == null ? 'na' : Math.abs(ci.tiltCam - ip.tilt) <= 3 ? 'ok' : 'warn', '傾きの照合（カメラから／iPadのセンサー）', ci && ci.tiltCam != null && ip?.tilt != null ? `${ci.tiltCam.toFixed(1)}° / ${ip.tilt.toFixed(1)}°` : '')],
-      fixes: a.cal && !a.cal.ok ? [a.cal.msg, '点が足りない → iPhoneを ○ の方へ向ける・近づける（15〜30cm）', 'ずれが大きい → 測っている間にiPhoneやiPadが動いた。固定してもう一回'] :
+      fixes: a.cal && !a.cal.ok ? [a.cal.msg, '読み取れない → iPadの画面の明るさを最大に、照明が画面に映り込まない向きにする', 'iPhoneを ○ の方へ向け、15〜30cm・見下ろし15〜30°にする', '測っている間はiPhone・iPadを動かさない'] :
         ci && !ci.inside ? ['黄色の点線が映像からはみ出している → iPhoneを少し離す、または ○ が映像の中央下に来るよう向きを直す'] :
-        ci && ci.rms > 1.5 ? ['ずれが大きい → iPhone・iPadを固定してもう一回'] : [],
-      btns: [btn(ci ? 'もう一回' : '測る', () => run('cal', { Wmm: ip.Wmm, Hmm: ip.Hmm, pip: ip.pip }), !ci, !ip), next(!!ci && ci.rms <= 1.5 && ci.n >= 7 && ci.inside)] };
+        ci && ci.rms > 1.0 ? ['ずれが大きい → iPhone・iPadを固定し、照明の映り込みを減らしてもう一回'] : [],
+      btns: [btn(ci ? 'もう一回' : '測る', () => run('cal', { Wmm: ip.Wmm, Hmm: ip.Hmm, pip: ip.pip, w: ip.w, h: ip.h, mmPerPx: ip.mmPerPx }), !ci, !ip), next(!!ci && ci.rms <= 1.0 && ci.n >= 200 && ci.inside)] };
     case 3: return {
       why: '指がないときの映像を覚える（指だけを取り出すため）', todo: '手を映像から出して［撮る］ → 3秒後に撮影',
       checks: [chk(s?.still ? 'ok' : 'ng', '映像が止まっている'), chk(!a.bg ? 'na' : a.bg.ok ? 'ok' : 'ng', '背景が撮れた')],
@@ -105,7 +105,7 @@ function stepView() {
 }
 const btn = (label, fn, primary, disabled = false) => ({ label, fn, primary, disabled });
 const next = (enabled) => ({ label: '次へ ▶', fn: () => { C.done[C.step] = true; goStep(C.step + 1); }, next: true, disabled: !enabled, primary: enabled });
-function run(name, extra = {}) { C.ack[name] = null; C.busy = name === 'cal' ? 'iPadに点を順に光らせて測っています（約10秒）…' : name === 'joints' ? '指を合わせています（最長10秒）…' : '実行中…'; toPhone(name, extra); render(); }
+function run(name, extra = {}) { C.ack[name] = null; C.busy = name === 'cal' ? 'iPadにしま模様を出して測っています（約5秒）…' : name === 'joints' ? '指を合わせています（最長10秒）…' : '実行中…'; toPhone(name, extra); render(); }
 function countdownBg() {
   C.ack.bg = null; let n = 3;
   const tick = () => { if (n > 0) { C.busy = `${n} 秒後に撮ります（手を出して、動かさない）`; toPhone('countdown', { n }); n--; render(); setTimeout(tick, 1000); } else { C.busy = '撮影中…'; toPhone('bg'); render(); } };
@@ -146,7 +146,7 @@ function renderNums() {
   const s = C.status, ci = C.ack.cal?.info, j = C.ack.joints?.info, ip = C.ipad;
   $('#nums').innerHTML = (s ? row('カメラ', `${s.fps} fps・${s.W}×${s.H}`) + row('1フレームの処理', `${s.proc} ms`) + row('PC↔iPhone 往復', C.rtt != null ? `${C.rtt.toFixed(0)} ms` : '—') : '')
     + (ip ? row('iPadの画面', `${ip.Wmm.toFixed(0)} × ${ip.Hmm.toFixed(0)} mm`) + row('iPadの傾き（センサー）', ip.tilt != null ? `${ip.tilt.toFixed(1)}°` : '—') : '')
-    + (ci ? row('点のずれ', `${ci.rms.toFixed(2)} 画素（${ci.n}/${ci.of}）`) + row('カメラまでの距離', `${(ci.dist / 10).toFixed(1)} cm`) + row('見下ろす角度', `${ci.elev.toFixed(1)}°`) + row('焦点距離（画像幅比）', ci.fW.toFixed(3)) + row('指の面の解像度', `${ci.scale.toFixed(1)} px/mm`) : '')
+    + (ci ? row('点のずれ', `${ci.rms.toFixed(2)} 画素（使えた点 ${ci.n}）`) + row('カメラまでの距離', `${(ci.dist / 10).toFixed(1)} cm`) + row('見下ろす角度', `${ci.elev.toFixed(1)}°`) + row('焦点距離（画像幅比）', ci.fW.toFixed(3)) + row('指の面の解像度', `${ci.scale.toFixed(1)} px/mm`) : '')
     + (j ? row('第2関節の ○ からのずれ', `${j.pipOffsetMm.toFixed(1)} mm`) + row('中節の長さ / 太さ', `${j.LmMm.toFixed(1)} / ${j.diaMm.toFixed(1)} mm`) : '');
 }
 
