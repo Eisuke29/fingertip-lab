@@ -9,6 +9,7 @@ import * as G from './geom.js';
 import { connect } from './wslink.js';
 import { discInBox } from './ring.js';
 import { autoReload } from './autoreload.js';
+import { VERSION } from './version.js';
 
 const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -28,7 +29,7 @@ let link = null, sim = null;
 const work = document.createElement('canvas'), wctx = work.getContext('2d', { willReadFrequently: true });
 const small = document.createElement('canvas'); small.width = 160; small.height = 90; const sctx = small.getContext('2d', { willReadFrequently: true });
 const view = $('#view'), vctx = view.getContext('2d');
-const prev = document.createElement('canvas'); prev.width = 960; prev.height = 540; const pctx = prev.getContext('2d');
+const prev = document.createElement('canvas'); prev.width = 1280; prev.height = 720; const pctx = prev.getContext('2d');
 let rectBuf = null, rectCtx = null;
 const toMon = (m) => link?.send({ ...m, to: 'monitor' });
 
@@ -409,11 +410,11 @@ function drawRectOverlay(c) {
 let sending = false;
 function sendFrame() { // small JPEG preview for the PC (~7 fps); the measurement uses the full camera frames
   if (sending || !link?.connected) return; sending = true;
-  prev.toBlob((b) => { if (b) link.sendBinary(b); sending = false; }, 'image/jpeg', 0.65);
+  prev.toBlob((b) => { if (b) link.sendBinary(b); sending = false; }, 'image/jpeg', 0.82);
 }
 function sendStatus() {
   if (!link?.connected) return;
-  toMon({ type: 'status', fps: S.fps, proc: +S.procMs.toFixed(1), W: S.W, H: S.H, busy: !!S.busy || S.bgBusy || !!S.jt,
+  toMon({ type: 'status', version: VERSION, fps: S.fps, proc: +S.procMs.toFixed(1), W: S.W, H: S.H, busy: !!S.busy || S.bgBusy || !!S.jt,
     calibrated: !!S.pose, bg: S.bg.ready, cal: !!S.cal, calInfo: S.calInfo, sim: SIM, still: S.diff < 2, ring: !!S.ring, why: S.why,
     gravity: S.gravity, res: S.cal && S.rect ? Math.atan(1 / (0.55 * (S.model || T.buildModel(S.cal)).Lp)) * 180 / Math.PI : null });
 }

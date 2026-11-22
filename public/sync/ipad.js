@@ -6,6 +6,7 @@ import { EyeTracker } from './eye.js';
 import { connect } from './wslink.js';
 import { drawPattern } from './pattern.js';
 import { autoReload } from './autoreload.js';
+import { VERSION } from './version.js';
 autoReload();
 
 const $ = (s) => document.querySelector(s);
@@ -32,7 +33,7 @@ const link = connect('local', 'ipad', {
 
 // ---------------- report geometry + tilt to the PC ----------------
 function report() {
-  toMon({ type: 'ipadinfo', Wmm: Wmm(), Hmm: Hmm(), pip: { x: 0, y: 0 }, mmPerPx: st.mmPerPx, tilt: P.tilt, tapped: P.tapped, eyeOn: P.eyeOn, eyeStatus: P.eyeOn ? eye.status : '', finger: P.finger, w: innerWidth, h: innerHeight });
+  toMon({ type: 'ipadinfo', version: VERSION, Wmm: Wmm(), Hmm: Hmm(), pip: { x: 0, y: 0 }, mmPerPx: st.mmPerPx, tilt: P.tilt, tapped: P.tapped, eyeOn: P.eyeOn, eyeStatus: P.eyeOn ? eye.status : '', finger: P.finger, w: innerWidth, h: innerHeight });
 }
 setInterval(report, 1000);
 $('#tap').addEventListener('pointerdown', async () => {

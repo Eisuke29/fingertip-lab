@@ -48,10 +48,12 @@ const all = () => [peers.ipad, peers.phone, ...peers.monitors].filter(Boolean);
 const sendTo = (ws, data, binary = false) => { if (ws && ws.readyState === 1 && (!binary || ws.bufferedAmount < 1.5e6)) ws.send(data, { binary }); };
 function attach(wss) {
   wss.on('connection', (ws, req) => {
-    const role = new URL(req.url, 'http://x').searchParams.get('role');
+    const q = new URL(req.url, 'http://x').searchParams, role = q.get('role');
     if (!['ipad', 'phone', 'monitor'].includes(role)) { ws.close(1008, 'role'); return; }
+    // pages from before versioning keep reconnecting with old code: refuse them so they cannot take the slot
+    if (!q.get('v')) { console.log(`  古い版のページを断りました（${role}・${req.socket.remoteAddress}）`); ws.close(4001, 'old version'); return; }
     if (role === 'monitor') peers.monitors.add(ws);
-    else { if (peers[role] && peers[role] !== ws) peers[role].terminate(); peers[role] = ws; }
+    else { const old = peers[role]; if (old && old !== ws) { sendTo(old, '{"type":"replaced"}'); setTimeout(() => old.terminate(), 200); } peers[role] = ws; }
     ws.role = role; ws.alive = true;
     console.log(`  つながりました: ${role === 'ipad' ? 'iPad' : role === 'phone' ? 'iPhone' : 'PC確認画面'}（${req.socket.remoteAddress}）`);
     for (const c of all()) sendTo(c, presence());

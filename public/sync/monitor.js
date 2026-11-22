@@ -2,6 +2,7 @@
 // the iPad only shows, the iPhone only measures.
 import { connect } from './wslink.js';
 import { autoReload } from './autoreload.js';
+import { VERSION } from './version.js';
 autoReload();
 
 const $ = (s) => document.querySelector(s);
@@ -41,9 +42,16 @@ let info = null;
 fetch('/api/info').then((r) => r.json()).then((j) => { info = j; render(); }).catch(() => {});
 const live = { ipad: () => !!C.ipad && link.presence.ipad && performance.now() - C.ipadAt < 3000, phone: () => !!C.status && link.presence.phone && performance.now() - C.statusAt < 3000 };
 let qrKey = '';
+function versionWarning() {
+  const old = [];
+  if (C.status && C.status.version !== VERSION) old.push('iPhone');
+  if (C.ipad && C.ipad.version !== VERSION) old.push('iPad');
+  return old.length ? `<div class="fix" style="margin-top:8px"><b>${old.join('・')}が古い版のまま動いています</b><ul><li>${old.join('・')}で開いているページを全部閉じる（Safariのタブも、ホーム画面のアプリも、アプリ一覧で上にスワイプ）</li><li>このPCの画面のQRから開き直す</li></ul></div>` : '';
+}
 function renderLinks() {
   const dot = (ok, t) => `<span><span style="color:${ok ? 'var(--ok)' : 'var(--ng)'}">●</span> ${t}</span>`;
   const fps = C.status?.fps;
+  $('#ver').innerHTML = versionWarning();
   $('#links').innerHTML = dot(link.connected, 'PC') + dot(live.ipad(), 'iPad') + dot(live.phone(), `iPhone${live.phone() ? `（${fps} fps）` : ''}`) + dot(performance.now() - C.frameAt < 1500, '映像');
   const ip = info?.ips?.[0], need = [];
   if (ip && !live.ipad()) need.push(['iPad', `https://${ip}:${info.https}/sync/ipad.html`]);

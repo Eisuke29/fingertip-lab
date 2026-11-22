@@ -1,9 +1,10 @@
 // Connection to the PC relay (sync-server.mjs). Reconnects by itself; a silent link is treated as dead.
 // addr: the PC's address (e.g. 172.20.10.2), or 'local' when the page itself is served by the PC.
 export const HTTPS_PORT = 8443;
+import { VERSION } from './version.js';
 export function wsUrl(addr, role) {
-  if (addr === 'local') return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/sync-ws?role=${role}`;
-  return `wss://${addr}:${HTTPS_PORT}/sync-ws?role=${role}`;
+  if (addr === 'local') return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/sync-ws?role=${role}&v=${VERSION}`;
+  return `wss://${addr}:${HTTPS_PORT}/sync-ws?role=${role}&v=${VERSION}`;
 }
 export function connect(addr, role, h = {}) {
   let ws = null, alive = true, lastMsg = 0, everOpen = false;
@@ -21,6 +22,7 @@ export function connect(addr, role, h = {}) {
       if (typeof e.data !== 'string') { h.onBinary?.(e.data); return; }
       let m; try { m = JSON.parse(e.data); } catch { return; }
       if (m.type === 'beat') return;
+      if (m.type === 'replaced') { alive = false; state('同じ役割のページが別に開かれたので、こちらは止めました'); try { sock.close(); } catch {} return; }
       if (m.type === 'presence') { api.presence = m; h.onPresence?.(m); return; }
       h.onData?.(m);
     };

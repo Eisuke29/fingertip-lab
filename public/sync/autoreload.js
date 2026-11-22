@@ -1,6 +1,6 @@
 // When the page files on the PC change (a fix was made), open pages reload themselves, so the iPad / iPhone / PC
 // never keep running an old version. Compares the content of the page files every 3 s (works with any server).
-const FILES = ['phone.js', 'ipad.js', 'monitor.js', 'tracker.js', 'geom.js', 'ring.js', 'wslink.js', 'pattern.js', 'display.js', 'autoreload.js', 'phone.html', 'ipad.html', 'monitor.html'];
+const FILES = ['phone.js', 'ipad.js', 'monitor.js', 'tracker.js', 'geom.js', 'ring.js', 'wslink.js', 'pattern.js', 'display.js', 'autoreload.js', 'version.js', 'phone.html', 'ipad.html', 'monitor.html'];
 export function autoReload(beforeReload) {
   if (/github\.io$/.test(location.hostname)) return;
   let v0 = null;
