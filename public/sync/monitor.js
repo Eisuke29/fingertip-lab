@@ -1,34 +1,31 @@
-// PC monitor: watches the iPhone camera and the estimates; can press the same buttons as the iPad.
-import { client } from './link.js';
+// PC monitor (served by the PC's sync-server): the iPhone camera with the estimates, the numbers, and the same
+// step buttons as the iPad.
+import { connect } from './wslink.js';
 
 const $ = (s) => document.querySelector(s);
-const params = new URLSearchParams(location.search);
-let saved = {}; try { saved = JSON.parse(localStorage.getItem('syncMonitor.v1') || '{}'); } catch {}
-$('#code').value = (params.get('room') || saved.room || '').toUpperCase();
-let link = null, ui = null, status = null, statusAt = 0, pose = null, poseAt = 0;
+let link = null, ui = null, status = null, statusAt = 0, pose = null, poseAt = 0, frameAt = 0, fw = 0, fh = 0;
 
-$('#go').onclick = join;
-$('#code').addEventListener('keydown', (e) => { if (e.key === 'Enter') join(); });
-if (params.get('room')) setTimeout(join, 50);
-async function join() {
-  const room = $('#code').value.trim().toUpperCase();
-  if (room.length !== 4) { $('#joinMsg').textContent = '4文字を入れてください'; return; }
-  saved.room = room; try { localStorage.setItem('syncMonitor.v1', JSON.stringify(saved)); } catch {}
-  $('#joinMsg').textContent = 'つないでいます…';
-  try {
-    link = await client(room, {
-      onOpen: () => { $('#join').style.display = 'none'; $('#main').classList.add('on'); },
-      onData, onStream: (s) => { const v = $('#pv'); v.srcObject = s; v.play().catch(() => {}); },
-      onClose: () => { $('#join').style.display = 'flex'; $('#main').classList.remove('on'); $('#joinMsg').textContent = '切れました。つなぎ直しています'; },
-      onError: () => {}, onState: (t) => { $('#joinMsg').textContent = t; },
-    }, 'monitor');
-  } catch (e) { $('#joinMsg').textContent = e.message; }
+if (/github\.io$/.test(location.hostname)) {
+  $('#joinMsg').innerHTML = 'この画面はPCの同期サーバーから開きます：<br><b>同期サーバー起動.bat</b> を開いてから <a href="http://localhost:8080/sync/monitor.html" style="color:#5aa9ff">http://localhost:8080/sync/monitor.html</a>';
+} else {
+  link = connect('local', 'monitor', {
+    onOpen: () => { $('#join').style.display = 'none'; $('#main').classList.add('on'); },
+    onClose: () => { $('#join').style.display = 'flex'; $('#main').classList.remove('on'); },
+    onData, onBinary: showFrame, onState: (t) => { $('#joinMsg').textContent = t; },
+  });
 }
 function onData(m) {
   if (m.type === 'ui') { ui = m; renderUI(); }
   else if (m.type === 'status') { status = m; statusAt = performance.now(); renderNums(); }
   else if (m.type === 'pose') { pose = m; poseAt = performance.now(); }
   else if (m.type === 'ack') renderNums();
+}
+const pv = $('#pv'), pvx = pv.getContext('2d');
+let drawing = false;
+async function showFrame(b) {
+  if (drawing) return; drawing = true;
+  try { const bm = await createImageBitmap(b); if (pv.width !== bm.width) { pv.width = bm.width; pv.height = bm.height; } pvx.drawImage(bm, 0, 0); fw = bm.width; fh = bm.height; bm.close?.(); frameAt = performance.now(); } catch {}
+  drawing = false;
 }
 function renderUI() {
   $('#stages').innerHTML = ui.names.map((n, i) => `<span class="sg ${i === ui.stage ? 'cur' : ui.done[i] ? 'done' : ''}" data-i="${i}"><i>${ui.done[i] && i !== ui.stage ? '✓' : i + 1}</i>${n}</span>`).join('');
@@ -48,11 +45,12 @@ function renderNums() {
     + (s.res != null ? row('角度の分解能（1画素）', `${s.res.toFixed(2)}°`) : '') + (j ? row('PIPの ○ からのずれ', `${j.pipOffsetMm.toFixed(1)} mm`) + row('中節の長さ / 太さ', `${j.LmMm.toFixed(1)} / ${j.diaMm.toFixed(1)} mm`) : '') : row('iPhone', '未接続');
 }
 setInterval(() => {
-  const v = $('#pv'), dot = (ok, t) => `<span><span style="color:${ok ? 'var(--ok)' : 'var(--ng)'}">●</span> ${t}</span>`;
-  const phoneLive = ui?.phone && performance.now() - statusAt < 3000;
-  $('#links').innerHTML = dot(link?.connected, 'iPad') + dot(phoneLive, `iPhone${phoneLive && status ? `（${status.fps} fps）` : ''}`) + dot(v.videoWidth > 0, v.videoWidth ? `映像 ${v.videoWidth}×${v.videoHeight}` : '映像なし');
+  if (!link) return;
+  const p = link.presence, dot = (ok, t) => `<span><span style="color:${ok ? 'var(--ok)' : 'var(--ng)'}">●</span> ${t}</span>`;
+  const phoneLive = p.phone && performance.now() - statusAt < 3000, video = performance.now() - frameAt < 1500;
+  $('#links').innerHTML = dot(link.connected, 'PC') + dot(p.ipad, 'iPad') + dot(phoneLive, `iPhone${phoneLive && status ? `（${status.fps} fps）` : ''}`) + dot(video, video ? `映像 ${fw}×${fh}` : '映像なし');
   const fresh = pose && performance.now() - poseAt < 600;
   $('#p').textContent = fresh ? (pose.fthp ?? pose.thp).toFixed(1) + '°' : '—'; $('#d').textContent = fresh ? (pose.fthd ?? pose.thd).toFixed(1) + '°' : '—';
   $('#trk').textContent = fresh ? (pose.ok ? `一致度 ${pose.sp.toFixed(2)} / ${pose.sd.toFixed(2)}` : '指を見失っています') : '';
-}, 100);
-window.monitor = { get ui() { return ui; }, get status() { return status; } };
+}, 200);
+window.monitor = { get ui() { return ui; }, get status() { return status; }, get link() { return link; } };

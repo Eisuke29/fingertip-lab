@@ -35,13 +35,10 @@
 </head>
 <body>
 <div id="join">
-  <div class="note">iPadに出ている番号</div>
-  <input id="code" maxlength="4" autocomplete="off" spellcheck="false">
-  <button class="btn primary" id="go">つなぐ</button>
-  <div class="note" id="joinMsg"></div>
+  <div class="note" id="joinMsg" style="font-size:16px;text-align:center">PCにつないでいます</div>
 </div>
 <div id="main">
-  <div id="vwrap"><video id="pv" muted playsinline autoplay></video></div>
+  <div id="vwrap"><canvas id="pv"></canvas></div>
   <div id="side">
     <div class="card" id="links" style="display:flex;gap:14px;font-size:14px"></div>
     <div class="card"><div id="stages"></div><div id="inst"></div><div id="res"></div><div id="btns"></div></div>
@@ -51,6 +48,6 @@
     <div class="card note legend">映像の線：<span style="background:#3ee"></span>iPadの枠（推定）<span style="background:#ff00c8"></span>格子（推定）<span style="background:#ff4d4d"></span>○<br>右上の小窓：指の曲がる面を真横から見た図（<span style="background:#4a86e8"></span>基節<span style="background:#f0953a"></span>末節、点線＝仮想指）</div>
   </div>
 </div>
-<script type="module" src="./monitor.js?v=1"></script>
+<script type="module" src="./monitor.js?v=2"></script>
 </body>
 </html>

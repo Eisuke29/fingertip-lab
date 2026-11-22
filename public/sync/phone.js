@@ -6,7 +6,7 @@
 // Camera frames stay on the devices; the preview video goes only to the iPad / the PC monitor.
 import * as T from './tracker.js';
 import * as G from './geom.js';
-import { client, peerIdOf } from './link.js';
+import { connect } from './wslink.js';
 
 const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -20,7 +20,7 @@ const S = {
   bg: new T.Background(), bgBusy: false, bgFrames: 0, bgRef: null,
   cal: null, model: null, jt: null, raw: null, filt: null, ok: false, prev: {},
   fP: new T.OneEuro(1.2, 0.25), fD: new T.OneEuro(1.2, 0.25), Lm: 25, dia: 15,
-  collect: null, lat: false, latLo: 255, latHi: 0, latWhite: null, waiters: [],
+  collect: null, previewOn: true, presence: null, lat: false, latLo: 255, latHi: 0, latWhite: null, waiters: [],
 };
 let link = null, sim = null;
 const work = document.createElement('canvas'), wctx = work.getContext('2d', { willReadFrequently: true });
@@ -30,14 +30,14 @@ const prev = document.createElement('canvas'); prev.width = 960; prev.height = 5
 let rectBuf = null, rectCtx = null;
 
 // ---------------- start ----------------
-const codeIn = $('#code');
-codeIn.value = (params.get('room') || saved.room || '').toUpperCase();
+const addrIn = $('#addr');
+addrIn.value = params.get('pc') || saved.addr || '';
 $('#go').onclick = start;
-if (SIM && codeIn.value) setTimeout(start, 50);
+if (SIM && addrIn.value) setTimeout(start, 50);
 async function start() {
-  const room = codeIn.value.trim().toUpperCase();
-  if (room.length !== 4) { $('#startErr').textContent = 'iPadに出ている4文字を入れてください'; return; }
-  saved.room = room; try { localStorage.setItem(STORE, JSON.stringify(saved)); } catch {}
+  const addr = addrIn.value.trim();
+  if (!addr) { $('#startErr').textContent = 'PCのアドレスを入れてください（PCの同期サーバーの画面に出ています）'; return; }
+  saved.addr = addr; try { localStorage.setItem(STORE, JSON.stringify(saved)); } catch {}
   try {
     let stream;
     if (SIM) { const { createSim3D } = await import('./sim3d.js'); sim = await createSim3D(); stream = sim.stream; }
@@ -46,10 +46,7 @@ async function start() {
     S.video = v; resize();
     $('#start').style.display = 'none';
     try { await navigator.wakeLock?.request('screen'); } catch {}
-    link = await client(room, { onOpen: () => { link.call(peerIdOf(room)); sendStatus(); }, onData, onClose: () => {}, onError: () => {}, onState: (t) => { S.linkState = t; } }, 'phone');
-    link.setStream(prev.captureStream(15));
-    S.hostAt = performance.now();
-    setInterval(() => { if (link.connected && performance.now() - S.hostAt > 5000) { S.linkState = 'iPadから応答がありません。つなぎ直しています'; S.hostAt = performance.now(); link.reconnect(); } }, 1000);
+    link = connect(addr, 'phone', { onOpen: () => sendStatus(), onData, onState: (t) => { S.linkState = t; }, onPresence: (p) => { S.presence = p; } });
     v.requestVideoFrameCallback(onFrame);
   } catch (e) { $('#startErr').textContent = `開始できません：${e.message || e}`; }
 }
@@ -75,6 +72,7 @@ function onFrame(now) {
   if (S.collect && S.raw) S.collect.push({ thp: S.raw.thp, thd: S.raw.thd, ok: S.ok });
   if (S.lat) latencyFrame();
   if (n % 2 === 0) drawPreview();
+  if (S.previewOn && n % 4 === 0) sendFrame();
   if (n % 8 === 0) sendStatus();
   S.video.requestVideoFrameCallback(onFrame);
 }
@@ -205,7 +203,7 @@ function drawPreview() {
   }
   if (rectCtx && S.rect) { const w = 300, h = w * S.rect.H / S.rect.W; c.drawImage(rectCtx.canvas, prev.width - w - 8, 8, w, h); c.strokeStyle = '#fff'; c.lineWidth = 1; c.strokeRect(prev.width - w - 8, 8, w, h); }
   vctx.drawImage(prev, 0, 0, view.width, view.height);
-  $('#msg').textContent = !link?.connected || performance.now() - S.hostAt > 3000 ? (S.linkState || 'iPadに接続中…') : S.stage === 'cal' ? 'iPadの位置を測っています' : S.bgBusy ? '背景を撮影中' : S.jt ? '指を合わせ中' : S.cal && S.bg.ready ? (S.ok ? '計測中' : '指を見失っています') : 'iPadの指示に従ってください';
+  $('#msg').textContent = !link?.connected ? (S.linkState || 'PCに接続中…') : !S.presence?.ipad ? 'iPadがまだPCにつながっていません' : S.stage === 'cal' ? 'iPadの位置を測っています' : S.bgBusy ? '背景を撮影中' : S.jt ? '指を合わせ中' : S.cal && S.bg.ready ? (S.ok ? '計測中' : '指を見失っています') : 'iPadの指示に従ってください';
   $('#meta').textContent = `${S.fps} fps・処理 ${S.procMs.toFixed(1)} ms`;
   $('#linkDot').className = 'dot ' + (link?.connected ? 'ok' : 'warn');
 }
@@ -224,6 +222,12 @@ function drawRectOverlay(c) {
 }
 
 // ---------------- messages ----------------
+// small JPEG preview for the iPad / PC (about 7 fps); the measurement itself uses the full camera frames
+let sending = false;
+function sendFrame() {
+  if (sending || !link?.connected) return; sending = true;
+  prev.toBlob((b) => { if (b) link.sendBinary(b); sending = false; }, 'image/jpeg', 0.6);
+}
 function sendStatus() {
   if (!link?.connected) return;
   link.send({ type: 'status', stage: S.stage, fps: S.fps, proc: +S.procMs.toFixed(1), W: S.W, H: S.H, busy: S.bgBusy || !!S.jt || S.stage === 'cal',
@@ -232,10 +236,8 @@ function sendStatus() {
 }
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 async function onData(m) {
-  S.hostAt = performance.now();
   if (m.type === 'ping') { link.send({ type: 'pong', t0: m.t0, t1: performance.now() }); return; }
   if (m.type === 'shown') { const w = showWait; showWait = null; w?.(); return; }
-  if (m.type === 'monitor') { link.call(m.id); return; }
   if (m.type === 'finger') { S.Lm = m.Lm; S.dia = m.dia; return; }
   if (m.type !== 'cmd') return;
   switch (m.name) {
@@ -243,6 +245,7 @@ async function onData(m) {
     case 'bg': captureBackground(); break;
     case 'joints': if (!S.bg.ready) { ack('joints', false, '背景がありません'); break; } startJoints(); break;
     case 'go': if (sim) sim.state.manual = null; break;
+    case 'preview': S.previewOn = !!m.on; break;
     case 'lat': S.lat = !!m.on; S.latLo = 255; S.latHi = 0; S.latWhite = null; break;
     case 'jitter': {
       if (sim) sim.state.manual = { thp: 80, thd: 30 };

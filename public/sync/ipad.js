@@ -2,87 +2,67 @@
 //  1 iPhone  2 iPadの位置 (camera pose from dots on this screen)  3 背景  4 指  5 描画
 import { Display } from './display.js';
 import { EyeTracker } from './eye.js';
-import { host, newCode } from './link.js';
+import { connect } from './wslink.js';
 
 const $ = (s) => document.querySelector(s);
 const STORE = 'syncIpad.v3';
-const DEF = { mmPerPx: 0.1924, mmCal: false, Lm: 25, Ld: 22, dia: 15, eyeX: 180, eyeY: 120, eyeZ: 450, hfov: 90, pipX: 83, pipY: 24, room: '' };
+const DEF = { mmPerPx: 0.1924, mmCal: false, Lm: 25, Ld: 22, dia: 15, eyeX: 180, eyeY: 120, eyeZ: 450, hfov: 90, pipX: 83, pipY: 24, addr: '' };
 const st = { ...DEF };
 try { Object.assign(st, JSON.parse(localStorage.getItem(STORE) || '{}')); } catch {}
 const save = () => { try { localStorage.setItem(STORE, JSON.stringify(st)); } catch {} };
-if (!st.room) { st.room = newCode(); save(); }
+const params = new URLSearchParams(location.search); if (params.get('pc')) { st.addr = params.get('pc'); save(); }
 
 const P = { status: null, pose: null, poseAt: 0, rtt: null, offset: null, pings: [], results: [],
   stage: 0, done: [false, false, false, false, false], ack: {}, busy: false, screenKind: 'scene', nPose: 0 };
 const display = new Display($('#display'));
 const eye = new EyeTracker();
 let link = null, eyeOn = false;
-const phoneOn = () => !!link?.has('phone') && performance.now() - (P.phoneAt || 0) < 4000; // only if the iPhone is actually talking
+const phoneOn = () => !!link?.presence.phone && performance.now() - (P.phoneAt || 0) < 4000; // only if the iPhone is actually talking
+const monitorOn = () => (link?.presence.monitors || 0) > 0;
 
 // ---------------- geometry of this screen ----------------
 const Wmm = () => innerWidth * st.mmPerPx, Hmm = () => innerHeight * st.mmPerPx;
 const pipMm = () => ({ x: (st.pipX / 100 - 0.5) * Wmm(), y: (st.pipY / 100 - 0.5) * Hmm() });
 
-// ---------------- link ----------------
-async function startLink() {
-  $('#roomCode').textContent = st.room;
-  try {
-    link = await host(st.room, {
-      onReady: () => { P.linkErr = null; showQR(); },
-      onOpen: (c) => {
-        if (c.role === 'phone') { c.openedAt = performance.now(); P.phoneAt = performance.now(); c.send({ type: 'finger', Lm: st.Lm, dia: st.dia }); }
-        else { forwardVideo(c.peer); sendUI(); }
-        render();
-      },
-      onClose: (c) => { if (c.role === 'phone') P.status = null; render(); },
-      onData: (m, c) => (c.role === 'monitor' ? onMonitor(m) : onPhone(m)),
-      onStream: (s) => { P.phoneStream = s; const v = $('#pv'); v.srcObject = s; v.play().catch(() => {}); for (const c of link.conns) if (c.role === 'monitor' && c.open) forwardVideo(c.peer); render(); },
-      onError: (e) => { if (e.type === 'unavailable-id') { st.room = newCode(); save(); location.reload(); } else { P.linkErr = e.type || e.message; render(); } },
-    });
-  } catch (e) { P.linkErr = e.message; render(); }
+// ---------------- link (through the PC relay) ----------------
+function startLink() {
+  link?.close(); link = null; P.status = null;
+  if (!st.addr) { render(); return; }
+  link = connect(st.addr, 'ipad', {
+    onOpen: () => { link.send({ type: 'finger', Lm: st.Lm, dia: st.dia, to: 'phone' }); render(); },
+    onPresence: (p) => { if (p.phone && !P.prevPhone) link.send({ type: 'finger', Lm: st.Lm, dia: st.dia, to: 'phone' }); P.prevPhone = p.phone; if (!p.phone) P.status = null; sendUI(); render(); },
+    onData: (m) => (m.from === 'monitor' ? onMonitor(m) : onPhone(m)),
+    onBinary: (b) => showFrame(b),
+    onState: (t) => { P.linkState = t; render(); },
+  });
 }
-async function showQR() {
-  const u = new URL('phone.html', location.href); u.search = `?room=${st.room}`;
-  try {
-    if (!window.qrcode) await new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js'; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
-    const q = window.qrcode(0, 'M'); q.addData(u.href); q.make(); $('#qr').innerHTML = `<img alt="" src="${q.createDataURL(5, 1)}">`;
-  } catch {}
-  render();
+// preview frames (JPEG) from the iPhone
+const pv = $('#pv'), pvx = pv.getContext('2d');
+let drawing = false;
+async function showFrame(b) {
+  if (drawing || pv.hidden) return; drawing = true;
+  try { const bm = await createImageBitmap(b); if (pv.width !== bm.width) { pv.width = bm.width; pv.height = bm.height; } pvx.drawImage(bm, 0, 0); bm.close?.(); P.frameAt = performance.now(); } catch {}
+  drawing = false;
 }
 function onPhone(m) {
   P.phoneAt = performance.now();
-  if (m.type === 'pose') { P.pose = m; P.poseAt = performance.now(); if (++P.nPose % 2 === 0) link.send(m, 'monitor'); return; }
+  if (m.type === 'pose') { P.pose = m; P.poseAt = performance.now(); return; }
   if (m.type === 'show') return showOnScreen(m);
   if (m.type === 'pong') {
     const t2 = performance.now(); P.pings.push({ rtt: t2 - m.t0, off: m.t1 - (m.t0 + t2) / 2 }); if (P.pings.length > 12) P.pings.shift();
     const b = P.pings.reduce((a, x) => (x.rtt < a.rtt ? x : a)); P.rtt = b.rtt; P.offset = b.off; return;
   }
-  link.send(m, 'monitor');
   if (m.type === 'status') { P.status = m; render(); }
   else if (m.type === 'ack') { P.ack[m.what] = m; P.busy = false; render(); }
   else if (m.type === 'lat-edge') latEdge(m);
   else if (m.type === 'result') onResult(m);
 }
-const fwd = new Map();
-function forwardVideo(id) {
-  if (!P.phoneStream || !link) return;
-  try { fwd.get(id)?.close(); } catch {}
-  fwd.set(id, link.peer.call(id, P.phoneStream));
-}
 function onMonitor(m) {
   if (m.type === 'press') { const v = stageView(); const b = v?.btns.filter(Boolean)[m.i]; if (b && !b.disabled) b.fn(); }
   else if (m.type === 'goto') tryGoto(m.i);
 }
-setInterval(() => {
-  if (!link) return;
-  if (link.peer.destroyed) { location.reload(); return; }
-  if (link.peer.disconnected) { try { link.peer.reconnect(); } catch {} }
-  link.send({ type: 'ping', t0: performance.now() }, 'phone');
-  // a phone link that has gone silent is dead: close it so the iPhone reconnects
-  for (const c of link.conns) if (c.role === 'phone' && performance.now() - (P.phoneAt || 0) > 6000 && performance.now() - (c.openedAt || 0) > 6000) { try { c.close(); } catch {} link.conns.delete(c); }
-  render();
-}, 1000);
-const cmd = (name, extra = {}) => link?.send({ type: 'cmd', name, ...extra }, 'phone');
+setInterval(() => { if (link?.connected) link.send({ type: 'ping', t0: performance.now(), to: 'phone' }); render(); }, 1000);
+const cmd = (name, extra = {}) => link?.send({ type: 'cmd', name, ...extra, to: 'phone' });
 
 // ---------------- what this screen shows for the camera (black / dot / grid) ----------------
 const cc = $('#calCanvas'), cx = cc.getContext('2d');
@@ -102,7 +82,7 @@ function showOnScreen(m) {
     }
     document.body.classList.toggle('dots', m.kind !== 'grid');
   }
-  requestAnimationFrame(() => requestAnimationFrame(() => link.send({ type: 'shown', kind: m.kind }, 'phone')));
+  requestAnimationFrame(() => requestAnimationFrame(() => link.send({ type: 'shown', kind: m.kind, to: 'phone' })));
 }
 
 // ---------------- stages ----------------
@@ -114,8 +94,8 @@ const run = (what, extra) => () => { P.ack[what] = null; P.busy = true; cmd(what
 function stageView() {
   const s = P.status, a = P.ack;
   switch (P.stage) {
-    case 0: return { inst: phoneOn() && s ? 'iPhoneとつながりました' : `iPhoneの「横カメラ」に番号 ${st.room} を入れる`,
-      res: phoneOn() && s ? ok(`カメラ ${s.fps} fps`) : P.linkErr ? ng(`通信が切れています（${P.linkErr}）。再接続中`) : '待っています',
+    case 0: return { inst: !link?.connected ? 'PCのアドレスを入れる' : phoneOn() && s ? 'iPhoneとつながりました' : 'iPhoneの「横カメラ」を開いて［開始］',
+      res: !st.addr ? '' : !link?.connected ? ng(P.linkState || 'PCにつないでいます') : phoneOn() && s ? ok(`カメラ ${s.fps} fps`) : 'PCにはつながりました。iPhoneを待っています',
       btns: [next(phoneOn() && !!s)] };
     case 1: {
       const i = a.cal?.info;
@@ -152,9 +132,9 @@ function render() {
   $('#stages').innerHTML = NAMES.map((n, i) => `<button class="sg ${i === P.stage ? 'cur' : P.done[i] ? 'done' : ''}" data-i="${i}"><i>${P.done[i] && i !== P.stage ? '✓' : i + 1}</i>${n}</button>`).join('');
   $('#stages').querySelectorAll('.sg').forEach((b) => (b.onclick = () => tryGoto(+b.dataset.i)));
   $('#eyeBtn').hidden = !draw; $('#backBtn').hidden = !draw;
-  $('#room').innerHTML = `番号 <b id="roomCode">${st.room}</b>${link?.has('monitor') ? '　PC ●' : ''}`;
-  $('#qr').hidden = P.stage !== 0 || phoneOn();
-  $('#pv').hidden = P.stage < 1 || P.stage > 3 || !$('#pv').srcObject;
+  $('#room').innerHTML = `PC <b>${st.addr || '—'}</b> <span style="color:${link?.connected ? 'var(--ok)' : 'var(--ng)'}">●</span>${monitorOn() ? '　確認画面 ●' : ''}`;
+  $('#addrBox').hidden = P.stage !== 0 || !!link?.connected;
+  pv.hidden = P.stage < 1 || P.stage > 3 || !P.frameAt;
   $('#pipLabel').hidden = P.stage !== 3;
   display.setFingerVisible(draw || !!P.ack.joints?.ok);
   if (!draw) {
@@ -170,9 +150,9 @@ function render() {
   sendUI();
 }
 function sendUI() {
-  if (!link?.has('monitor')) return;
+  if (!monitorOn()) return;
   const v = P.stage < 4 ? stageView() : null;
-  link.send({ type: 'ui', room: st.room, video: !!P.phoneStream, stage: P.stage, names: NAMES, done: P.done, busy: P.busy, phone: phoneOn(),
+  link.send({ type: 'ui', to: 'monitor', addr: st.addr, stage: P.stage, names: NAMES, done: P.done, busy: P.busy, phone: phoneOn(),
     inst: v?.inst || '体験中', res: P.busy ? '…' : v?.res || '', btns: (v?.btns || []).filter(Boolean).map((b) => ({ label: b.label, disabled: !!b.disabled || (P.busy && !b.next), primary: !!(b.primary || (b.next && !b.disabled)) })),
     calInfo: P.ack.cal?.info || null, joints: P.ack.joints?.info || null, rtt: P.rtt }, 'monitor');
 }
@@ -220,7 +200,7 @@ function latEdge(m) {
 
 // ---------------- settings ----------------
 function bindSettings() {
-  const num = (id, key) => { const e = $(id); e.value = st[key]; e.onchange = () => { const v = parseFloat(e.value); if (isFinite(v)) { st[key] = v; save(); layout(); render(); if (key === 'Lm' || key === 'dia') link?.send({ type: 'finger', Lm: st.Lm, dia: st.dia }, 'phone'); } }; };
+  const num = (id, key) => { const e = $(id); e.value = st[key]; e.onchange = () => { const v = parseFloat(e.value); if (isFinite(v)) { st[key] = v; save(); layout(); render(); if (key === 'Lm' || key === 'dia') link?.send({ type: 'finger', Lm: st.Lm, dia: st.dia, to: 'phone' }); } }; };
   for (const [id, k] of [['#sPipX', 'pipX'], ['#sPipY', 'pipY'], ['#sLm', 'Lm'], ['#sLd', 'Ld'], ['#sDia', 'dia'], ['#sEyeX', 'eyeX'], ['#sEyeY', 'eyeY'], ['#sEyeZ', 'eyeZ'], ['#sFov', 'hfov']]) num(id, k);
   const cw = $('#cardW'), card = $('#card');
   const show = () => { const w = 85.6 / st.mmPerPx; cw.value = Math.round(w); card.style.width = w + 'px'; card.style.height = (w * 54 / 85.6) + 'px'; };
@@ -228,7 +208,7 @@ function bindSettings() {
   show();
   $('#gear').onclick = () => { $('#drawer').classList.toggle('open'); renderVerify(); };
   $('#closeDrawer').onclick = () => $('#drawer').classList.remove('open');
-  $('#newRoom').onclick = () => { st.room = newCode(); save(); location.reload(); };
+
 }
 
 // ---------------- display ----------------
@@ -250,6 +230,8 @@ $('#eyeBtn').onclick = async () => {
   if (eyeOn) { try { await eye.start('user'); } catch { eyeOn = false; $('#eyeBtn').setAttribute('aria-pressed', 'false'); } } else eye.stop();
 };
 
+$('#addrGo').onclick = () => { st.addr = $('#addrIn').value.trim(); save(); startLink(); };
+$('#addrIn').value = st.addr || '';
 bindSettings(); layout(); render(); requestAnimationFrame(loop); startLink();
 try { navigator.wakeLock?.request('screen').catch(() => {}); } catch {}
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') try { navigator.wakeLock?.request('screen').catch(() => {}); } catch {} });

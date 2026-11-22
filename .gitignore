@@ -7,3 +7,5 @@ playwright-report/
 *.log
 .env*
 public/vendor/
+
+certs/
