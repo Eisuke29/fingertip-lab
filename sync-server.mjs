@@ -84,16 +84,22 @@ function statusPage(ips) {
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>同期サーバー</title>
 <style>body{margin:0;padding:24px;background:#101216;color:#eef0f3;font:16px/1.6 system-ui,"Yu Gothic UI",sans-serif}h1{font-size:18px;margin:0 0 4px}.addr{font:700 44px ui-monospace,monospace;letter-spacing:.04em}
 .card{background:#181b21;border:1px solid #2f343e;border-radius:12px;padding:14px 16px;margin:14px 0;max-width:720px}.dot{font-size:18px}a{color:#5aa9ff}.mut{color:#9aa1ab;font-size:14px}ol{margin:6px 0;padding-left:20px}</style></head><body>
-<h1>PCのアドレス（iPad・iPhoneに入れる）</h1><div class="addr">${ip}</div>
+<h1>PCのアドレス</h1><div class="addr">${ip}</div>
 <div class="card" id="st">接続状況を確認中…</div>
-<div class="card"><b><a href="/sync/monitor.html">PCの確認画面を開く</a></b></div>
-<div class="card"><b>初回だけ：iPhoneとiPadに証明書を入れる</b>
+<div class="card"><b>① 初回だけ：iPhoneとiPadに証明書を入れる</b>
 <ol><li>iPhone（iPadも）のSafariで <b>http://${ip}:${HTTP_PORT}/ca</b> を開き「許可」</li>
 <li>設定 →「プロファイルがダウンロード済み」→ インストール</li>
 <li>設定 → 一般 → 情報 → 証明書信頼設定 →「Fingertip Lab Local CA」をオン</li>
 <li>確認：Safariで <a href="https://${ip}:${HTTPS_PORT}/ok">https://${ip}:${HTTPS_PORT}/ok</a> を開いて「OK」と出ればよい</li></ol>
 <div class="mut">証明書はこのPCのフォルダ certs/ にだけあります。</div></div>
-<script>async function u(){try{const p=await (await fetch('/api/presence')).json();const d=(b,t)=>'<span class="dot" style="color:'+(b?'#3ecf8e':'#ff6b6b')+'">●</span> '+t;document.getElementById('st').innerHTML=d(p.ipad,'iPad')+'　'+d(p.phone,'iPhone')+'　'+d(p.monitors>0,'PC確認画面');}catch{}}setInterval(u,1000);u();</script></body></html>`;
+<div class="card" style="display:flex;gap:28px;flex-wrap:wrap">
+<div><b>② iPhone</b>（カメラで読む）<div id="qp"></div><div class="mut">https://${ip}:${HTTPS_PORT}/sync/phone.html</div></div>
+<div><b>② iPad</b><div id="qi"></div><div class="mut">https://${ip}:${HTTPS_PORT}/sync/ipad.html</div></div>
+<div class="mut" style="max-width:220px">開いたら 共有 →「ホーム画面に追加」。次からはホーム画面のアイコンで開く</div></div>
+<div class="card"><b><a href="/sync/monitor.html">PCの確認画面を開く</a></b></div>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script>for(const [id,u] of [['qp','https://${ip}:${HTTPS_PORT}/sync/phone.html'],['qi','https://${ip}:${HTTPS_PORT}/sync/ipad.html']]){try{const q=qrcode(0,'M');q.addData(u);q.make();document.getElementById(id).innerHTML='<img style="background:#fff;padding:6px;border-radius:8px;width:150px" src="'+q.createDataURL(5,1)+'">';}catch{}}
+async function u(){try{const p=await (await fetch('/api/presence')).json();const d=(b,t)=>'<span class="dot" style="color:'+(b?'#3ecf8e':'#ff6b6b')+'">●</span> '+t;document.getElementById('st').innerHTML=d(p.ipad,'iPad')+'　'+d(p.phone,'iPhone')+'　'+d(p.monitors>0,'PC確認画面');}catch{}}setInterval(u,1000);u();</script></body></html>`;
 }
 function handler(ips) {
   return (req, res) => {

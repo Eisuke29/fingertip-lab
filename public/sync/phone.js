@@ -32,12 +32,17 @@ let rectBuf = null, rectCtx = null;
 // ---------------- start ----------------
 const addrIn = $('#addr');
 addrIn.value = params.get('pc') || saved.addr || '';
+const LOCAL = !/github\.io$/.test(location.hostname); // served by the PC's sync-server
+if (LOCAL) { addrIn.value = 'local'; addrIn.hidden = true; document.querySelector('.lbl').hidden = true; }
 $('#go').onclick = start;
 if (SIM && addrIn.value) setTimeout(start, 50);
+let started = false;
 async function start() {
+  if (started) return; // a second tap must not open a second connection
+  started = true;
   const addr = addrIn.value.trim();
-  if (!addr) { $('#startErr').textContent = 'PCのアドレスを入れてください（PCの同期サーバーの画面に出ています）'; return; }
-  saved.addr = addr; try { localStorage.setItem(STORE, JSON.stringify(saved)); } catch {}
+  if (!addr) { started = false; $('#startErr').textContent = 'PCのアドレスを入れてください（PCの同期サーバーの画面に出ています）'; return; }
+  if (!LOCAL) saved.addr = addr; try { localStorage.setItem(STORE, JSON.stringify(saved)); } catch {}
   try {
     let stream;
     if (SIM) { const { createSim3D } = await import('./sim3d.js'); sim = await createSim3D(); stream = sim.stream; }
@@ -48,7 +53,7 @@ async function start() {
     try { await navigator.wakeLock?.request('screen'); } catch {}
     link = connect(addr, 'phone', { onOpen: () => sendStatus(), onData, onState: (t) => { S.linkState = t; }, onPresence: (p) => { S.presence = p; } });
     v.requestVideoFrameCallback(onFrame);
-  } catch (e) { $('#startErr').textContent = `開始できません：${e.message || e}`; }
+  } catch (e) { started = false; $('#startErr').textContent = `開始できません：${e.message || e}`; }
 }
 function resize() {
   const v = S.video;

@@ -11,6 +11,8 @@ const st = { ...DEF };
 try { Object.assign(st, JSON.parse(localStorage.getItem(STORE) || '{}')); } catch {}
 const save = () => { try { localStorage.setItem(STORE, JSON.stringify(st)); } catch {} };
 const params = new URLSearchParams(location.search); if (params.get('pc')) { st.addr = params.get('pc'); save(); }
+const LOCAL = !/github\.io$/.test(location.hostname); // served by the PC's sync-server
+if (LOCAL) st.addr = 'local';
 
 const P = { status: null, pose: null, poseAt: 0, rtt: null, offset: null, pings: [], results: [],
   stage: 0, done: [false, false, false, false, false], ack: {}, busy: false, screenKind: 'scene', nPose: 0 };
@@ -132,7 +134,7 @@ function render() {
   $('#stages').innerHTML = NAMES.map((n, i) => `<button class="sg ${i === P.stage ? 'cur' : P.done[i] ? 'done' : ''}" data-i="${i}"><i>${P.done[i] && i !== P.stage ? '✓' : i + 1}</i>${n}</button>`).join('');
   $('#stages').querySelectorAll('.sg').forEach((b) => (b.onclick = () => tryGoto(+b.dataset.i)));
   $('#eyeBtn').hidden = !draw; $('#backBtn').hidden = !draw;
-  $('#room').innerHTML = `PC <b>${st.addr || '—'}</b> <span style="color:${link?.connected ? 'var(--ok)' : 'var(--ng)'}">●</span>${monitorOn() ? '　確認画面 ●' : ''}`;
+  $('#room').innerHTML = `PC <b>${LOCAL ? location.hostname : st.addr || '—'}</b> <span style="color:${link?.connected ? 'var(--ok)' : 'var(--ng)'}">●</span>${monitorOn() ? '　確認画面 ●' : ''}`;
   $('#addrBox').hidden = P.stage !== 0 || !!link?.connected;
   pv.hidden = P.stage < 1 || P.stage > 3 || !P.frameAt;
   $('#pipLabel').hidden = P.stage !== 3;
