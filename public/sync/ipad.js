@@ -137,6 +137,7 @@ function render() {
   $('#stages').innerHTML = NAMES.map((n, i) => `<button class="sg ${i === P.stage ? 'cur' : P.done[i] ? 'done' : ''}" data-i="${i}"><i>${P.done[i] && i !== P.stage ? '✓' : i + 1}</i>${n}</button>`).join('');
   $('#stages').querySelectorAll('.sg').forEach((b) => (b.onclick = () => tryGoto(+b.dataset.i)));
   $('#eyeBtn').hidden = !draw; $('#backBtn').hidden = !draw;
+  $('#room').innerHTML = `番号 <b id="roomCode">${st.room}</b>${link?.has('monitor') ? '　PC ●' : ''}`;
   $('#qr').hidden = P.stage !== 0 || phoneOn();
   $('#pv').hidden = P.stage < 1 || P.stage > 3 || !$('#pv').srcObject;
   $('#pipLabel').hidden = P.stage !== 3;

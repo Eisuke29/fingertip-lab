@@ -19,7 +19,8 @@ async function join() {
     link = await client(room, {
       onOpen: () => { $('#join').style.display = 'none'; $('#main').classList.add('on'); },
       onData, onStream: (s) => { const v = $('#pv'); v.srcObject = s; v.play().catch(() => {}); },
-      onClose: () => {}, onError: () => {},
+      onClose: () => { $('#join').style.display = 'flex'; $('#main').classList.remove('on'); $('#joinMsg').textContent = '切れました。つなぎ直しています'; },
+      onError: () => {}, onState: (t) => { $('#joinMsg').textContent = t; },
     }, 'monitor');
   } catch (e) { $('#joinMsg').textContent = e.message; }
 }

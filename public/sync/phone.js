@@ -46,7 +46,7 @@ async function start() {
     S.video = v; resize();
     $('#start').style.display = 'none';
     try { await navigator.wakeLock?.request('screen'); } catch {}
-    link = await client(room, { onOpen: () => { link.call(peerIdOf(room)); sendStatus(); }, onData, onClose: () => {}, onError: () => {} }, 'phone');
+    link = await client(room, { onOpen: () => { link.call(peerIdOf(room)); sendStatus(); }, onData, onClose: () => {}, onError: () => {}, onState: (t) => { S.linkState = t; } }, 'phone');
     link.setStream(prev.captureStream(15));
     v.requestVideoFrameCallback(onFrame);
   } catch (e) { $('#startErr').textContent = `開始できません：${e.message || e}`; }
@@ -203,7 +203,7 @@ function drawPreview() {
   }
   if (rectCtx && S.rect) { const w = 300, h = w * S.rect.H / S.rect.W; c.drawImage(rectCtx.canvas, prev.width - w - 8, 8, w, h); c.strokeStyle = '#fff'; c.lineWidth = 1; c.strokeRect(prev.width - w - 8, 8, w, h); }
   vctx.drawImage(prev, 0, 0, view.width, view.height);
-  $('#msg').textContent = !link?.connected ? 'iPadに接続中…' : S.stage === 'cal' ? 'iPadの位置を測っています' : S.bgBusy ? '背景を撮影中' : S.jt ? '指を合わせ中' : S.cal && S.bg.ready ? (S.ok ? '計測中' : '指を見失っています') : 'iPadの指示に従ってください';
+  $('#msg').textContent = !link?.connected ? (S.linkState || 'iPadに接続中…') : S.stage === 'cal' ? 'iPadの位置を測っています' : S.bgBusy ? '背景を撮影中' : S.jt ? '指を合わせ中' : S.cal && S.bg.ready ? (S.ok ? '計測中' : '指を見失っています') : 'iPadの指示に従ってください';
   $('#meta').textContent = `${S.fps} fps・処理 ${S.procMs.toFixed(1)} ms`;
   $('#linkDot').className = 'dot ' + (link?.connected ? 'ok' : 'warn');
 }

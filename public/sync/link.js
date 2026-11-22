@@ -50,17 +50,34 @@ export async function client(code, h, role = 'phone') {
     call(id) { if (!stream) return; try { calls.get(id)?.close(); } catch {} calls.set(id, peer.call(id, stream)); },
     close() { alive = false; try { peer.destroy(); } catch {} },
   };
+  const state = (t) => h.onState?.(t);
   const connect = () => {
     if (!alive || peer.destroyed) return;
+    state('iPadを探しています');
     const c = peer.connect(peerIdOf(code), { serialization: 'json', reliable: true, metadata: { role } });
-    c.on('open', () => { conn = c; h.onOpen?.(); });
+    // diagnose: found the iPad but the direct link between the devices does not come up
+    const watch = setInterval(() => {
+      const pc = c.peerConnection; if (!pc) return;
+      const s = pc.iceConnectionState;
+      if (s === 'checking') state('iPadは見つかりました。直接つないでいます');
+      if (s === 'failed' || s === 'disconnected') { state('iPadは見つかりましたが、直接つながりません（Wi-Fiが端末どうしの通信を止めている可能性）'); clearInterval(watch); }
+      if (c.open) clearInterval(watch);
+    }, 500);
+    setTimeout(() => { if (!c.open && c.peerConnection) state('iPadは見つかりましたが、直接つながりません（Wi-Fiが端末どうしの通信を止めている可能性）'); }, 12000);
+    c.on('open', () => { conn = c; clearInterval(watch); state('つながりました'); h.onOpen?.(); });
     c.on('data', (m) => h.onData?.(m));
     c.on('close', () => { if (conn === c) { conn = null; h.onClose?.(); } setTimeout(connect, 1500); });
     c.on('error', () => {});
   };
   peer.on('open', connect);
   peer.on('call', (call) => { call.answer(); call.on('stream', (s) => h.onStream?.(s)); });
-  peer.on('disconnected', () => { try { peer.reconnect(); } catch {} });
-  peer.on('error', (e) => { h.onError?.(e); if (e.type === 'peer-unavailable') setTimeout(connect, 2000); });
+  peer.on('disconnected', () => { state('仲介サーバーとの接続が切れました。再接続しています'); try { peer.reconnect(); } catch {} });
+  peer.on('error', (e) => {
+    h.onError?.(e);
+    if (e.type === 'peer-unavailable') { state(`番号 ${String(code).toUpperCase()} のiPadが見つかりません（iPadのアプリが開いているか、番号が合っているか確認）`); setTimeout(connect, 2000); }
+    else if (e.type === 'network' || e.type === 'server-error' || e.type === 'socket-error') state('仲介サーバーにつながりません（インターネット接続を確認）');
+    else state(`通信エラー：${e.type}`);
+  });
+  setTimeout(() => { if (!peer.open) state('仲介サーバーにつながりません（インターネット接続を確認）'); }, 8000);
   return api;
 }
