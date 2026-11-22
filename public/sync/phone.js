@@ -7,7 +7,7 @@
 import * as T from './tracker.js';
 import * as G from './geom.js';
 import { connect } from './wslink.js';
-import { blinkBlob } from './ring.js';
+import { discInBox } from './ring.js';
 
 const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -98,17 +98,24 @@ function stats() {
 }
 // before the iPad position is measured: the iPad blinks a white disc at the ring; find it in the picture
 let placing = false;
+const BOX = { x0: 0.3, x1: 0.7, y0: 0.5, y1: 0.82 }; // target zone for the ring (also drawn on the preview)
 function lumaSmall() { const W = 320, H = Math.round(320 * S.H / S.W); sctx.canvas.width = W; sctx.canvas.height = H; sctx.drawImage(S.video, 0, 0, W, H); const d = sctx.getImageData(0, 0, W, H).data, L = new Float32Array(W * H); for (let i = 0, k = 0; k < L.length; i += 4, k++) L[k] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; sctx.canvas.width = 160; sctx.canvas.height = 90; return { L, W, H }; }
-async function placementLoop() {
-  if (placing) return; placing = true;
-  while (S.step === 2 && !S.pose && !S.busy && link?.connected && S.presence?.ipad) {
-    await show({ kind: 'black' }); await nextFrames(2); const off = lumaSmall();
-    if (S.step !== 2 || S.busy) break;
-    await show({ kind: 'dot', x: 0, y: 0, r: 10 }); await nextFrames(2); const on = lumaSmall();
-    S.ring = blinkBlob(on.L, off.L, on.W, on.H); S.ringAt = performance.now();
+// only when the user says the ring is in the box: blink the disc 5 times and look inside the box only
+async function findRing() {
+  if (placing) return; placing = true; S.busy = '枠の中で ○ を探しています'; S.ring = null;
+  let sum = null, W = 0, H = 0;
+  for (let i = 0; i < 5; i++) {
+    await show({ kind: 'black' }); await nextFrames(3); const off = lumaSmall();
+    await show({ kind: 'dot', x: 0, y: 0, r: 10 }); await nextFrames(3); const on = lumaSmall();
+    W = on.W; H = on.H; if (!sum) sum = new Float32Array(on.L.length);
+    for (let k = 0; k < sum.length; k++) sum[k] += (on.L[k] - off.L[k]) / 5;
   }
-  if (S.step === 2 && !S.pose && !S.busy) await show({ kind: 'black' });
-  placing = false;
+  await show({ kind: 'scene' });
+  S.ring = discInBox(sum, W, H, BOX); S.ringAt = performance.now(); S.busy = null; placing = false;
+  if (!S.ring) { ack('find', false, '枠の中に ○ が見つかりません'); return; }
+  const dist = 20 * 0.78 * S.W / Math.max(1, S.ring.w * S.W) / 10; // disc diameter 20 mm
+  S.ring.dist = dist;
+  ack('find', true, '', { dist, x: S.ring.x, y: S.ring.y });
 }
 const ack = (what, ok, msg, info) => toMon({ type: 'ack', what, ok, msg, info });
 
@@ -275,21 +282,21 @@ function drawPreview() {
   // ---- before the iPad position is known: guide the placement with the red ring
   if (!S.pose) {
     // target zone for the ring: centre horizontally, lower half (the finger rises above it)
-    const zx0 = 0.3 * PW, zx1 = 0.7 * PW, zy0 = 0.5 * PH, zy1 = 0.82 * PH;
+    const zx0 = BOX.x0 * PW, zx1 = BOX.x1 * PW, zy0 = BOX.y0 * PH, zy1 = BOX.y1 * PH;
     c.setLineDash([10, 8]); c.strokeStyle = TGT; c.lineWidth = 2; c.strokeRect(zx0, zy0, zx1 - zx0, zy1 - zy0); c.setLineDash([]);
     label(c, zx0, zy0 - 30, '目標：○ がこの枠に入る', TGT, 18);
-    if (S.ring && performance.now() - (S.ringAt || 0) < 1500) {
+    if (S.ring) {
       const rx = S.ring.x * PW, ry = S.ring.y * PH, inside = rx > zx0 && rx < zx1 && ry > zy0 && ry < zy1;
-      c.strokeStyle = inside ? OK : NG; c.lineWidth = 3; c.beginPath(); c.arc(rx, ry, Math.max(14, S.ring.w * PW / 2 + 6), 0, 7); c.stroke();
+      c.strokeStyle = OK; c.lineWidth = 3; c.beginPath(); c.ellipse(rx, ry, Math.max(12, S.ring.w * PW / 2 + 6), Math.max(8, S.ring.h * PH / 2 + 6), 0, 0, 7); c.stroke();
       if (!inside) {
         const tx = Math.min(Math.max(rx, zx0 + 20), zx1 - 20), ty = Math.min(Math.max(ry, zy0 + 20), zy1 - 20);
         const hx = rx < zx0 ? 'iPhoneを少し左に向ける' : rx > zx1 ? 'iPhoneを少し右に向ける' : '', hy = ry < zy0 ? 'iPhoneを少し上に向ける' : ry > zy1 ? 'iPhoneを少し下に向ける' : '';
         arrow(c, { x: rx, y: ry }, { x: tx, y: ty }, NG); lines.push([`今：○ が枠の外 → ${[hx, hy].filter(Boolean).join('・')}`, NG]);
-      } else lines.push(['今：○ は枠の中 ✓（PCで［測る］へ）', OK]);
+      } else lines.push(['○ を確認しました ✓（PCで［測る］へ）', OK]);
       // distance from the blinking disc (diameter 20 mm)
       const fpx = 0.78 * PW, dist = 20 * fpx / Math.max(1, S.ring.w * PW) / 10;
       lines.push([`○までの距離 約 ${dist.toFixed(0)} cm（目標 15〜30 cm）`, dist < 15 ? NG : dist > 30 ? WARN : OK]);
-    } else lines.push([S.step === 2 ? '今：○ が見えません → iPadで点滅している ○ が映るように置く' : '②で ○ の位置を確かめます', S.step === 2 ? NG : TGT]);
+    } else lines.push([S.step === 2 ? '○ を枠に入れたら、PCで［枠に入れた］を押す' : '②で ○ の位置を確かめます', TGT]);
   }
   // ---- after calibration: predicted iPad outline / grid / ring / measuring box
   if (pr) {
@@ -371,7 +378,7 @@ function sendFrame() { // small JPEG preview for the PC (~7 fps); the measuremen
 function sendStatus() {
   if (!link?.connected) return;
   toMon({ type: 'status', fps: S.fps, proc: +S.procMs.toFixed(1), W: S.W, H: S.H, busy: !!S.busy || S.bgBusy || !!S.jt,
-    calibrated: !!S.pose, bg: S.bg.ready, cal: !!S.cal, calInfo: S.calInfo, sim: SIM, still: S.diff < 2, ring: !!S.ring && performance.now() - (S.ringAt || 0) < 1500, why: S.why,
+    calibrated: !!S.pose, bg: S.bg.ready, cal: !!S.cal, calInfo: S.calInfo, sim: SIM, still: S.diff < 2, ring: !!S.ring, why: S.why,
     gravity: S.gravity, res: S.cal && S.rect ? Math.atan(1 / (0.55 * (S.model || T.buildModel(S.cal)).Lp)) * 180 / Math.PI : null });
 }
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -381,7 +388,8 @@ async function onData(m) {
   if (m.type === 'finger') { S.Lm = m.Lm; S.dia = m.dia; return; }
   if (m.type !== 'cmd') return;
   switch (m.name) {
-    case 'step': S.step = m.step; if (S.step === 2 && !S.pose) placementLoop(); break;
+    case 'step': S.step = m.step; break;
+    case 'find': findRing(); break;
     case 'countdown': S.countdown = m.n; break;
     case 'cal': calibrate(m); break;
     case 'bg': S.countdown = null; captureBackground(); break;
