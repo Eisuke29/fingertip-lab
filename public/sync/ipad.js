@@ -38,6 +38,17 @@ function startLink() {
     onState: (t) => { P.linkState = t; render(); },
   });
 }
+// QR for the iPhone page (until the iPhone is connected)
+let qrDone = false;
+async function drawPhoneQR() {
+  if (qrDone) return; qrDone = true;
+  const url = `${location.origin}/sync/phone.html`;
+  try {
+    if (!window.qrcode) await new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js'; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+    const q = window.qrcode(0, 'M'); q.addData(url); q.make();
+    $('#qr').innerHTML = `<img alt="" src="${q.createDataURL(5, 1)}">iPhoneで読む`;
+  } catch { $('#qr').textContent = url; }
+}
 // preview frames (JPEG) from the iPhone
 const pv = $('#pv'), pvx = pv.getContext('2d');
 let drawing = false;
@@ -137,6 +148,8 @@ function render() {
   $('#room').innerHTML = `PC <b>${LOCAL ? location.hostname : st.addr || '—'}</b> <span style="color:${link?.connected ? 'var(--ok)' : 'var(--ng)'}">●</span>${monitorOn() ? '　確認画面 ●' : ''}`;
   $('#addrBox').hidden = P.stage !== 0 || !!link?.connected;
   pv.hidden = P.stage < 1 || P.stage > 3 || !P.frameAt;
+  const needQR = P.stage === 0 && LOCAL && !phoneOn(); // shown until the iPhone is connected
+  $('#qr').hidden = !needQR; if (needQR) drawPhoneQR();
   $('#pipLabel').hidden = P.stage !== 3;
   display.setFingerVisible(draw || !!P.ack.joints?.ok);
   if (!draw) {
