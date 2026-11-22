@@ -60,6 +60,10 @@ export function foreground(img, rect, bg, opt = {}) {
           if (Math.abs(r / s - R / S) + Math.abs(g / s - G / S) < 0.05) p = 0;
         }
       }
+      if (p > 0 && opt.skin) { // skin-like colours count fully; strongly blue / orange screen content counts less
+        const s = r + g + b + 1, rc = r / s - 0.42, gc = g / s - 0.31;
+        p *= 0.4 + 0.6 * Math.exp(-(rc * rc) / (2 * 0.06 * 0.06) - (gc * gc) / (2 * 0.04 * 0.04));
+      }
       out[y * w + x] = p;
     }
   }
@@ -256,17 +260,18 @@ export function proposeJoints(f, glass) {
   return A.area >= B.area ? A : B;
 }
 
-// Middle-phalanx thickness measured at the midpoint between the contact points
-export function measureThickness(f, glass, pipC, dipC, side) {
+// Middle-phalanx thickness = height of its top edge above the glass (median of 3 columns between the joints).
+// The underside can have low contrast against the screen, so only the top edge is used.
+export function measureThickness(f, glass, pipC, dipC, side, Texp = 0) {
   const { nrm } = glassFrame(glass, side, sub(dipC, pipC));
-  const hs = [];
+  const kmax = Texp ? 2.2 * Texp : 400, hs = [];
   for (const q of [0.35, 0.5, 0.65]) {
-    const base = add(pipC, mul(sub(dipC, pipC), q)); let h = 0, started = false;
-    for (let k = 1; k < 400; k++) {
+    const base = add(pipC, mul(sub(dipC, pipC), q)); let top = 0, inside = 0, out = 0;
+    for (let k = 1; k < kmax; k++) {
       const p = sampleP(f, base.x + nrm.x * k, base.y + nrm.y * k); if (p < 0) break;
-      if (p > 0.5) { if (!started && k > 12) break; started = true; h = k; } else if (started && k > h + 3) break;
+      if (p > 0.5) { inside++; out = 0; top = k; } else if (p < 0.3) { out++; if (inside > 6 && out > 8) break; }
     }
-    if (h) hs.push(h);
+    if (inside > 6) hs.push(top);
   }
   if (!hs.length) return 0;
   hs.sort((a, b) => a - b); return hs[(hs.length / 2) | 0];
@@ -300,8 +305,8 @@ export function freeAxis(f, model, which, deg) {
   const c = which === 'prox' ? model.pip : model.dip;
   const L = which === 'prox' ? model.Lp : model.Ld, r = which === 'prox' ? model.rp : model.rd;
   // near the joint the distal's inner edge merges with the middle phalanx when strongly bent: start further out
-  const [f0, f1] = which === 'prox' ? SAMPLE.prox : [0.1 + 0.25 * Math.min(1, Math.max(0, deg / 60)), 0.7];
-  const d = segDir(model, which, deg), n = { x: -d.y, y: d.x }, pts = [];
+  const [f0, f1] = which === 'prox' ? SAMPLE.prox : [0.15 + 0.25 * Math.min(1, Math.max(0, deg / 60)), 0.85];
+  const d = segDir(model, which, deg), n = { x: -d.y, y: d.x }, cand = [];
   for (let s = f0 * L; s <= f1 * L; s += 2) {
     const bx = c.x + d.x * s, by = c.y + d.y * s, edge = [];
     for (const sg of [-1, 1]) {
@@ -316,8 +321,11 @@ export function freeAxis(f, model, which, deg) {
       edge.push(found);
     }
     if (edge[0] == null || edge[1] == null || Math.abs(edge[0] + edge[1] - 2 * r) > 0.8 * r) continue;
-    const off = (edge[1] - edge[0]) / 2; pts.push({ x: bx + n.x * off, y: by + n.y * off });
+    const off = (edge[1] - edge[0]) / 2; cand.push({ x: bx + n.x * off, y: by + n.y * off, w: edge[0] + edge[1] });
   }
+  // near the joint the silhouette merges with the neighbouring phalanx: keep only samples with the typical width
+  const ws = cand.map((c) => c.w).sort((a, b) => a - b), med = ws[ws.length >> 1];
+  const pts = cand.filter((c) => Math.abs(c.w - med) < 0.1 * med);
   if (pts.length < 8) return null;
   const m = pts.reduce((a, p) => ({ x: a.x + p.x / pts.length, y: a.y + p.y / pts.length }), { x: 0, y: 0 });
   let sxx = 0, sxy = 0, syy = 0;

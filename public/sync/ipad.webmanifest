@@ -1,0 +1,16 @@
+{
+  "id": "./ipad.html",
+  "name": "ディスプレイ内指触覚",
+  "short_name": "指触覚",
+  "start_url": "./ipad.html",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#15171c",
+  "theme_color": "#15171c",
+  "icons": [
+    { "src": "icon-ipad-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-ipad-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

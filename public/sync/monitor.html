@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>確認モニター</title>
+<style>
+  :root { --bg:#101216; --panel:#181b21; --panel2:#20242c; --line:#2f343e; --fg:#eef0f3; --mut:#9aa1ab; --accent:#5aa9ff; --ok:#3ecf8e; --warn:#f5b84b; --ng:#ff6b6b; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui, "Hiragino Sans", "Yu Gothic UI", sans-serif; }
+  button, input { font:inherit; color:inherit; }
+  #join { position:fixed; inset:0; display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center; }
+  #code { font:700 32px/1 ui-monospace, monospace; letter-spacing:.3em; text-transform:uppercase; text-align:center; width:6.2em; padding:8px; border-radius:12px; border:2px solid var(--line); background:var(--panel); }
+  .btn { border:1px solid var(--line); background:var(--panel2); padding:8px 16px; border-radius:10px; cursor:pointer; font-weight:600; }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:#04203f; }
+  .btn:disabled { opacity:.35; cursor:default; }
+  #main { display:none; height:100%; grid-template-columns:1fr 380px; gap:14px; padding:14px; }
+  #main.on { display:grid; }
+  #vwrap { min-width:0; display:flex; align-items:center; justify-content:center; background:#000; border-radius:12px; border:1px solid var(--line); overflow:hidden; }
+  #pv { width:100%; height:100%; max-height:calc(100vh - 30px); object-fit:contain; display:block; }
+  #side { display:flex; flex-direction:column; gap:10px; overflow:auto; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  #stages { display:flex; flex-wrap:wrap; gap:6px; }
+  .sg { display:flex; align-items:center; gap:6px; padding:4px 10px 4px 4px; border-radius:999px; background:var(--panel2); border:1px solid var(--line); color:var(--mut); font-weight:600; font-size:13px; cursor:pointer; }
+  .sg i { width:22px; height:22px; border-radius:50%; display:grid; place-items:center; font-style:normal; font-size:12px; background:#2f343e; }
+  .sg.cur { color:var(--fg); border-color:var(--accent); } .sg.cur i { background:var(--accent); color:#04203f; } .sg.done i { background:var(--ok); color:#06261a; }
+  #inst { font-size:18px; font-weight:700; margin-top:10px; } #res { color:var(--mut); margin-top:4px; }
+  #res .ok { color:var(--ok); font-weight:700; } #res .ng { color:var(--ng); font-weight:700; } #res .warn { color:var(--warn); font-weight:700; }
+  #btns { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; } td { padding:3px 2px; border-bottom:1px solid var(--line); } td:last-child { text-align:right; color:var(--fg); } td:first-child { color:var(--mut); }
+  .big { font-size:28px; font-weight:700; font-variant-numeric:tabular-nums; } .big small { font-size:13px; color:var(--mut); margin-right:4px; }
+  .note { color:var(--mut); font-size:13px; }
+  .legend span { display:inline-block; width:12px; height:3px; vertical-align:middle; margin:0 4px 0 10px; }
+</style>
+</head>
+<body>
+<div id="join">
+  <div class="note">iPadに出ている番号</div>
+  <input id="code" maxlength="4" autocomplete="off" spellcheck="false">
+  <button class="btn primary" id="go">つなぐ</button>
+  <div class="note" id="joinMsg"></div>
+</div>
+<div id="main">
+  <div id="vwrap"><video id="pv" muted playsinline autoplay></video></div>
+  <div id="side">
+    <div class="card"><div id="stages"></div><div id="inst"></div><div id="res"></div><div id="btns"></div></div>
+    <div class="card"><div style="display:flex;gap:22px"><div class="big"><small>θp</small><span id="p">—</span></div><div class="big"><small>θd</small><span id="d">—</span></div></div><div class="note" id="trk"></div></div>
+    <div class="card"><b>iPadの位置の推定</b><table id="cal"></table></div>
+    <div class="card"><b>計測</b><table id="meas"></table></div>
+    <div class="card note legend">映像の線：<span style="background:#3ee"></span>iPadの枠（推定）<span style="background:#ff00c8"></span>格子（推定）<span style="background:#ff4d4d"></span>○<br>右上の小窓：指の曲がる面を真横から見た図（<span style="background:#4a86e8"></span>基節<span style="background:#f0953a"></span>末節、点線＝仮想指）</div>
+  </div>
+</div>
+<script type="module" src="./monitor.js?v=1"></script>
+</body>
+</html>

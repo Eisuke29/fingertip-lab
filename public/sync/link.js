@@ -1,60 +1,66 @@
-// iPhone <-> iPad link over WebRTC (PeerJS). The public PeerJS server is only used to exchange connection
-// info; angles and the small preview video then go directly between the devices on the same Wi-Fi.
+// iPad (host) <-> iPhone / PC monitor over WebRTC (PeerJS). The public PeerJS server is only used to exchange
+// connection info; data and video then go directly between the devices on the same Wi-Fi.
 const PEERJS = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
-
 function loadScript(src) {
   return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('通信ライブラリを読み込めません（インターネット接続を確認）')); document.head.appendChild(s); });
 }
 export async function getPeerClass() { if (!window.Peer) await loadScript(PEERJS); return window.Peer; }
 
-export const newId = () => 'fl-' + Array.from(crypto.getRandomValues(new Uint8Array(5)), b => b.toString(36).padStart(2, '0')).join('').slice(0, 8);
+// 4-character room code without look-alike characters; the peer id is 'fl-' + code
+const ALPHA = 'ACDEFHJKMNPRTUVWXY34679';
+export const newCode = () => Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) => ALPHA[b % ALPHA.length]).join('');
+export const peerIdOf = (code) => 'fl-' + String(code).trim().toUpperCase();
 
-// Host side (iPad). Calls back with each message; returns {send, peerId, onMedia}
-export async function host(id, handlers) {
+// Host (iPad): many connections, each tagged with a role ('phone' or 'monitor')
+export async function host(code, h) {
   const Peer = await getPeerClass();
-  const peer = new Peer(id, { debug: 0 });
-  let conn = null;
+  const peer = new Peer(peerIdOf(code), { debug: 0 });
+  const conns = new Set();
   const api = {
-    peer, get connected() { return !!conn?.open; },
-    send(m) { if (conn?.open) conn.send(m); },
+    peer, conns,
+    send(m, role = 'phone') { for (const c of conns) if (c.open && c.role === role) c.send(m); },
+    has(role) { for (const c of conns) if (c.open && c.role === role) return true; return false; },
   };
-  peer.on('open', () => handlers.onReady?.(id));
+  peer.on('open', () => h.onReady?.());
   peer.on('connection', (c) => {
-    if (conn) try { conn.close(); } catch {}
-    conn = c;
-    c.on('open', () => handlers.onOpen?.());
-    c.on('data', (m) => handlers.onData?.(m));
-    c.on('close', () => { if (conn === c) { conn = null; handlers.onClose?.(); } });
+    c.role = c.metadata?.role === 'monitor' ? 'monitor' : 'phone';
+    if (c.role === 'phone') for (const o of conns) if (o.role === 'phone') { try { o.close(); } catch {} conns.delete(o); }
+    conns.add(c);
+    c.on('open', () => h.onOpen?.(c));
+    c.on('data', (m) => h.onData?.(m, c));
+    c.on('close', () => { conns.delete(c); h.onClose?.(c); });
     c.on('error', () => {});
   });
-  peer.on('call', (call) => { call.answer(); call.on('stream', (s) => handlers.onStream?.(s)); });
+  peer.on('call', (call) => { call.answer(); call.on('stream', (s) => h.onStream?.(s, call)); });
   peer.on('disconnected', () => { try { peer.reconnect(); } catch {} });
-  peer.on('error', (e) => handlers.onError?.(e));
+  peer.on('error', (e) => h.onError?.(e));
   return api;
 }
 
-// Client side (iPhone). Keeps retrying until connected.
-export async function client(hostId, handlers) {
+// Client (iPhone or PC monitor). Retries until the host is there.
+export async function client(code, h, role = 'phone') {
   const Peer = await getPeerClass();
   const peer = new Peer({ debug: 0 });
-  let conn = null, call = null, stream = null, alive = true;
+  let conn = null, alive = true, stream = null;
+  const calls = new Map();
   const api = {
     peer, get connected() { return !!conn?.open; },
     send(m) { if (conn?.open) conn.send(m); },
-    setStream(s) { stream = s; if (conn?.open) startCall(); },
+    setStream(s) { stream = s; },
+    call(id) { if (!stream) return; try { calls.get(id)?.close(); } catch {} calls.set(id, peer.call(id, stream)); },
     close() { alive = false; try { peer.destroy(); } catch {} },
   };
-  const startCall = () => { if (!stream) return; try { call?.close(); } catch {} call = peer.call(hostId, stream); };
   const connect = () => {
-    if (!alive || peer.disconnected || peer.destroyed) return;
-    const c = peer.connect(hostId, { serialization: 'json', reliable: true });
-    c.on('open', () => { conn = c; handlers.onOpen?.(); startCall(); });
-    c.on('data', (m) => handlers.onData?.(m));
-    c.on('close', () => { if (conn === c) { conn = null; handlers.onClose?.(); } setTimeout(connect, 1500); });
+    if (!alive || peer.destroyed) return;
+    const c = peer.connect(peerIdOf(code), { serialization: 'json', reliable: true, metadata: { role } });
+    c.on('open', () => { conn = c; h.onOpen?.(); });
+    c.on('data', (m) => h.onData?.(m));
+    c.on('close', () => { if (conn === c) { conn = null; h.onClose?.(); } setTimeout(connect, 1500); });
     c.on('error', () => {});
   };
   peer.on('open', connect);
+  peer.on('call', (call) => { call.answer(); call.on('stream', (s) => h.onStream?.(s)); });
   peer.on('disconnected', () => { try { peer.reconnect(); } catch {} });
-  peer.on('error', (e) => { handlers.onError?.(e); if (e.type === 'peer-unavailable') setTimeout(connect, 2000); });
+  peer.on('error', (e) => { h.onError?.(e); if (e.type === 'peer-unavailable') setTimeout(connect, 2000); });
   return api;
 }
