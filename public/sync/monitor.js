@@ -115,7 +115,8 @@ function goStep(i) { C.step = i; C.busy = ''; enterStep(i); render(); }
 function enterStep(i) {
   toPhone('step', { step: i });
   // what the iPad shows in each step (the iPhone switches it to dots / grid during the measurement itself)
-  if (i === 2) toIpad({ mode: C.ack.cal?.ok ? 'grid' : 'scene', finger: false });
+  if (i === 1) toIpad({ mode: 'scene', finger: false });
+  else if (i === 2) toIpad({ mode: C.ack.cal?.ok ? 'grid' : 'scene', finger: false });
   else if (i === 3 || i === 4) toIpad({ mode: 'scene', finger: false });
   else if (i === 5) { toIpad({ mode: 'scene', finger: true }); toPhone('go'); }
 }

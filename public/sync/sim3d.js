@@ -27,7 +27,7 @@ export async function createSim3D({ width = 1280, height = 720, fps = 30, Wmm = 
   const pxmm = sc.width / Wmm, toPx = (x, y) => [(x + Wmm / 2) * pxmm, (Hmm / 2 - y) * pxmm];
   function drawScreen(state) {
     sx.fillStyle = '#000'; sx.fillRect(0, 0, sc.width, sc.height);
-    if (state.kind === 'dot') { const [x, y] = toPx(state.x, state.y); sx.fillStyle = '#fff'; sx.beginPath(); sx.arc(x, y, 7 * pxmm, 0, 7); sx.fill(); }
+    if (state.kind === 'dot') { const [x, y] = toPx(state.x, state.y); sx.fillStyle = '#fff'; sx.beginPath(); sx.arc(x, y, (state.r || 7) * pxmm, 0, 7); sx.fill(); }
     else if (state.kind === 'grid') {
       sx.strokeStyle = '#9fe'; sx.lineWidth = 2;
       for (let x = -100; x <= 100; x += 20) { const [a] = toPx(x, 0); sx.beginPath(); sx.moveTo(a, 0); sx.lineTo(a, sc.height); sx.stroke(); }

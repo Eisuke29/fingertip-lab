@@ -7,6 +7,7 @@
 import * as T from './tracker.js';
 import * as G from './geom.js';
 import { connect } from './wslink.js';
+import { blinkBlob } from './ring.js';
 
 const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -76,7 +77,6 @@ function onFrame(now) {
   if (S.bgBusy) bgFrame();
   if (S.rect && S.bg.ready && S.cal) trackFrame(now);
   if (S.jt && n % 3 === 0) jointTry();
-  if (!S.pose && n % 5 === 0) findRing();
   S.procMs = performance.now() - t0;
   if (S.raw && link?.connected) link.send({ type: 'pose', to: ['ipad', 'monitor'], t: now, thp: S.raw.thp, thd: S.raw.thd, fthp: S.filt?.thp ?? null, fthd: S.filt?.thd ?? null, ok: S.ok, sp: +S.raw.scoreP.toFixed(3), sd: +S.raw.scoreD.toFixed(3), proc: +S.procMs.toFixed(1) });
   if (S.collect && S.raw) S.collect.push({ thp: S.raw.thp, thd: S.raw.thd, ok: S.ok });
@@ -96,17 +96,19 @@ function stats() {
   S.center = c / cn; S.diff = S.prevSmall ? diff / L.length : 99; S.prevSmall = L;
   S.stillN = S.diff < 2 ? S.stillN + 1 : 0;
 }
-// before calibration: find the red ring on the iPad, so placement can be guided right away
-function findRing() {
-  const W = 320, H = Math.round(320 * S.H / S.W);
-  sctx.canvas.width = W; sctx.canvas.height = H; sctx.drawImage(S.video, 0, 0, W, H);
-  const d = sctx.getImageData(0, 0, W, H).data; let n = 0, sx = 0, sy = 0, x0 = W, x1 = 0;
-  for (let y = 0, k = 0; y < H; y++) for (let x = 0; x < W; x++, k += 4) {
-    const r = d[k], g = d[k + 1], b = d[k + 2];
-    if (r > 140 && r > 2.2 * g && r > 2.2 * b) { n++; sx += x; sy += y; if (x < x0) x0 = x; if (x > x1) x1 = x; }
+// before the iPad position is measured: the iPad blinks a white disc at the ring; find it in the picture
+let placing = false;
+function lumaSmall() { const W = 320, H = Math.round(320 * S.H / S.W); sctx.canvas.width = W; sctx.canvas.height = H; sctx.drawImage(S.video, 0, 0, W, H); const d = sctx.getImageData(0, 0, W, H).data, L = new Float32Array(W * H); for (let i = 0, k = 0; k < L.length; i += 4, k++) L[k] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; sctx.canvas.width = 160; sctx.canvas.height = 90; return { L, W, H }; }
+async function placementLoop() {
+  if (placing) return; placing = true;
+  while (S.step === 2 && !S.pose && !S.busy && link?.connected && S.presence?.ipad) {
+    await show({ kind: 'black' }); await nextFrames(2); const off = lumaSmall();
+    if (S.step !== 2 || S.busy) break;
+    await show({ kind: 'dot', x: 0, y: 0, r: 10 }); await nextFrames(2); const on = lumaSmall();
+    S.ring = blinkBlob(on.L, off.L, on.W, on.H); S.ringAt = performance.now();
   }
-  sctx.canvas.width = 160; sctx.canvas.height = 90;
-  S.ring = n > 6 ? { x: sx / n / W, y: sy / n / H, w: (x1 - x0 + 1) / W } : null;
+  if (S.step === 2 && !S.pose && !S.busy) await show({ kind: 'black' });
+  placing = false;
 }
 const ack = (what, ok, msg, info) => toMon({ type: 'ack', what, ok, msg, info });
 
@@ -119,7 +121,9 @@ function show(state) { // ask the iPad to show something; resolves when it says 
 function lumaFull() { const d = wctx.getImageData(0, 0, S.W, S.H).data, L = new Float32Array(S.W * S.H); for (let i = 0, k = 0; k < L.length; i += 4, k++) L[k] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; return L; }
 async function avgLuma(k) { let acc = null; for (let i = 0; i < k; i++) { await nextFrames(1); const L = lumaFull(); if (!acc) acc = L; else for (let j = 0; j < L.length; j++) acc[j] += L[j]; } for (let j = 0; j < acc.length; j++) acc[j] /= k; return acc; }
 async function calibrate(m) {
-  S.screen = m; S.busy = '点を測っています'; S.pose = null; S.rect = null; S.bg.reset(); S.cal = null; S.raw = null; S.ok = false; S.showGrid = false; S.calPts = null;
+  S.busy = '点を測っています';
+  while (placing) await nextFrames(1); // let the placement blinking stop first
+  S.screen = m; S.pose = null; S.rect = null; S.bg.reset(); S.cal = null; S.raw = null; S.ok = false; S.showGrid = false; S.calPts = null;
   if (sim) sim.state.handIn = false;
   const dots = G.dotLayout(m.Wmm, m.Hmm, m.pip);
   await show({ kind: 'black' }); await nextFrames(6);
@@ -236,7 +240,7 @@ function drawPreview() {
     const zx0 = 0.3 * PW, zx1 = 0.7 * PW, zy0 = 0.5 * PH, zy1 = 0.82 * PH;
     c.setLineDash([10, 8]); c.strokeStyle = TGT; c.lineWidth = 2; c.strokeRect(zx0, zy0, zx1 - zx0, zy1 - zy0); c.setLineDash([]);
     label(c, zx0, zy0 - 30, '目標：○ がこの枠に入る', TGT, 18);
-    if (S.ring) {
+    if (S.ring && performance.now() - (S.ringAt || 0) < 1500) {
       const rx = S.ring.x * PW, ry = S.ring.y * PH, inside = rx > zx0 && rx < zx1 && ry > zy0 && ry < zy1;
       c.strokeStyle = inside ? OK : NG; c.lineWidth = 3; c.beginPath(); c.arc(rx, ry, Math.max(14, S.ring.w * PW / 2 + 6), 0, 7); c.stroke();
       if (!inside) {
@@ -244,10 +248,10 @@ function drawPreview() {
         const hx = rx < zx0 ? 'iPhoneを少し左に向ける' : rx > zx1 ? 'iPhoneを少し右に向ける' : '', hy = ry < zy0 ? 'iPhoneを少し上に向ける' : ry > zy1 ? 'iPhoneを少し下に向ける' : '';
         arrow(c, { x: rx, y: ry }, { x: tx, y: ty }, NG); lines.push([`今：○ が枠の外 → ${[hx, hy].filter(Boolean).join('・')}`, NG]);
       } else lines.push(['今：○ は枠の中 ✓（PCで［測る］へ）', OK]);
-      // distance from the ring size (diameter 21 mm)
-      const fpx = 0.78 * PW, dist = 21 * fpx / Math.max(1, S.ring.w * PW) / 10;
+      // distance from the blinking disc (diameter 20 mm)
+      const fpx = 0.78 * PW, dist = 20 * fpx / Math.max(1, S.ring.w * PW) / 10;
       lines.push([`○までの距離 約 ${dist.toFixed(0)} cm（目標 15〜30 cm）`, dist < 15 ? NG : dist > 30 ? WARN : OK]);
-    } else lines.push(['今：○ が見えません → iPadの赤い ○ が映るように置く', NG]);
+    } else lines.push([S.step === 2 ? '今：○ が見えません → iPadで点滅している ○ が映るように置く' : '②で ○ の位置を確かめます', S.step === 2 ? NG : TGT]);
   }
   // ---- after calibration: predicted iPad outline / grid / ring / measuring box
   if (pr) {
@@ -329,7 +333,7 @@ function sendFrame() { // small JPEG preview for the PC (~7 fps); the measuremen
 function sendStatus() {
   if (!link?.connected) return;
   toMon({ type: 'status', fps: S.fps, proc: +S.procMs.toFixed(1), W: S.W, H: S.H, busy: !!S.busy || S.bgBusy || !!S.jt,
-    calibrated: !!S.pose, bg: S.bg.ready, cal: !!S.cal, calInfo: S.calInfo, sim: SIM, still: S.diff < 2, ring: !!S.ring, why: S.why,
+    calibrated: !!S.pose, bg: S.bg.ready, cal: !!S.cal, calInfo: S.calInfo, sim: SIM, still: S.diff < 2, ring: !!S.ring && performance.now() - (S.ringAt || 0) < 1500, why: S.why,
     gravity: S.gravity, res: S.cal && S.rect ? Math.atan(1 / (0.55 * (S.model || T.buildModel(S.cal)).Lp)) * 180 / Math.PI : null });
 }
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -339,7 +343,7 @@ async function onData(m) {
   if (m.type === 'finger') { S.Lm = m.Lm; S.dia = m.dia; return; }
   if (m.type !== 'cmd') return;
   switch (m.name) {
-    case 'step': S.step = m.step; break;
+    case 'step': S.step = m.step; if (S.step === 2 && !S.pose) placementLoop(); break;
     case 'countdown': S.countdown = m.n; break;
     case 'cal': calibrate(m); break;
     case 'bg': S.countdown = null; captureBackground(); break;

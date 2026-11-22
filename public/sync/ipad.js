@@ -69,7 +69,7 @@ function show(m, reply = true) {
     cc.hidden = false; cc.width = innerWidth; cc.height = innerHeight;
     const k = 1 / st.mmPerPx, X = (x) => (x + Wmm() / 2) * k, Y = (y) => (Hmm() / 2 - y) * k;
     cx.fillStyle = '#000'; cx.fillRect(0, 0, cc.width, cc.height);
-    if (m.kind === 'dot') { cx.fillStyle = '#fff'; cx.beginPath(); cx.arc(X(m.x), Y(m.y), 7 * k, 0, 7); cx.fill(); }
+    if (m.kind === 'dot') { cx.fillStyle = '#fff'; cx.beginPath(); cx.arc(X(m.x), Y(m.y), (m.r || 7) * k, 0, 7); cx.fill(); }
     if (m.kind === 'grid') {
       cx.strokeStyle = '#ffffff'; cx.lineWidth = 2;
       for (let x = -100; x <= 100; x += 20) { cx.beginPath(); cx.moveTo(X(x), 0); cx.lineTo(X(x), cc.height); cx.stroke(); }
