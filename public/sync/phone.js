@@ -8,8 +8,7 @@ import * as T from './tracker.js';
 import * as G from './geom.js';
 import { connect } from './wslink.js';
 import { discInBox } from './ring.js';
-import { autoReload } from './autoreload.js';
-import { VERSION } from './version.js';
+import { boot } from './boot.js';
 
 const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -29,40 +28,37 @@ let link = null, sim = null;
 const work = document.createElement('canvas'), wctx = work.getContext('2d', { willReadFrequently: true });
 const small = document.createElement('canvas'); small.width = 160; small.height = 90; const sctx = small.getContext('2d', { willReadFrequently: true });
 const view = $('#view'), vctx = view.getContext('2d');
-const prev = document.createElement('canvas'); prev.width = 1280; prev.height = 720; const pctx = prev.getContext('2d');
+const prev = document.createElement('canvas'); prev.width = 960; prev.height = 540; const pctx = prev.getContext('2d');
 let rectBuf = null, rectCtx = null;
 const toMon = (m) => link?.send({ ...m, to: 'monitor' });
 
 // ---------------- start ----------------
-const addrIn = $('#addr');
-addrIn.value = params.get('pc') || saved.addr || '';
-const LOCAL = !/github\.io$/.test(location.hostname); // served by the PC's sync-server
-if (LOCAL) { addrIn.value = 'local'; addrIn.hidden = true; document.querySelector('.lbl').hidden = true; }
+$('#addr').hidden = true; document.querySelector('.lbl').hidden = true; // pages are always served by the PC
 $('#go').onclick = start;
-autoReload(() => { try { sessionStorage.setItem('autostart', '1'); } catch {} });
-try { if (LOCAL && sessionStorage.getItem('autostart')) { sessionStorage.removeItem('autostart'); setTimeout(start, 100); } } catch {}
-if (SIM && addrIn.value) setTimeout(start, 50);
+try { if (sessionStorage.getItem('autostart')) { sessionStorage.removeItem('autostart'); setTimeout(start, 100); } } catch {}
+if (SIM) setTimeout(start, 50);
 let started = false;
 async function start() {
   if (started) return; // a second tap must not open a second connection
   started = true;
-  const addr = addrIn.value.trim();
-  if (!addr) { started = false; $('#startErr').textContent = 'PCのアドレスを入れてください'; return; }
-  if (!LOCAL) saved.addr = addr; try { localStorage.setItem(STORE, JSON.stringify(saved)); } catch {}
   try {
+    S.version = await boot();
     // motion sensor (for the tilt cross-check on the PC); iOS asks for permission on this tap
     try { if (typeof DeviceMotionEvent?.requestPermission === 'function') await DeviceMotionEvent.requestPermission(); } catch {}
     addEventListener('devicemotion', (e) => { const g = e.accelerationIncludingGravity; if (g && g.x != null) S.gravity = S.gravity ? S.gravity.map((v, i) => v * 0.9 + [g.x, g.y, g.z][i] * 0.1) : [g.x, g.y, g.z]; });
     let stream;
     if (SIM) { const { createSim3D } = await import('./sim3d.js'); sim = await createSim3D(); stream = sim.stream; sim.setScreen({ kind: 'scene' }); }
-    else stream = await openCamera(saved.camId);
+    else stream = await openCamera(null);
     const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.srcObject = stream; await v.play();
     S.video = v; S.stream = stream; resize();
     $('#start').style.display = 'none';
     if (!SIM) await chooseDefaultCamera();
     try { await navigator.wakeLock?.request('screen'); } catch {}
-    link = connect(addr, 'phone', { onOpen: () => sendStatus(), onData, onState: (t) => { S.linkState = t; }, onPresence: (p) => { S.presence = p; } });
-    v.requestVideoFrameCallback(onFrame);
+    link = connect('phone', S.version, { onOpen: () => sendStatus(), onData, onState: (t) => { S.linkState = t; }, onPresence: (p) => { S.presence = p; },
+      onOld: reloadWhenIdle });
+    watchTrack();
+    S.lastFrameAt = performance.now(); S.frameCb = v.requestVideoFrameCallback(onFrame);
+    setInterval(sendStatus, 250);
   } catch (e) { started = false; $('#startErr').textContent = `開始できません：${e.message || e}`; }
 }
 // ---------------- camera choice and focus (controlled from the PC) ----------------
@@ -71,11 +67,14 @@ function openCamera(id) {
   if (id) c.deviceId = { exact: id }; else c.facingMode = { ideal: 'environment' };
   return navigator.mediaDevices.getUserMedia({ video: c, audio: false }).catch(() => navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }));
 }
-async function listCameras() { try { return (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput' && !/前面|front/i.test(d.label)); } catch { return []; } }
-// the dual-wide camera switches to the ultra-wide (macro) by itself when the subject is close, so focus works up close
+// only the plain wide back camera: the dual / triple cameras switch lenses by themselves, which would make
+// the measured iPad position invalid in the middle of use (Fable review P0-6)
+const isWide = (label) => /^(背面カメラ|back camera)$/i.test(label.trim());
+async function listCameras() { try { return (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput' && isWide(d.label)); } catch { return []; } }
 async function chooseDefaultCamera() {
-  const devs = await listCameras(), cur = S.stream.getVideoTracks()[0].getSettings().deviceId;
-  if (!saved.camId) { const pref = devs.find((d) => /デュアル広角|dual wide/i.test(d.label)); if (pref && pref.deviceId !== cur) { await switchCamera(pref.deviceId, false); return; } }
+  delete saved.camId; try { localStorage.setItem(STORE, JSON.stringify(saved)); } catch {}
+  const devs = await listCameras(), cur = S.stream.getVideoTracks()[0];
+  if (devs.length && !isWide(cur.label)) { await switchCamera(devs[0].deviceId, false); return; }
   sendCamInfo();
 }
 async function switchCamera(id, remember = true) {
@@ -90,8 +89,52 @@ async function sendCamInfo() {
   const t = S.stream?.getVideoTracks()[0]; if (!t) return;
   const caps = t.getCapabilities ? t.getCapabilities() : {}, set = t.getSettings();
   toMon({ type: 'caminfo', devices: (await listCameras()).map((d) => ({ id: d.deviceId, label: d.label })), current: set.deviceId, label: t.label,
-    w: set.width, h: set.height, fps: set.frameRate, focusModes: caps.focusMode || [], focusDistance: caps.focusDistance || null, focusNow: set.focusDistance ?? null, focusMode: set.focusMode ?? null, err: S.camErr || null });
+    w: set.width, h: set.height, fps: set.frameRate, focusModes: caps.focusMode || [], focusDistance: caps.focusDistance || null, focusNow: set.focusDistance ?? null, focusMode: set.focusMode ?? null, err: S.camErr || null,
+    caps: JSON.parse(JSON.stringify(caps)), settings: JSON.parse(JSON.stringify(set)), locks: S.locks || null });
 }
+// what can Safari fix? try to lock focus / exposure / white balance (auto first, then manual) and report it
+async function lockCamera() {
+  const t = S.stream?.getVideoTracks()[0];
+  if (!t || !t.getCapabilities) { S.locks = { focusMode: 'この端末では調べられない', exposureMode: 'この端末では調べられない', whiteBalanceMode: 'この端末では調べられない' }; sendCamInfo(); return; }
+  const caps = t.getCapabilities(), out = {};
+  for (const k of ['focusMode', 'exposureMode', 'whiteBalanceMode']) {
+    const modes = caps[k] || [];
+    if (modes.includes('manual')) { try { await t.applyConstraints({ advanced: [{ [k]: 'manual' }] }); out[k] = '固定した'; } catch (e) { out[k] = `固定できず（${e.message}）`; } }
+    else out[k] = modes.length ? `自動のまま（選べる方式：${modes.join(' / ')}）` : '固定できない（この端末のブラウザに機能がない）';
+  }
+  S.locks = out; sendCamInfo();
+}
+function watchTrack() {
+  const t = S.stream?.getVideoTracks()[0]; if (!t) return;
+  t.onended = () => { S.camState = 'カメラが切れました'; reopenCamera(); };
+  t.onmute = () => { S.camState = 'カメラが一時停止しました'; };
+  t.onunmute = () => { S.camState = null; };
+}
+async function reopenCamera() {
+  if (sim || !S.video) return;
+  try {
+    const id = S.stream?.getVideoTracks()[0]?.getSettings().deviceId, s2 = await openCamera(id);
+    S.stream?.getTracks().forEach((x) => x.stop()); S.stream = s2; S.video.srcObject = s2; await S.video.play(); watchTrack();
+    if (S.frameCb != null) try { S.video.cancelVideoFrameCallback(S.frameCb); } catch {}
+    S.lastFrameAt = performance.now(); S.frameCb = S.video.requestVideoFrameCallback(onFrame);
+    S.camState = 'カメラを開き直しました'; report('カメラを開き直しました');
+  } catch (e) { S.camState = `カメラを開き直せません：${e.message}`; report(S.camState); }
+}
+// no frame for 1 s -> play() again; for 3 s -> open the camera again
+setInterval(async () => {
+  if (!S.video || !started) return;
+  const gap = performance.now() - (S.lastFrameAt || 0);
+  if (gap > 1000 && gap < 3000) { S.camState = 'カメラが止まりました（再開しています）'; try { await S.video.play(); } catch {} }
+  else if (gap >= 3000 && performance.now() - (S.reopenAt || 0) > 5000) { S.reopenAt = performance.now(); S.camState = 'カメラが止まりました（開き直しています）'; reopenCamera(); }
+}, 500);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') S.video?.play().catch(() => {}); });
+// errors go to the PC (red there), never silently stop anything
+let lastErr = '', lastErrAt = 0;
+function report(msg) { if (msg === lastErr && performance.now() - lastErrAt < 2000) return; lastErr = msg; lastErrAt = performance.now(); toMon({ type: 'error', msg: String(msg).slice(0, 300) }); }
+addEventListener('error', (e) => report(`エラー：${e.message}`));
+addEventListener('unhandledrejection', (e) => report(`エラー：${e.reason?.message || e.reason}`));
+// an old page reloads itself once, but never in the middle of a job
+function reloadWhenIdle() { const t = setInterval(() => { if (!job) { clearInterval(t); try { sessionStorage.setItem('autostart', '1'); } catch {} location.reload(); } }, 500); }
 async function setFocus(m) {
   const t = S.stream?.getVideoTracks()[0]; if (!t) return;
   try { await t.applyConstraints({ advanced: [m.mode === 'manual' ? { focusMode: 'manual', focusDistance: m.d } : { focusMode: m.mode }] }); S.camErr = null; } catch (e) { S.camErr = `ピントを変えられません：${e.message}`; }
@@ -105,6 +148,12 @@ function resize() {
 // ---------------- frame loop ----------------
 let n = 0;
 function onFrame(now) {
+  S.frameCb = S.video.requestVideoFrameCallback(onFrame); // schedule first: an error below must not stop the camera loop
+  S.lastFrameAt = performance.now(); if (S.camState && /止まりました/.test(S.camState)) S.camState = null;
+  try { frameBody(now); } catch (e) { report(`処理エラー：${e.message}`); }
+}
+let lastSent = 0;
+function frameBody(now) {
   resize();
   S.frameTimes.push(now); while (now - S.frameTimes[0] > 1000) S.frameTimes.shift(); S.fps = S.frameTimes.length;
   const t0 = performance.now();
@@ -119,11 +168,18 @@ function onFrame(now) {
   if (S.collect && S.raw) S.collect.push({ thp: S.raw.thp, thd: S.raw.thd, ok: S.ok });
   if (S.lat) latencyFrame();
   if (n % 2 === 0) drawPreview();
-  if (S.previewOn && n % 4 === 0) sendFrame();
-  if (n % 8 === 0) sendStatus();
-  S.video.requestVideoFrameCallback(onFrame);
+  // preview: 5 per second, 2 per second during a job (Fable P0-9)
+  if (S.previewOn && performance.now() - lastSent > (job ? 500 : 200)) { lastSent = performance.now(); sendFrame(); }
+  if (n % 15 === 0) sharpness();
 }
-const nextFrames = (k) => new Promise((res) => { let c = 0; const f = () => { if (++c >= k) res(); else S.waiters.push(f); }; S.waiters.push(f); });
+// sharpness of the picture (variance of the Laplacian in the middle of the frame); small = blurred
+function sharpness() {
+  const W = 160, H = 90, L = S.prevSmall; if (!L) return;
+  let sum = 0, sum2 = 0, c = 0;
+  for (let y = 20; y < H - 20; y++) for (let x = 40; x < W - 40; x++) { const k = y * W + x, v = 4 * L[k] - L[k - 1] - L[k + 1] - L[k - W] - L[k + W]; sum += v; sum2 += v * v; c++; }
+  S.sharp = sum2 / c - (sum / c) ** 2;
+}
+const nextFrames = (k) => new Promise((res, rej) => { let c = 0; const f = () => { if (job?.abort) { rej(new Error('中止されました')); return; } if (++c >= k) res(); else S.waiters.push(f); }; S.waiters.push(f); });
 function stats() {
   sctx.drawImage(S.video, 0, 0, 160, 90);
   const d = sctx.getImageData(0, 0, 160, 90).data, L = new Float32Array(160 * 90);
@@ -139,7 +195,7 @@ const BOX = { x0: 0.3, x1: 0.7, y0: 0.5, y1: 0.82 }; // target zone for the ring
 function lumaSmall() { const W = 320, H = Math.round(320 * S.H / S.W); sctx.canvas.width = W; sctx.canvas.height = H; sctx.drawImage(S.video, 0, 0, W, H); const d = sctx.getImageData(0, 0, W, H).data, L = new Float32Array(W * H); for (let i = 0, k = 0; k < L.length; i += 4, k++) L[k] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; sctx.canvas.width = 160; sctx.canvas.height = 90; return { L, W, H }; }
 // only when the user says the ring is in the box: blink the disc 5 times and look inside the box only
 async function findRing() {
-  if (placing) return; placing = true; S.busy = '枠の中で ○ を探しています'; S.ring = null;
+  placing = true; phase('枠の中で ○ を探しています'); S.ring = null;
   let sum = null, W = 0, H = 0;
   for (let i = 0; i < 5; i++) {
     await show({ kind: 'black' }); await nextFrames(3); const off = lumaSmall();
@@ -148,19 +204,46 @@ async function findRing() {
     for (let k = 0; k < sum.length; k++) sum[k] += (on.L[k] - off.L[k]) / 5;
   }
   await show({ kind: 'scene' });
-  S.ring = discInBox(sum, W, H, BOX); S.ringAt = performance.now(); S.busy = null; placing = false;
+  S.ring = discInBox(sum, W, H, BOX); S.ringAt = performance.now(); placing = false;
   if (!S.ring) { ack('find', false, '枠の中に ○ が見つかりません'); return; }
   const dist = 20 * 0.78 * S.W / Math.max(1, S.ring.w * S.W) / 10; // disc diameter 20 mm
   S.ring.dist = dist;
   ack('find', true, '', { dist, x: S.ring.x, y: S.ring.y });
 }
-const ack = (what, ok, msg, info) => toMon({ type: 'ack', what, ok, msg, info });
+// A job = one command from the PC. The PC gets: "got" at once, the job/phase in every status (4 per second),
+// and the result, which is repeated in the status until the PC confirms it. Nothing waits forever.
+let job = null, result = null;
+function phase(p, progress) { if (job) { job.phase = p; if (progress != null) job.progress = progress; } S.busy = p; }
+const ack = (what, ok, msg, info) => { result = { jobId: job?.jobId ?? null, what, ok, msg, info }; toMon({ type: 'ack', ...result }); };
+let frameJobDone = null;
+const finishFrameJob = () => { const f = frameJobDone; frameJobDone = null; f?.(); };
+async function runJob(m, fn) {
+  if (job) { toMon({ type: 'ack', jobId: m.jobId, what: m.name, ok: false, msg: `実行中です（先の「${job.name}」が終わっていません）` }); return; }
+  job = { name: m.name, jobId: m.jobId, phase: '開始', progress: 0, t0: performance.now() };
+  try { await fn(); }
+  catch (e) { ack(m.name, false, e.message || String(e)); }
+  finally {
+    job = null; S.busy = null; placing = false; frameJobDone = null;
+    if (S.bgBusy) { S.bgBusy = false; S.bg.reset(); }
+    if (S.jt) S.jt = null;
+    sendStatus();
+  }
+}
+// frame-driven jobs (background, joints) finish inside the frame loop
+const frameJob = (start) => new Promise((res) => { frameJobDone = res; start(); });
 
 // ---------------- 1. calibration: camera pose from dots on the iPad ----------------
-let showWait = null;
-function show(state) { // ask the iPad to show something; resolves when it says it is on screen
-  if (sim) sim.setScreen(state);
-  return new Promise((res) => { showWait = res; link.send({ type: 'show', to: 'ipad', ...state }); setTimeout(() => { if (showWait === res) { showWait = null; res(); } }, 1500); });
+let showSeq = 0;
+const showPend = new Map(), showStats = { lat: [], timeouts: 0 };
+function show(state) { // ask the iPad to show something; resolves when the iPad says it is on screen, fails after 1.5 s
+  if (job?.abort) return Promise.reject(new Error('中止されました'));
+  const id = ++showSeq; if (sim) sim.setScreen(state);
+  return new Promise((res, rej) => {
+    const t0 = performance.now();
+    const to = setTimeout(() => { showPend.delete(id); showStats.timeouts++; rej(new Error('iPadの返事がありません（表示の依頼が時間切れ）')); }, 1500);
+    showPend.set(id, () => { clearTimeout(to); showPend.delete(id); showStats.lat.push(performance.now() - t0); if (showStats.lat.length > 60) showStats.lat.shift(); res(); });
+    if (!link.send({ type: 'show', to: 'ipad', id, ...state })) { clearTimeout(to); showPend.delete(id); rej(new Error('PCとの接続が切れています')); }
+  });
 }
 // luma of the camera frame at 1/2 resolution (for decoding the patterns)
 const half = document.createElement('canvas'), hctx = half.getContext('2d', { willReadFrequently: true });
@@ -184,7 +267,7 @@ async function captureScreen(m) {
   const total = (Bx - MIN) + (By - MIN); let done = 0;
   for (const [axis, B] of [['x', Bx], ['y', By]]) {
     for (let bit = B - 1; bit >= MIN; bit--) {
-      S.busy = `しま模様 ${++done}/${total}`;
+      phase(`しま模様 ${++done}/${total}`, done / total);
       const P = await showGrab({ kind: 'gray', axis, bit }), I = await showGrab({ kind: 'gray', axis, bit, inv: true });
       const c = code[axis], dp = depth[axis], dd = dead[axis];
       for (let k = 0; k < N; k++) {
@@ -247,31 +330,31 @@ function accuracy(pose, isrc, idst, m) {
 // has the iPhone or the iPad moved since the measurement? re-read the screen and compare with the saved pose
 async function verifyPose() {
   if (!S.pose || !S.screen) { ack('verify', false, '先に②でiPadの位置を測ってください'); return; }
-  S.busy = 'ずれを確認しています';
+  phase('ずれを確認しています');
   const { src, dst } = await captureScreen(S.screen);
-  await show({ kind: 'scene' }); S.busy = null;
+  await show({ kind: 'scene' });
   if (src.length < 30) { ack('verify', false, `iPadの画面が読み取れません（${src.length}）`); return; }
   const e = []; for (let i = 0; i < src.length; i += Math.max(1, (src.length / 3000) | 0)) { const q = toScreen(S.pose, dst[i]); e.push(Math.hypot(q.x - src[i].x, q.y - src[i].y)); }
   e.sort((a, b) => a - b);
   ack('verify', true, '', { driftMm: e[e.length >> 1], n: e.length });
 }
 async function calibrate(m) {
-  S.busy = 'しま模様で測っています';
-  while (placing) await nextFrames(1); // let the placement blinking stop first
+  phase('ピント・露出を合わせています');
   S.screen = m; S.pose = null; S.rect = null; S.bg.reset(); S.cal = null; S.raw = null; S.ok = false; S.showGrid = false; S.calPts = null;
   if (sim) sim.state.handIn = false;
+  if (!S.locks) { await nextFrames(30); await lockCamera(); } // auto first, then lock what can be locked
   const { src, dst } = await captureScreen(m);
   await show({ kind: 'grid' });
-  if (src.length < 30) { S.busy = null; ack('cal', false, `iPadの画面が読み取れません（使えた点 ${src.length}）`, { n: src.length }); return; }
+  if (src.length < 30) { ack('cal', false, `iPadの画面が読み取れません（使えた点 ${src.length}）`, { n: src.length }); return; }
   const rs = G.ransacHomography(src, dst, 3);
   const isrc = rs ? rs.inliers.map((i) => src[i]) : [], idst = rs ? rs.inliers.map((i) => dst[i]) : [];
-  if (isrc.length < 30) { S.busy = null; ack('cal', false, `読み取れた点が合いません（${isrc.length}/${src.length}）`, { n: isrc.length }); return; }
-  S.busy = '精度を計算しています';
+  if (isrc.length < 30) { ack('cal', false, `読み取れた点が合いません（${isrc.length}/${src.length}）`, { n: isrc.length }); return; }
+  phase('計算しています');
   await nextFrames(1);
   const pose = G.estimatePose(isrc, idst, S.W, S.H);
-  if (!pose || pose.rms > 3) { S.busy = null; ack('cal', false, `計算が合いません（ずれ ${pose ? pose.rms.toFixed(1) : '?'} 画素）`, { n: isrc.length }); return; }
+  if (!pose || pose.rms > 3) { ack('cal', false, `計算が合いません（ずれ ${pose ? pose.rms.toFixed(1) : '?'} 画素）`, { n: isrc.length }); return; }
   S.lastCorr = { isrc, idst }; // kept for checking
-  const acc = accuracy(pose, isrc, idst, m); S.busy = null;
+  const acc = accuracy(pose, isrc, idst, m);
   S.pose = pose; S.showGrid = true;
   const step = Math.max(1, Math.floor(isrc.length / 80));
   S.calPts = []; for (let i = 0; i < isrc.length; i += step) S.calPts.push({ seen: idst[i], pred: G.project(pose, [isrc[i].x, isrc[i].y, 0]) });
@@ -304,17 +387,19 @@ function captureBackground() {
   if (sim) { sim.state.handIn = false; sim.setScreen({ kind: 'scene' }); }
 }
 function bgFrame() {
+  if (job?.abort) { S.bgBusy = false; S.bg.reset(); ack('bg', false, '中止されました'); finishFrameJob(); return; }
   if (S.bgFrames < 0) { S.bgFrames++; return; }
   if (!S.bgRef) S.bgRef = S.prevSmall.slice();
-  else { let d = 0; for (let k = 0; k < S.bgRef.length; k++) d += Math.abs(S.prevSmall[k] - S.bgRef[k]); if (d / S.bgRef.length > 6) { S.bgBusy = false; S.bg.reset(); ack('bg', false, '撮っている間に映像が動きました'); return; } }
+  else { let d = 0; for (let k = 0; k < S.bgRef.length; k++) d += Math.abs(S.prevSmall[k] - S.bgRef[k]); if (d / S.bgRef.length > 6) { S.bgBusy = false; S.bg.reset(); ack('bg', false, '撮っている間に映像が動きました'); finishFrameJob(); return; } }
   S.bg.add(rectFull()); S.bgFrames++;
   if (S.bgFrames >= 30) {
-    S.bg.finish(); S.bgBusy = false; ack('bg', true, '');
+    S.bg.finish(); S.bgBusy = false; ack('bg', true, ''); finishFrameJob();
     if (sim) setTimeout(() => { sim.state.handIn = true; sim.state.manual = { thp: 70, thd: 45 }; }, 300);
   }
 }
 
 // ---------------- 3. joints: the PIP is on the ring; refine both joints (up to ~10 s) ----------------
+const finishFrameJobAfter = () => setTimeout(finishFrameJob, 0);
 function rectCalInit() {
   const R = S.rect, vg = R.vGlass;
   return { glass: { a: { x: 0, y: vg }, b: { x: R.W, y: vg } }, side: -1,
@@ -323,6 +408,7 @@ function rectCalInit() {
 function fgFull() { return T.foreground(rectFull(), { x0: 0, y0: 0, w: S.rect.W, h: S.rect.H }, S.bg); }
 function startJoints() { S.jt = { n: 0, last: null, good: 0 }; S.why = ''; S.cal = rectCalInit(); S.model = null; S.prev = {}; S.raw = null; S.ok = false; }
 function jointTry() {
+  if (job?.abort) { S.jt = null; ack('joints', false, '中止されました'); finishFrameJob(); return; }
   const J = S.jt; J.n++;
   const f = fgFull();
   const ref = T.refineJoints(f, rectCalInit()); // always start from the ring, so repeated tries cannot drift
@@ -332,8 +418,8 @@ function jointTry() {
   const bent = S.raw && S.raw.thd >= 12 && S.raw.thp > 25 && S.raw.thp < 160;
   S.why = !S.raw || Math.max(S.raw.scoreP, S.raw.scoreD) < 0.4 ? '指が見えません' : !bent ? '第1関節の曲げが足りません' : !S.ok ? '指の形が合いません' : moved >= 3 ? '指が動いています' : '';
   J.good = !S.why ? J.good + 1 : 0;
-  if (J.good >= 3) { S.jt = null; S.fP.reset(); S.fD.reset(); ack('joints', true, '', { pipOffsetMm: (ref.pipC.x - S.rect.uPip) / S.rect.s, LmMm: (ref.dipC.x - ref.pipC.x) / S.rect.s, diaMm: ref.T / S.rect.s }); return; }
-  if (J.n >= 100) { S.jt = null; if (!S.ok) S.cal = null; ack('joints', false, S.why); }
+  if (J.good >= 3) { S.jt = null; S.fP.reset(); S.fD.reset(); finishFrameJobAfter(); ack('joints', true, '', { pipOffsetMm: (ref.pipC.x - S.rect.uPip) / S.rect.s, LmMm: (ref.dipC.x - ref.pipC.x) / S.rect.s, diaMm: ref.T / S.rect.s }); return; }
+  if (J.n >= 100) { S.jt = null; if (!S.ok) S.cal = null; ack('joints', false, S.why); finishFrameJob(); }
 }
 
 // ---------------- tracking ----------------
@@ -386,7 +472,7 @@ function drawPreview() {
       } else lines.push(['○ を確認しました ✓（PCで［測る］へ）', OK]);
       // distance from the blinking disc (diameter 20 mm)
       const fpx = 0.78 * PW, dist = 20 * fpx / Math.max(1, S.ring.w * PW) / 10;
-      lines.push([`○までの距離 約 ${dist.toFixed(0)} cm（目標 15〜30 cm）`, dist < 15 ? NG : dist > 30 ? WARN : OK]);
+      lines.push([`○までの距離 約 ${dist.toFixed(0)} cm（目標 20〜30 cm）`, dist < 20 ? NG : dist > 30 ? WARN : OK]);
     } else lines.push([S.step === 2 ? '○ を枠に入れたら、PCで［枠に入れた］を押す' : '②で ○ の位置を確かめます', TGT]);
   }
   // ---- after calibration: predicted iPad outline / grid / ring / measuring box
@@ -464,31 +550,40 @@ function drawRectOverlay(c) {
 let sending = false;
 function sendFrame() { // small JPEG preview for the PC (~7 fps); the measurement uses the full camera frames
   if (sending || !link?.connected) return; sending = true;
-  prev.toBlob((b) => { if (b) link.sendBinary(b); sending = false; }, 'image/jpeg', 0.82);
+  prev.toBlob((b) => { if (b) link.sendBinary(b); sending = false; }, 'image/jpeg', 0.6);
 }
 function sendStatus() {
   if (!link?.connected) return;
-  toMon({ type: 'status', version: VERSION, fps: S.fps, proc: +S.procMs.toFixed(1), W: S.W, H: S.H, busy: !!S.busy || S.bgBusy || !!S.jt,
+  const lat = showStats.lat.slice().sort((a, b) => a - b);
+  toMon({ type: 'status', version: S.version, job: job && { name: job.name, jobId: job.jobId, phase: job.phase, progress: job.progress, sec: (performance.now() - job.t0) / 1000 }, result,
+    camState: S.camState || null, sharp: S.sharp ?? null, locks: S.locks || null, showMs: lat.length ? lat[lat.length >> 1] : null, showTimeouts: showStats.timeouts, fps: S.fps, proc: +S.procMs.toFixed(1), W: S.W, H: S.H, busy: !!S.busy || S.bgBusy || !!S.jt,
     calibrated: !!S.pose, bg: S.bg.ready, cal: !!S.cal, calInfo: S.calInfo, sim: SIM, still: S.diff < 2, ring: !!S.ring, why: S.why,
     gravity: S.gravity, res: S.cal && S.rect ? Math.atan(1 / (0.55 * (S.model || T.buildModel(S.cal)).Lp)) * 180 / Math.PI : null });
 }
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 async function onData(m) {
   if (m.type === 'ping') { toMon({ type: 'pong', t0: m.t0, t1: performance.now() }); return; }
-  if (m.type === 'shown') { const w = showWait; showWait = null; w?.(); return; }
+  if (m.type === 'shown') { showPend.get(m.id)?.(); return; }
+  if (m.type === 'resultAck') { if (result && result.jobId === m.jobId) result = null; return; }
+  if (m.type === 'cmd' && m.jobId) {
+    toMon({ type: 'got', jobId: m.jobId });
+    if (job && job.jobId === m.jobId) return;                                   // the PC sent it twice
+    if (result && result.jobId === m.jobId) { toMon({ type: 'ack', ...result }); return; } // it missed the result
+  }
   if (m.type === 'finger') { S.Lm = m.Lm; S.dia = m.dia; return; }
   if (m.type !== 'cmd') return;
   switch (m.name) {
     case 'step': S.step = m.step; break;
-    case 'find': findRing(); break;
+    case 'abort': if (job) { job.abort = true; phase('中止しています'); } break;
+    case 'find': runJob(m, findRing); break;
     case 'camera': switchCamera(m.id); break;
     case 'focus': setFocus(m); break;
     case 'caminfo': sendCamInfo(); break;
     case 'countdown': S.countdown = m.n; break;
-    case 'cal': calibrate(m); break;
-    case 'verify': verifyPose(); break;
-    case 'bg': S.countdown = null; captureBackground(); break;
-    case 'joints': if (!S.bg.ready) { ack('joints', false, '背景がありません'); break; } startJoints(); break;
+    case 'cal': runJob(m, () => calibrate(m)); break;
+    case 'verify': runJob(m, verifyPose); break;
+    case 'bg': S.countdown = null; runJob(m, async () => { if (!S.rect) throw new Error('先にiPadの位置を測ってください'); phase('背景を撮っています'); await frameJob(captureBackground); }); break;
+    case 'joints': runJob(m, async () => { if (!S.bg.ready) throw new Error('背景がありません'); phase('指を合わせています'); await frameJob(startJoints); }); break;
     case 'go': if (sim) sim.state.manual = null; break;
     case 'preview': S.previewOn = !!m.on; break;
     case 'lat': S.lat = !!m.on; S.latLo = 255; S.latHi = 0; S.latWhite = null; break;
@@ -501,7 +596,6 @@ async function onData(m) {
       break;
     }
   }
-  sendStatus();
 }
 function latencyFrame() {
   const c = S.center; S.latLo = Math.min(S.latLo * 0.99 + c * 0.01, c); S.latHi = Math.max(S.latHi * 0.99 + c * 0.01, c);

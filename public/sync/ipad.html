@@ -24,7 +24,7 @@
   #flash { position:fixed; inset:0; z-index:30; background:#000; display:none; }
 </style>
 <script type="importmap">
-{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.module.js" } }
+{ "imports": { "three": "/vendor/three/three.module.js" } }
 </script>
 </head>
 <body>
@@ -34,7 +34,6 @@
 <div id="tap">タップ</div>
 <div id="rotate">横向きにしてください</div>
 <div id="flash"></div>
-<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});</script>
-<script type="module" src="./ipad.js?v=5"></script>
+<script type="module" src="./ipad.js"></script>
 </body>
 </html>

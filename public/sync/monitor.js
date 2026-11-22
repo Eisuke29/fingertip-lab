@@ -1,21 +1,25 @@
 // PC control page (served by sync-server at http://localhost:8080/). All instructions and buttons live here;
 // the iPad only shows, the iPhone only measures.
 import { connect } from './wslink.js';
-import { autoReload } from './autoreload.js';
-import { VERSION } from './version.js';
-autoReload();
+import { boot } from './boot.js';
+const VERSION = await boot();
 
 const $ = (s) => document.querySelector(s);
-const C = { step: 1, done: {}, ack: {}, busy: '', status: null, statusAt: 0, ipad: null, ipadAt: 0, pose: null, poseAt: 0, frameAt: 0, results: [], rtt: null, eyeOn: false };
-const link = connect('local', 'monitor', {
+const C = { step: 1, done: {}, ack: {}, pending: null, countdown: '', errors: [], secondary: false, status: null, statusAt: 0, ipad: null, ipadAt: 0, pose: null, poseAt: 0, frameAt: 0, results: [], rtt: null, eyeOn: false };
+const link = connect('monitor', VERSION, {
   onData, onBinary: showFrame, onPresence: () => render(),
   onState: (t) => { C.linkState = t; render(); },
+  onOld: () => { const t = setInterval(() => { if (!C.pending) { clearInterval(t); location.reload(); } }, 500); },
 });
-const toPhone = (name, extra = {}) => link.send({ type: 'cmd', name, ...extra, to: 'phone' });
-const toIpad = (m) => link.send({ type: 'ipad', ...m, to: 'ipad' });
+const toPhone = (name, extra = {}) => { if (!C.secondary) link.send({ type: 'cmd', name, ...extra, to: 'phone' }); };
+const toIpad = (m) => { if (!C.secondary) link.send({ type: 'ipad', ...m, to: 'ipad' }); };
 
 function onData(m) {
-  if (m.type === 'status') { C.status = m; C.statusAt = performance.now(); }
+  if (m.type === 'status') { C.status = m; C.statusAt = performance.now(); if (m.result && C.pending && m.result.jobId === C.pending.jobId) finish(m.result); }
+  else if (m.type === 'secondary') C.secondary = true;
+  else if (m.type === 'primary') C.secondary = false;
+  else if (m.type === 'got') { if (C.pending && m.jobId === C.pending.jobId) C.pending.gotAt = performance.now(); }
+  else if (m.type === 'error') { C.errors.push({ t: new Date().toLocaleTimeString(), msg: `${m.from === 'ipad' ? 'iPad' : 'iPhone'}：${m.msg}` }); C.errors = C.errors.slice(-4); }
   else if (m.type === 'ipadinfo') { const first = !C.ipad; C.ipad = m; C.ipadAt = performance.now(); if (first) enterStep(C.step); }
   else if (m.type === 'pose') {
     C.pose = m; C.poseAt = performance.now();
@@ -25,7 +29,7 @@ function onData(m) {
       const sp = sd(1), sdd = sd(2); if (sp < 2 && sdd < 2) C.jit = { p: sp, d: sdd }; // only while held still
     }
   }
-  else if (m.type === 'ack') { C.ack[m.what] = m; C.busy = ''; }
+  else if (m.type === 'ack') { if (C.pending && (m.jobId === C.pending.jobId || (!m.jobId && m.what === C.pending.name))) finish(m); else if (!C.pending) C.ack[m.what] = m; }
   else if (m.type === 'pong') C.rtt = performance.now() - m.t0;
   else if (m.type === 'caminfo') { C.cam = m; renderCam(); }
   else if (m.type === 'result') { C.results.push(m); renderTools(); }
@@ -50,10 +54,11 @@ fetch('/api/info').then((r) => r.json()).then((j) => { info = j; render(); }).ca
 const live = { ipad: () => !!C.ipad && link.presence.ipad && performance.now() - C.ipadAt < 3000, phone: () => !!C.status && link.presence.phone && performance.now() - C.statusAt < 3000 };
 let qrKey = '';
 function versionWarning() {
-  const old = [];
-  if (C.status && C.status.version !== VERSION) old.push('iPhone');
-  if (C.ipad && C.ipad.version !== VERSION) old.push('iPad');
-  return old.length ? `<div class="fix" style="margin-top:8px"><b>${old.join('・')}が古い版のまま動いています</b><ul><li>${old.join('・')}で開いているページを全部閉じる（Safariのタブも、ホーム画面のアプリも、アプリ一覧で上にスワイプ）</li><li>このPCの画面のQRから開き直す</li></ul></div>` : '';
+  const v = (x) => x ? `<b style="color:${x === VERSION ? 'var(--ok)' : 'var(--ng)'}">${x}</b>` : '—';
+  let h = `<div class="note" style="margin-top:6px">版　PC ${v(VERSION)}　iPad ${v(C.ipad?.version)}　iPhone ${v(C.status?.version)}</div>`;
+  if (C.secondary) h += '<div class="fix" style="margin-top:8px"><b>この操作画面は見るだけです</b>（別のタブで操作画面が開いています。そちらを使うか、そちらを閉じてください）</div>';
+  if (C.status?.camState) h += `<div class="fix" style="margin-top:8px"><b>iPhoneのカメラ：${C.status.camState}</b></div>`;
+  return h;
 }
 function renderLinks() {
   const dot = (ok, t) => `<span><span style="color:${ok ? 'var(--ok)' : 'var(--ng)'}">●</span> ${t}</span>`;
@@ -98,7 +103,8 @@ function stepView() {
         chk(!ci ? 'na' : ci.inside ? 'ok' : 'ng', '指を測る範囲（黄色の点線）が映像に入っている'),
         chk(!ci ? 'na' : 'warn', '映像のピンクの線がiPadの白い格子に重なる（目で確認）'),
         chk(!ci || ci.tiltCam == null || ip?.tilt == null ? 'na' : Math.abs(ci.tiltCam - ip.tilt) <= 3 ? 'ok' : 'warn', '傾きの照合（カメラから／iPadのセンサー）', ci && ci.tiltCam != null && ip?.tilt != null ? `${ci.tiltCam.toFixed(1)}° / ${ip.tilt.toFixed(1)}°` : '')],
-      fixes: a.find && !a.find.ok && !ci ? ['枠の中に ○ が見つからない → 映像の黄色い枠の中に iPad の ○ が入るよう iPhone の向きを直してから、もう一度［枠に入れた］', 'iPadの画面の明るさを最大にする'] : a.cal && !a.cal.ok ? [a.cal.msg, '読み取れない → iPadの画面の明るさを最大に、照明が画面に映り込まない向きにする', 'iPhoneを ○ の方へ向け、15〜30cm・見下ろし15〜30°にする', '測っている間はiPhone・iPadを動かさない'] :
+      fixes: C.lastJob === 'cal' && a.cal && !a.cal.ok ? [a.cal.msg, '読み取れない → iPadの画面の明るさを最大に、照明が画面に映り込まない向きにする', 'iPhoneを ○ の方へ向け、20〜30cm・見下ろし10〜20°にする', '測っている間はiPhone・iPadを動かさない'] :
+        a.find && !a.find.ok && !ci ? [a.find.msg, '枠の中に ○ が見つからない → 映像の黄色い枠の中に iPad の ○ が入るよう iPhone の向きを直してから、もう一度［枠に入れた］', 'iPadの画面の明るさを最大にする'] : a.cal && !a.cal.ok ? [a.cal.msg, '読み取れない → iPadの画面の明るさを最大に、照明が画面に映り込まない向きにする', 'iPhoneを ○ の方へ向け、15〜30cm・見下ろし15〜30°にする', '測っている間はiPhone・iPadを動かさない'] :
         ci && !ci.inside ? ['黄色の点線が映像からはみ出している → iPhoneを少し離す、または ○ が映像の中央下に来るよう向きを直す'] :
         ci && (ci.checkMm > 0.5 || ci.angleDeg > 0.5) ? ['誤差が大きい → ピントが合っているか見る（合わなければ○から離す・カメラを「デュアル広角」に）', '照明が画面に映り込まない向きにする・iPadの明るさを最大に', 'iPhoneを ○ に近づけて画面を大きく映す（15〜25cm）'] : [],
       btns: [btn('枠に入れた', () => run('find'), !a.find?.ok && !ci), btn(ci ? 'もう一回測る' : '測る', () => run('cal', { Wmm: ip.Wmm, Hmm: ip.Hmm, pip: ip.pip, w: ip.w, h: ip.h, mmPerPx: ip.mmPerPx }), !ci, !ip), next(!!ci && ci.n >= 200 && ci.checkMm <= 0.5 && ci.angleDeg <= 0.5 && ci.inside)] };
@@ -131,13 +137,50 @@ function stepView() {
 }
 const btn = (label, fn, primary, disabled = false) => ({ label, fn, primary, disabled });
 const next = (enabled) => ({ label: '次へ ▶', fn: () => { C.done[C.step] = true; goStep(C.step + 1); }, next: true, disabled: !enabled, primary: enabled });
-function run(name, extra = {}) { C.ack[name] = null; C.busy = name === 'verify' ? 'しま模様でずれを確認しています（約5秒、手を映さない）…' : name === 'find' ? '枠の中で ○ を探しています…' : name === 'cal' ? 'iPadにしま模様を出して測っています（約5秒）…' : name === 'joints' ? '指を合わせています（最長10秒）…' : '実行中…'; toPhone(name, extra); render(); }
+// A job is sent with an id. The iPhone answers "got" at once; without it the command is sent once more after 1 s.
+// While it runs, the iPhone's own phase is shown. Every job has a time limit; then the buttons come back.
+const LIMIT = { find: 12, cal: 30, verify: 30, bg: 10, joints: 15 };
+const NAMES_JA = { find: '○ を探す', cal: 'iPadの位置を測る', verify: 'ずれの確認', bg: '背景を撮る', joints: '指を合わせる' };
+function run(name, extra = {}) {
+  if (C.pending || C.secondary) return;
+  const jobId = `${name}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  C.ack[name] = null;
+  C.pending = { name, jobId, extra, sentAt: performance.now(), gotAt: null, resent: false, lastPhase: '' };
+  toPhone(name, { ...extra, jobId }); render();
+}
+function finish(res) {
+  const p = C.pending; if (!p) return;
+  C.ack[p.name] = res; C.lastJob = p.name; C.pending = null;
+  link.send({ type: 'resultAck', jobId: p.jobId, to: 'phone' });
+  render();
+}
+setInterval(() => {
+  const p = C.pending; if (!p) return;
+  const now = performance.now(), job = C.status?.job;
+  if (job && job.jobId === p.jobId) p.lastPhase = job.phase;
+  if (!p.gotAt && !p.resent && now - p.sentAt > 1000) { p.resent = true; toPhone(p.name, { ...p.extra, jobId: p.jobId }); }
+  // the iPhone has gone (page closed, Wi-Fi lost): say so now instead of waiting for the time limit
+  if (now - p.sentAt > 3000 && now - C.statusAt > 3000) {
+    C.ack[p.name] = { ok: false, msg: `iPhoneとの接続が切れました（止まった所：${p.lastPhase || '開始前'}）` }; C.lastJob = p.name; C.pending = null; render(); return;
+  }
+  if (now - p.sentAt > LIMIT[p.name] * 1000) {
+    C.ack[p.name] = { ok: false, msg: `時間切れ（${p.gotAt ? `iPhoneは受け取った。止まった所：${p.lastPhase || '不明'}` : 'iPhoneが命令を受け取っていない'}）` };
+    C.pending = null; toPhone('abort'); render();
+  }
+}, 250);
+function busyText() {
+  const p = C.pending; if (!p) return C.countdown;
+  const job = C.status?.job, mine = job && job.jobId === p.jobId;
+  const sec = Math.floor((performance.now() - p.sentAt) / 1000);
+  return `${NAMES_JA[p.name]}：${mine ? job.phase : p.gotAt ? 'iPhoneが受け取りました' : 'iPhoneに送りました（返事を待っています）'}（${sec}／${LIMIT[p.name]} 秒）`;
+}
 function countdownBg() {
+  if (C.pending) return;
   C.ack.bg = null; let n = 3;
-  const tick = () => { if (n > 0) { C.busy = `${n} 秒後に撮ります（手を出して、動かさない）`; toPhone('countdown', { n }); n--; render(); setTimeout(tick, 1000); } else { C.busy = '撮影中…'; toPhone('bg'); render(); } };
+  const tick = () => { if (n > 0) { C.countdown = `${n} 秒後に撮ります（手を出して、動かさない）`; toPhone('countdown', { n }); n--; render(); setTimeout(tick, 1000); } else { C.countdown = ''; run('bg'); } };
   tick();
 }
-function goStep(i) { C.step = i; C.busy = ''; enterStep(i); render(); renderCam(); }
+function goStep(i) { if (C.pending) return; C.step = i; enterStep(i); render(); renderCam(); }
 function enterStep(i) {
   toPhone('step', { step: i });
   // what the iPad shows in each step (the iPhone switches it to dots / grid during the measurement itself)
@@ -154,13 +197,15 @@ function render() {
   $('#title').textContent = `${C.step}. ${NAMES[C.step - 1]}`;
   $('#why').textContent = v.why; $('#todo').textContent = v.todo;
   $('#checks').innerHTML = v.checks.map((c) => `<li class="c-${c.state}"><b>${{ ok: '○', ng: '×', na: '−', warn: '△' }[c.state]}</b><span>${c.text}</span><span class="v">${c.value}</span></li>`).join('');
-  $('#busy').textContent = C.busy;
+  $('#busy').textContent = busyText();
+  $('#errs').innerHTML = C.errors.map((e) => `<div>${e.t}　${e.msg}</div>`).join('');
   const fixes = (v.fixes || []).filter(Boolean);
   $('#fix').hidden = !fixes.length; $('#fix').innerHTML = `<b>直し方</b><ul>${fixes.map((f) => `<li>${f}</li>`).join('')}</ul>`;
   const box = $('#btns'); box.innerHTML = '';
-  for (const b of v.btns) {
+  const btns = C.pending ? [{ label: '中止', fn: () => toPhone('abort'), abort: true }] : v.btns;
+  for (const b of btns) {
     const e = document.createElement('button'); e.className = 'btn' + (b.primary ? ' primary' : '') + (b.next ? ' next' : '');
-    e.textContent = b.label; e.disabled = !!b.disabled || (!!C.busy && !b.next); e.onclick = b.fn; box.appendChild(e);
+    e.textContent = b.label; e.disabled = C.secondary || !!b.disabled || (!!C.countdown && !b.abort); e.onclick = b.fn; box.appendChild(e);
   }
   const p = C.pose, fresh = p && performance.now() - C.poseAt < 600;
   $('#p').textContent = fresh ? (p.fthp ?? p.thp).toFixed(1) + '°' : '—'; $('#d').textContent = fresh ? (p.fthd ?? p.thd).toFixed(1) + '°' : '—';
@@ -170,9 +215,13 @@ function render() {
 const row = (k, v) => `<tr><td>${k}</td><td>${v}</td></tr>`;
 function renderNums() {
   const s = C.status, ci = C.ack.cal?.info, j = C.ack.joints?.info, ip = C.ipad;
-  $('#nums').innerHTML = (s ? row('カメラ', `${s.fps} fps・${s.W}×${s.H}`) + row('1フレームの処理', `${s.proc} ms`) + row('PC↔iPhone 往復', C.rtt != null ? `${C.rtt.toFixed(0)} ms` : '—') : '')
+  const lk = s?.locks, lv = (x) => x ? `<span style="color:${/^固定した/.test(x) ? 'var(--ok)' : 'var(--warn)'}">${x}</span>` : '—（②で測る前に調べます）';
+  $('#nums').innerHTML = (s ? row('ピント', lv(lk?.focusMode)) + row('露出（明るさ）', lv(lk?.exposureMode)) + row('色（ホワイトバランス）', lv(lk?.whiteBalanceMode))
+      + row('映像の鮮明さ', s.sharp == null ? '—' : `${s.sharp.toFixed(0)}${s.sharp < 30 ? '<span style="color:var(--warn)">（ぼけている可能性：○ から離す）</span>' : ''}`)
+      + row('iPadの表示の返事', s.showMs == null ? '—' : `中央値 ${s.showMs.toFixed(0)} ms・時間切れ ${s.showTimeouts} 回`) : '')
+    + (s ? row('カメラ', `${s.fps} fps・${s.W}×${s.H}`) + row('1フレームの処理', `${s.proc} ms`) + row('PC↔iPhone 往復', C.rtt != null ? `${C.rtt.toFixed(0)} ms` : '—') : '')
     + (ip ? row('iPadの画面', `${ip.Wmm.toFixed(0)} × ${ip.Hmm.toFixed(0)} mm`) + row('iPadの傾き（センサー）', ip.tilt != null ? `${ip.tilt.toFixed(1)}°` : '—') : '')
-    + (ci ? row('点のずれ', `${ci.rms.toFixed(2)} 画素（使えた点 ${ci.n}）`) + row('カメラまでの距離', `${(ci.dist / 10).toFixed(1)} cm`) + row('見下ろす角度', `${ci.elev.toFixed(1)}°`) + row('焦点距離（画像幅比）', ci.fW.toFixed(3)) + row('指の面の解像度', `${ci.scale.toFixed(1)} px/mm`) : '')
+    + (ci ? row('点のずれ', `${ci.rms.toFixed(2)} 画素（使えた点 ${ci.n}）`) + row('カメラまでの距離', `${(ci.dist / 10).toFixed(1)} cm`) + row('見下ろす角度', `${ci.elev.toFixed(1)}°`) + row('真横からのずれ', `${ci.side.toFixed(1)}°`) + row('焦点距離（画像幅比）', ci.fW.toFixed(3)) + row('指の面の解像度', `${ci.scale.toFixed(1)} px/mm`) : '')
     + (j ? row('第2関節の ○ からのずれ', `${j.pipOffsetMm.toFixed(1)} mm`) + row('中節の長さ / 太さ', `${j.LmMm.toFixed(1)} / ${j.diaMm.toFixed(1)} mm`) : '');
 }
 
@@ -184,7 +233,7 @@ function renderCam() {
   const fd = c.focusDistance, manual = fd && c.focusModes.includes('manual');
   el.innerHTML = `<div class="lbl">iPhoneのカメラ</div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><select id="camSel" style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:5px 8px;color:inherit">${opts}</select><span class="note">${c.w}×${c.h}・${Math.round(c.fps || 0)} fps</span></div>
-    <div class="note" style="margin-top:4px">ピントが合わないとき：「背面デュアル広角カメラ」を選ぶ（近いと自動で接写用に切り替わる）。広角のままなら ○ から15cm以上離す。</div>
+    <div class="note" style="margin-top:4px">カメラは「背面カメラ（広角）」だけを使います。ピントが合わないときは ○ から20cm以上離す。</div>
     ${manual ? `<div style="display:flex;gap:8px;align-items:center;margin-top:6px"><span class="note">ピント</span><button class="btn" id="fAuto">自動</button><input type="range" id="fDist" min="${fd.min}" max="${fd.max}" step="${fd.step || 0.01}" value="${c.focusNow ?? fd.min}" style="flex:1"></div>`
       : `<div class="note" style="margin-top:4px">${c.focusModes.length ? `ピントの方式：${c.focusModes.join(' / ')}（手動の距離指定は不可）` : 'このiPhoneのブラウザでは、ピントを手動で動かせません（自動のみ）'}</div>`}
     ${c.err ? `<div class="note" style="color:var(--ng)">${c.err}</div>` : ''}`;

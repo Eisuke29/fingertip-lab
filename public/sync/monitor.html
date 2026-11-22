@@ -55,6 +55,7 @@
       <div class="lbl">やること</div><div class="txt" id="todo"></div>
       <div class="lbl">合格の目安</div><ul class="checks" id="checks"></ul>
       <div id="busy" class="busy"></div>
+      <div id="errs" class="note" style="color:var(--ng)"></div>
       <div id="fix" class="fix" hidden></div>
       <div id="btns"></div>
       <div id="camBox"></div>
@@ -64,7 +65,7 @@
     <details class="card"><summary>検証・設定</summary><div id="tools"></div></details>
   </div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
-<script type="module" src="./monitor.js?v=3"></script>
+<script src="/vendor/qrcode.js"></script>
+<script type="module" src="./monitor.js"></script>
 </body>
 </html>

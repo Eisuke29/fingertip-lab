@@ -6,7 +6,7 @@ if not exist node_modules (
   echo 初回のため、必要なファイルを入れています（数分かかります）...
   call npm install
 )
-start "" cmd /c "timeout /t 2 /nobreak >nul & start http://localhost:8080/"
+echo PCの操作画面: http://localhost:8080/  （ブラウザで1つだけ開いてください）
 node sync-server.mjs
 echo.
 echo 同期サーバーが止まりました。上にエラーが出ていないか確認してください。

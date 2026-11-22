@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 
@@ -16,6 +17,13 @@ const PUB = path.join(ROOT, 'public');
 const CERTS = path.join(ROOT, 'certs');
 const HTTP_PORT = +(process.env.SYNC_HTTP_PORT || 8080), HTTPS_PORT = +(process.env.SYNC_HTTPS_PORT || 8443); // tests use other ports
 
+// version of the pages = hash of every file in public/sync when the server starts (Fable review P0-5)
+function hashPages() {
+  const h = crypto.createHash('sha1'), dir = path.join(PUB, 'sync');
+  for (const f of fs.readdirSync(dir).sort()) { const fp = path.join(dir, f); if (fs.statSync(fp).isFile()) { h.update(f); h.update(fs.readFileSync(fp)); } }
+  return h.digest('hex').slice(0, 8);
+}
+const VERSION = hashPages();
 const lanIPs = () => Object.values(os.networkInterfaces()).flat().filter((a) => a && a.family === 'IPv4' && !a.internal).map((a) => a.address);
 
 // ---------- certificates (local CA, created once; server certificate re-issued for the current addresses) ----------
@@ -42,7 +50,7 @@ function ensureCerts(ips) {
 }
 
 // ---------- relay ----------
-const peers = { ipad: null, phone: null, monitors: new Set() };
+const peers = { ipad: null, phone: null, monitors: new Set(), controller: null };
 const presence = () => JSON.stringify({ type: 'presence', ipad: !!peers.ipad, phone: !!peers.phone, monitors: peers.monitors.size });
 const all = () => [peers.ipad, peers.phone, ...peers.monitors].filter(Boolean);
 const sendTo = (ws, data, binary = false) => { if (ws && ws.readyState === 1 && (!binary || ws.bufferedAmount < 1.5e6)) ws.send(data, { binary }); };
@@ -51,8 +59,11 @@ function attach(wss) {
     const q = new URL(req.url, 'http://x').searchParams, role = q.get('role');
     if (!['ipad', 'phone', 'monitor'].includes(role)) { ws.close(1008, 'role'); return; }
     // pages from before versioning keep reconnecting with old code: refuse them so they cannot take the slot
-    if (!q.get('v')) { console.log(`  古い版のページを断りました（${role}・${req.socket.remoteAddress}）`); ws.close(4001, 'old version'); return; }
-    if (role === 'monitor') peers.monitors.add(ws);
+    if (q.get('v') !== VERSION) { console.log(`  古い版のページを断りました（${role}・版 ${q.get('v') || 'なし'}・今の版 ${VERSION}）`); ws.close(4001, 'old version'); return; }
+    if (role === 'monitor') {
+      peers.monitors.add(ws);
+      if (!peers.controller) peers.controller = ws; else sendTo(ws, '{"type":"secondary"}'); // only one PC page controls
+    }
     else { const old = peers[role]; if (old && old !== ws) { sendTo(old, '{"type":"replaced"}'); setTimeout(() => old.terminate(), 200); } peers[role] = ws; }
     ws.role = role; ws.alive = true;
     console.log(`  つながりました: ${role === 'ipad' ? 'iPad' : role === 'phone' ? 'iPhone' : 'PC確認画面'}（${req.socket.remoteAddress}）`);
@@ -62,6 +73,7 @@ function attach(wss) {
       ws.alive = true;
       if (isBinary) { if (role === 'phone') for (const m of peers.monitors) sendTo(m, data, true); return; }
       let m; try { m = JSON.parse(data.toString()); } catch { return; }
+      if (role === 'monitor' && ws !== peers.controller) return; // a second PC page only watches
       m.from = role; const s = JSON.stringify(m);
       const to = [].concat(m.to || ['ipad', 'phone', 'monitor']).filter((r) => r !== role);
       if (to.includes('ipad')) sendTo(peers.ipad, s);
@@ -69,7 +81,10 @@ function attach(wss) {
       if (to.includes('monitor')) for (const x of peers.monitors) sendTo(x, s);
     });
     ws.on('close', () => {
-      if (role === 'monitor') peers.monitors.delete(ws); else if (peers[role] === ws) peers[role] = null;
+      if (role === 'monitor') {
+        peers.monitors.delete(ws);
+        if (peers.controller === ws) { peers.controller = [...peers.monitors][0] || null; if (peers.controller) sendTo(peers.controller, '{"type":"primary"}'); }
+      } else if (peers[role] === ws) peers[role] = null;
       console.log(`  切れました: ${role === 'ipad' ? 'iPad' : role === 'phone' ? 'iPhone' : 'PC確認画面'}`);
       for (const c of all()) sendTo(c, presence());
     });
@@ -77,7 +92,11 @@ function attach(wss) {
 }
 // heartbeat: a JSON beat the pages can see, plus protocol pings to drop dead sockets
 setInterval(() => {
-  for (const ws of all()) { if (!ws.alive) { ws.terminate(); continue; } ws.alive = false; try { ws.ping(); } catch {} sendTo(ws, '{"type":"beat"}'); }
+  for (const ws of all()) {
+    ws.missed = ws.alive ? 0 : (ws.missed || 0) + 1; ws.alive = false;
+    if (ws.missed >= 3) { console.log(`  応答がないので切りました：${ws.role}`); ws.terminate(); continue; }
+    try { ws.ping(); } catch {} sendTo(ws, '{"type":"beat"}');
+  }
 }, 2000);
 
 // ---------- static files + status page ----------
@@ -86,10 +105,10 @@ function handler(ips) {
   return (req, res) => {
     const u = new URL(req.url, 'http://x');
     if (u.pathname === '/') { res.writeHead(302, { location: '/sync/monitor.html' }); res.end(); return; }
-    if (u.pathname === '/api/version') { // newest change of the page files: open pages reload themselves when it changes
-      let v = 0; try { for (const f of fs.readdirSync(path.join(PUB, 'sync'))) v = Math.max(v, fs.statSync(path.join(PUB, 'sync', f)).mtimeMs); } catch {}
-      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ v })); return;
-    }
+    if (u.pathname === '/api/version') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ v: VERSION })); return; }
+    const vendor = u.pathname.startsWith('/vendor/three/') ? path.join(ROOT, 'node_modules', 'three', 'build', path.basename(u.pathname))
+      : u.pathname === '/vendor/qrcode.js' ? path.join(ROOT, 'node_modules', 'qrcode-generator', 'dist', 'qrcode.js') : null;
+    if (vendor) { fs.readFile(vendor, (e, buf) => { if (e) { res.writeHead(404); res.end(); return; } res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'max-age=86400' }); res.end(buf); }); return; }
     if (u.pathname === '/api/info') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ips, http: HTTP_PORT, https: HTTPS_PORT })); return; }
     if (u.pathname === '/ok') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'access-control-allow-origin': '*' }); res.end('<meta name="viewport" content="width=device-width"><h1 style="font-family:sans-serif">OK（証明書は信頼されています）</h1>'); return; }
     if (u.pathname === '/ca' || u.pathname === '/ca.crt') { res.writeHead(200, { 'content-type': 'application/x-x509-ca-cert', 'content-disposition': 'attachment; filename="fingertip-lab-ca.crt"' }); res.end(fs.readFileSync(path.join(CERTS, 'ca.crt'))); return; }
@@ -120,5 +139,6 @@ console.log('');
 console.log('  同期サーバーを起動しました');
 console.log(`  PCのアドレス: ${ips.join(' / ') || '（ネットワーク未接続）'}`);
 console.log(`  PCの操作画面: http://localhost:${HTTP_PORT}/`);
+console.log(`  ページの版: ${VERSION}`);
 console.log('  このウィンドウを閉じると止まります');
 console.log('');

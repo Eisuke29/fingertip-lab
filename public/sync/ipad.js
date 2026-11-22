@@ -5,9 +5,7 @@ import { Display } from './display.js';
 import { EyeTracker } from './eye.js';
 import { connect } from './wslink.js';
 import { drawPattern } from './pattern.js';
-import { autoReload } from './autoreload.js';
-import { VERSION } from './version.js';
-autoReload();
+import { boot } from './boot.js';
 
 const $ = (s) => document.querySelector(s);
 const STORE = 'syncIpad.v5';
@@ -20,10 +18,12 @@ const P = { pose: null, poseAt: 0, finger: false, eyeOn: false, tilt: null, tapp
 const display = new Display($('#display'));
 const eye = new EyeTracker();
 const Wmm = () => innerWidth * st.mmPerPx, Hmm = () => innerHeight * st.mmPerPx;
-const toMon = (m) => link.send({ ...m, to: 'monitor' });
+const toMon = (m) => link?.send({ ...m, to: 'monitor' });
+const VERSION = await boot();
 
-const link = connect('local', 'ipad', {
+const link = connect('ipad', VERSION, {
   onOpen: () => report(),
+  onOld: () => location.reload(), // the iPad never runs a job itself, so reloading is always safe
   onData: (m) => {
     if (m.type === 'pose') { P.pose = m; P.poseAt = performance.now(); return; }
     if (m.type === 'show') return show(m);
@@ -66,15 +66,16 @@ async function control(m) {
 
 // ---------------- what the screen shows for the camera (black / dot / grid) or the experience ----------------
 const cc = $('#cal'), cx = cc.getContext('2d');
+let lastShow = { kind: 'scene' };
 function show(m, reply = true) {
-  P.screenKind = m.kind;
+  P.screenKind = m.kind; lastShow = m;
   if (m.kind === 'scene') cc.hidden = true;
   else {
     cc.hidden = false; const dpr = devicePixelRatio || 1;
     cc.width = Math.round(innerWidth * dpr); cc.height = Math.round(innerHeight * dpr);
     drawPattern(cx, cc.width, cc.height, m, innerWidth, innerHeight, st.mmPerPx);
   }
-  if (reply) requestAnimationFrame(() => requestAnimationFrame(() => link.send({ type: 'shown', kind: m.kind, to: 'phone' })));
+  if (reply) requestAnimationFrame(() => requestAnimationFrame(() => link.send({ type: 'shown', id: m.id, kind: m.kind, to: 'phone' })));
 }
 
 // ---------------- the experience ----------------
@@ -82,7 +83,7 @@ function layout() {
   display.layout({ mmPerPx: st.mmPerPx, pipFrac: { x: 0.5, y: 0.5 }, Lm: st.Lm, Ld: st.Ld, dia: st.dia, fullBox: true, sideLight: true });
   eye.configure({ hfov: st.hfov, camPos: { x: 0, y: display.Hm / 2 + 10, z: 0 } });
 }
-addEventListener('resize', () => { layout(); if (P.screenKind !== 'scene') show({ kind: P.screenKind }, false); report(); });
+addEventListener('resize', () => { layout(); if (lastShow.kind !== 'scene') show(lastShow, false); report(); });
 function loop() {
   const p = P.pose, fresh = p && performance.now() - P.poseAt < 500;
   display.setFingerVisible(P.finger);
