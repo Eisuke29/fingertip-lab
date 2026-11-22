@@ -84,6 +84,10 @@ function handler(ips) {
   return (req, res) => {
     const u = new URL(req.url, 'http://x');
     if (u.pathname === '/') { res.writeHead(302, { location: '/sync/monitor.html' }); res.end(); return; }
+    if (u.pathname === '/api/version') { // newest change of the page files: open pages reload themselves when it changes
+      let v = 0; try { for (const f of fs.readdirSync(path.join(PUB, 'sync'))) v = Math.max(v, fs.statSync(path.join(PUB, 'sync', f)).mtimeMs); } catch {}
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ v })); return;
+    }
     if (u.pathname === '/api/info') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ips, http: HTTP_PORT, https: HTTPS_PORT })); return; }
     if (u.pathname === '/ok') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'access-control-allow-origin': '*' }); res.end('<meta name="viewport" content="width=device-width"><h1 style="font-family:sans-serif">OK（証明書は信頼されています）</h1>'); return; }
     if (u.pathname === '/ca' || u.pathname === '/ca.crt') { res.writeHead(200, { 'content-type': 'application/x-x509-ca-cert', 'content-disposition': 'attachment; filename="fingertip-lab-ca.crt"' }); res.end(fs.readFileSync(path.join(CERTS, 'ca.crt'))); return; }

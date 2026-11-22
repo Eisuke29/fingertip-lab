@@ -5,6 +5,8 @@ import { Display } from './display.js';
 import { EyeTracker } from './eye.js';
 import { connect } from './wslink.js';
 import { drawPattern } from './pattern.js';
+import { autoReload } from './autoreload.js';
+autoReload();
 
 const $ = (s) => document.querySelector(s);
 const STORE = 'syncIpad.v5';

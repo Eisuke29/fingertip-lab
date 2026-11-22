@@ -8,6 +8,7 @@ import * as T from './tracker.js';
 import * as G from './geom.js';
 import { connect } from './wslink.js';
 import { discInBox } from './ring.js';
+import { autoReload } from './autoreload.js';
 
 const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -37,6 +38,8 @@ addrIn.value = params.get('pc') || saved.addr || '';
 const LOCAL = !/github\.io$/.test(location.hostname); // served by the PC's sync-server
 if (LOCAL) { addrIn.value = 'local'; addrIn.hidden = true; document.querySelector('.lbl').hidden = true; }
 $('#go').onclick = start;
+autoReload(() => { try { sessionStorage.setItem('autostart', '1'); } catch {} });
+try { if (LOCAL && sessionStorage.getItem('autostart')) { sessionStorage.removeItem('autostart'); setTimeout(start, 100); } } catch {}
 if (SIM && addrIn.value) setTimeout(start, 50);
 let started = false;
 async function start() {
@@ -51,14 +54,47 @@ async function start() {
     addEventListener('devicemotion', (e) => { const g = e.accelerationIncludingGravity; if (g && g.x != null) S.gravity = S.gravity ? S.gravity.map((v, i) => v * 0.9 + [g.x, g.y, g.z][i] * 0.1) : [g.x, g.y, g.z]; });
     let stream;
     if (SIM) { const { createSim3D } = await import('./sim3d.js'); sim = await createSim3D(); stream = sim.stream; sim.setScreen({ kind: 'scene' }); }
-    else stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } }, audio: false });
+    else stream = await openCamera(saved.camId);
     const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.srcObject = stream; await v.play();
-    S.video = v; resize();
+    S.video = v; S.stream = stream; resize();
     $('#start').style.display = 'none';
+    if (!SIM) await chooseDefaultCamera();
     try { await navigator.wakeLock?.request('screen'); } catch {}
     link = connect(addr, 'phone', { onOpen: () => sendStatus(), onData, onState: (t) => { S.linkState = t; }, onPresence: (p) => { S.presence = p; } });
     v.requestVideoFrameCallback(onFrame);
   } catch (e) { started = false; $('#startErr').textContent = `開始できません：${e.message || e}`; }
+}
+// ---------------- camera choice and focus (controlled from the PC) ----------------
+function openCamera(id) {
+  const c = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } };
+  if (id) c.deviceId = { exact: id }; else c.facingMode = { ideal: 'environment' };
+  return navigator.mediaDevices.getUserMedia({ video: c, audio: false }).catch(() => navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }));
+}
+async function listCameras() { try { return (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput' && !/前面|front/i.test(d.label)); } catch { return []; } }
+// the dual-wide camera switches to the ultra-wide (macro) by itself when the subject is close, so focus works up close
+async function chooseDefaultCamera() {
+  const devs = await listCameras(), cur = S.stream.getVideoTracks()[0].getSettings().deviceId;
+  if (!saved.camId) { const pref = devs.find((d) => /デュアル広角|dual wide/i.test(d.label)); if (pref && pref.deviceId !== cur) { await switchCamera(pref.deviceId, false); return; } }
+  sendCamInfo();
+}
+async function switchCamera(id, remember = true) {
+  try {
+    const s2 = await openCamera(id); S.stream?.getTracks().forEach((t) => t.stop()); S.stream = s2; S.video.srcObject = s2; await S.video.play();
+    if (remember) { saved.camId = id; try { localStorage.setItem(STORE, JSON.stringify(saved)); } catch {} }
+    S.pose = null; S.rect = null; S.bg.reset(); S.cal = null; S.raw = null; S.ok = false; S.ring = null; S.W = 0; resize();
+  } catch (e) { S.camErr = e.message; }
+  sendCamInfo();
+}
+async function sendCamInfo() {
+  const t = S.stream?.getVideoTracks()[0]; if (!t) return;
+  const caps = t.getCapabilities ? t.getCapabilities() : {}, set = t.getSettings();
+  toMon({ type: 'caminfo', devices: (await listCameras()).map((d) => ({ id: d.deviceId, label: d.label })), current: set.deviceId, label: t.label,
+    w: set.width, h: set.height, fps: set.frameRate, focusModes: caps.focusMode || [], focusDistance: caps.focusDistance || null, focusNow: set.focusDistance ?? null, focusMode: set.focusMode ?? null, err: S.camErr || null });
+}
+async function setFocus(m) {
+  const t = S.stream?.getVideoTracks()[0]; if (!t) return;
+  try { await t.applyConstraints({ advanced: [m.mode === 'manual' ? { focusMode: 'manual', focusDistance: m.d } : { focusMode: m.mode }] }); S.camErr = null; } catch (e) { S.camErr = `ピントを変えられません：${e.message}`; }
+  sendCamInfo();
 }
 function resize() {
   const v = S.video;
@@ -390,6 +426,9 @@ async function onData(m) {
   switch (m.name) {
     case 'step': S.step = m.step; break;
     case 'find': findRing(); break;
+    case 'camera': switchCamera(m.id); break;
+    case 'focus': setFocus(m); break;
+    case 'caminfo': sendCamInfo(); break;
     case 'countdown': S.countdown = m.n; break;
     case 'cal': calibrate(m); break;
     case 'bg': S.countdown = null; captureBackground(); break;

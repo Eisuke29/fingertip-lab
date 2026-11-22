@@ -1,6 +1,8 @@
 // PC control page (served by sync-server at http://localhost:8080/). All instructions and buttons live here;
 // the iPad only shows, the iPhone only measures.
 import { connect } from './wslink.js';
+import { autoReload } from './autoreload.js';
+autoReload();
 
 const $ = (s) => document.querySelector(s);
 const C = { step: 1, done: {}, ack: {}, busy: '', status: null, statusAt: 0, ipad: null, ipadAt: 0, pose: null, poseAt: 0, frameAt: 0, results: [], rtt: null, eyeOn: false };
@@ -17,6 +19,7 @@ function onData(m) {
   else if (m.type === 'pose') { C.pose = m; C.poseAt = performance.now(); }
   else if (m.type === 'ack') { C.ack[m.what] = m; C.busy = ''; }
   else if (m.type === 'pong') C.rtt = performance.now() - m.t0;
+  else if (m.type === 'caminfo') { C.cam = m; renderCam(); }
   else if (m.type === 'result') { C.results.push(m); renderTools(); }
   else if (m.type === 'lat-edge') latEdge(m);
   render();
@@ -111,7 +114,7 @@ function countdownBg() {
   const tick = () => { if (n > 0) { C.busy = `${n} 秒後に撮ります（手を出して、動かさない）`; toPhone('countdown', { n }); n--; render(); setTimeout(tick, 1000); } else { C.busy = '撮影中…'; toPhone('bg'); render(); } };
   tick();
 }
-function goStep(i) { C.step = i; C.busy = ''; enterStep(i); render(); }
+function goStep(i) { C.step = i; C.busy = ''; enterStep(i); render(); renderCam(); }
 function enterStep(i) {
   toPhone('step', { step: i });
   // what the iPad shows in each step (the iPhone switches it to dots / grid during the measurement itself)
@@ -148,6 +151,22 @@ function renderNums() {
     + (ip ? row('iPadの画面', `${ip.Wmm.toFixed(0)} × ${ip.Hmm.toFixed(0)} mm`) + row('iPadの傾き（センサー）', ip.tilt != null ? `${ip.tilt.toFixed(1)}°` : '—') : '')
     + (ci ? row('点のずれ', `${ci.rms.toFixed(2)} 画素（使えた点 ${ci.n}）`) + row('カメラまでの距離', `${(ci.dist / 10).toFixed(1)} cm`) + row('見下ろす角度', `${ci.elev.toFixed(1)}°`) + row('焦点距離（画像幅比）', ci.fW.toFixed(3)) + row('指の面の解像度', `${ci.scale.toFixed(1)} px/mm`) : '')
     + (j ? row('第2関節の ○ からのずれ', `${j.pipOffsetMm.toFixed(1)} mm`) + row('中節の長さ / 太さ', `${j.LmMm.toFixed(1)} / ${j.diaMm.toFixed(1)} mm`) : '');
+}
+
+// ---------------- camera choice / focus (shown in steps 1-2) ----------------
+function renderCam() {
+  const el = $('#camBox'); if (!el) return;
+  const c = C.cam; if (!c || C.step > 2) { el.innerHTML = ''; return; }
+  const opts = c.devices.map((d) => `<option value="${d.id}" ${d.id === c.current ? 'selected' : ''}>${d.label}</option>`).join('');
+  const fd = c.focusDistance, manual = fd && c.focusModes.includes('manual');
+  el.innerHTML = `<div class="lbl">iPhoneのカメラ</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><select id="camSel" style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:5px 8px;color:inherit">${opts}</select><span class="note">${c.w}×${c.h}・${Math.round(c.fps || 0)} fps</span></div>
+    <div class="note" style="margin-top:4px">ピントが合わないとき：「背面デュアル広角カメラ」を選ぶ（近いと自動で接写用に切り替わる）。広角のままなら ○ から15cm以上離す。</div>
+    ${manual ? `<div style="display:flex;gap:8px;align-items:center;margin-top:6px"><span class="note">ピント</span><button class="btn" id="fAuto">自動</button><input type="range" id="fDist" min="${fd.min}" max="${fd.max}" step="${fd.step || 0.01}" value="${c.focusNow ?? fd.min}" style="flex:1"></div>`
+      : `<div class="note" style="margin-top:4px">${c.focusModes.length ? `ピントの方式：${c.focusModes.join(' / ')}（手動の距離指定は不可）` : 'このiPhoneのブラウザでは、ピントを手動で動かせません（自動のみ）'}</div>`}
+    ${c.err ? `<div class="note" style="color:var(--ng)">${c.err}</div>` : ''}`;
+  $('#camSel').onchange = (e) => toPhone('camera', { id: e.target.value });
+  if (manual) { $('#fAuto').onclick = () => toPhone('focus', { mode: 'continuous' }); $('#fDist').onchange = (e) => toPhone('focus', { mode: 'manual', d: +e.target.value }); }
 }
 
 // ---------------- verification / settings ----------------
