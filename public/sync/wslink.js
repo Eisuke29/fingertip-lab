@@ -46,6 +46,6 @@ export function connect(addr, role, h = {}) {
     const s = ws; ws = null; s.onclose = null; try { s.close(); } catch {}
     h.onClose?.(); state('PCから応答がありません。つなぎ直しています'); lastMsg = performance.now(); setTimeout(open, 300);
   }, 2000);
-  open();
+  setTimeout(open, 0); // after the caller has stored the returned object
   return api;
 }

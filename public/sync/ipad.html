@@ -12,60 +12,16 @@
 <link rel="apple-touch-icon" href="./icon-ipad-180.png">
 <title>ディスプレイ内指触覚</title>
 <style>
-  :root { --bg:#15171c; --glass:rgba(16,18,22,.88); --panel2:#23272f; --line:#333944; --fg:#eef0f3; --mut:#9aa1ab; --dim:#5f6672;
-    --accent:#5aa9ff; --ok:#3ecf8e; --warn:#f5b84b; --ng:#ff6b6b; }
-  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); overflow:hidden; overscroll-behavior:none;
-    font:16px/1.45 system-ui, "Hiragino Sans", sans-serif; -webkit-user-select:none; user-select:none; touch-action:none; }
-  button, select, input { font:inherit; color:inherit; }
-  #display, #calCanvas { position:fixed; inset:0; width:100vw; height:100vh; display:block; }
-  #calCanvas { z-index:8; background:#000; }
-
-  #bar { position:fixed; left:0; right:0; top:0; z-index:10; display:flex; align-items:center; gap:10px;
-    padding:calc(env(safe-area-inset-top) + 8px) calc(env(safe-area-inset-right) + 12px) 8px calc(env(safe-area-inset-left) + 12px);
-    background:var(--glass); border-bottom:1px solid var(--line); }
-  #stages { display:flex; gap:6px; flex:1; }
-  .sg { display:flex; align-items:center; gap:8px; padding:6px 14px 6px 6px; border-radius:999px; background:var(--panel2); border:1px solid var(--line); color:var(--mut); font-weight:600; }
-  .sg i { width:26px; height:26px; border-radius:50%; display:grid; place-items:center; font-style:normal; font-size:13px; background:#2f343e; }
-  .sg.cur { color:var(--fg); border-color:var(--accent); background:rgba(90,169,255,.16); } .sg.cur i { background:var(--accent); color:#04203f; }
-  .sg.done { color:var(--fg); } .sg.done i { background:var(--ok); color:#06261a; }
-  .ib { border:1px solid var(--line); background:var(--panel2); border-radius:999px; padding:6px 14px; color:var(--mut); }
-  .ib[aria-pressed="true"] { color:var(--fg); border-color:var(--accent); }
-  #room { color:var(--mut); font-size:14px; white-space:nowrap; } #room b { color:var(--fg); font:700 18px ui-monospace, monospace; letter-spacing:.12em; }
-
-  #panel { position:fixed; left:calc(env(safe-area-inset-left) + 12px); top:calc(env(safe-area-inset-top) + 64px); z-index:10; width:min(460px, 44vw);
-    background:var(--glass); border:1px solid var(--line); border-radius:16px; padding:14px 16px; }
-  #inst { font-size:20px; font-weight:700; }
-  #res { margin-top:6px; font-size:16px; color:var(--mut); min-height:1.45em; }
-  #res .ok { color:var(--ok); font-weight:700; } #res .ng { color:var(--ng); font-weight:700; } #res .warn { color:var(--warn); font-weight:700; }
-  #btns { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
-  .btn { border:1px solid var(--line); background:var(--panel2); padding:10px 18px; border-radius:12px; font-weight:600; }
-  .btn.primary { background:var(--accent); border-color:var(--accent); color:#04203f; }
-  .btn.next { margin-left:auto; } .btn:disabled { opacity:.35; }
-
-  #media { position:fixed; right:calc(env(safe-area-inset-right) + 12px); top:calc(env(safe-area-inset-top) + 64px); z-index:10; }
-  #qr { background:#fff; padding:6px; border-radius:10px; width:110px; height:110px; } #qr img { width:100%; height:100%; image-rendering:pixelated; display:block; }
-  #pv { display:block; width:min(48vw, 560px); border-radius:12px; border:1px solid var(--line); background:#000; }
+  html,body { margin:0; height:100%; background:#15171c; overflow:hidden; overscroll-behavior:none; touch-action:none; -webkit-user-select:none; user-select:none; }
+  canvas { position:fixed; inset:0; width:100vw; height:100vh; display:block; }
+  #cal { z-index:5; background:#000; }
   [hidden] { display:none !important; }
-
-  body.draw #panel, body.draw #media, body.draw #stages, body.draw #room { display:none; }
-  body.draw #bar { background:transparent; border-color:transparent; }
-  body.dots #panel, body.dots #media, body.dots #bar { display:none; }
-  #chip { display:none; padding:5px 12px; border-radius:999px; background:rgba(0,0,0,.45); color:var(--mut); font-size:14px; font-variant-numeric:tabular-nums; }
-  body.draw #chip { display:inline-block; } body.draw .spacer { flex:1; } #chip b { color:var(--fg); }
-  #pipLabel { position:fixed; z-index:9; transform:translate(0,-50%); padding:3px 10px; border-radius:8px; background:rgba(255,77,77,.14);
-    border:1px solid rgba(255,77,77,.5); color:#ffd0d0; font-size:14px; pointer-events:none; }
-
-  #drawer { position:fixed; right:12px; top:calc(env(safe-area-inset-top) + 64px); bottom:12px; width:min(400px, 92vw); z-index:20; overflow:auto;
-    background:#181b21; border:1px solid var(--line); border-radius:16px; padding:14px 16px; display:none; font-size:14px; }
-  #drawer.open { display:block; } #drawer h3 { margin:14px 0 6px; font-size:14px; color:var(--mut); }
-  .field { display:grid; grid-template-columns:1fr 130px; gap:8px; align-items:center; margin:4px 0; }
-  .field input, .field select { width:100%; background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:5px 8px; }
-  #card { border:2px solid var(--accent); border-radius:10px; margin:6px 0; display:grid; place-items:center; color:var(--mut); font-size:12px; }
-  .pass { color:var(--ok); font-weight:700; } .fail { color:var(--ng); font-weight:700; }
-  #rotate { position:fixed; inset:0; z-index:60; background:var(--bg); display:none; place-items:center; font-size:22px; font-weight:700; }
+  #card { position:fixed; z-index:6; left:50%; top:50%; transform:translate(-50%,-50%); border:3px solid #5aa9ff; border-radius:12px; display:none; }
+  /* the only thing ever asked on the iPad: one tap (full screen + motion sensor permission) */
+  #tap { position:fixed; inset:0; z-index:10; background:#15171c; display:grid; place-items:center; color:#9aa1ab; font:600 22px system-ui, "Hiragino Sans", sans-serif; }
+  #rotate { position:fixed; inset:0; z-index:20; background:#15171c; display:none; place-items:center; color:#eef0f3; font:700 22px system-ui, sans-serif; }
   @media (orientation: portrait) { #rotate { display:grid; } }
-  #flash { position:fixed; inset:0; z-index:50; background:#000; display:none; }
+  #flash { position:fixed; inset:0; z-index:30; background:#000; display:none; }
 </style>
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.module.js" } }
@@ -73,40 +29,12 @@
 </head>
 <body>
 <canvas id="display"></canvas>
-<canvas id="calCanvas" hidden></canvas>
-<div id="pipLabel" hidden>第2関節</div>
-
-<div id="bar">
-  <div id="stages"></div>
-  <span id="room"></span>
-  <span id="chip"></span><span class="spacer"></span>
-  <button class="ib" id="eyeBtn" aria-pressed="false" hidden>視線追従</button>
-  <button class="ib" id="backBtn" hidden>準備</button>
-  <button class="ib" id="gear">⚙</button>
-</div>
-
-<div id="panel"><div id="inst"></div><div id="res"></div>
-  <div id="addrBox" hidden style="display:flex;gap:8px;margin-top:10px"><input id="addrIn" inputmode="decimal" placeholder="172.20.10.2" style="font:700 22px ui-monospace,monospace;width:10em;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--panel2)"><button class="btn primary" id="addrGo">つなぐ</button></div>
-  <div id="btns"></div></div>
-<div id="media"><div id="qr" hidden></div><canvas id="pv" hidden></canvas></div>
-
-<div id="drawer">
-  <div style="display:flex;justify-content:space-between;align-items:center"><b>検証・設定</b><button class="ib" id="closeDrawer">閉じる</button></div>
-  <h3>検証</h3>
-  <div id="verify"></div>
-  <h3>画面の大きさ（カードを当てて枠を合わせる）</h3>
-  <div id="card" style="width:445px;height:281px">85.6 × 54 mm</div>
-  <input type="range" id="cardW" min="200" max="800" step="1" style="width:100%">
-  <div class="field"><span>○ の位置 左から / 下から（%）</span><span style="display:flex;gap:6px"><input id="sPipX" type="number" step="1"><input id="sPipY" type="number" step="1"></span></div>
-  <div class="field"><span>中節 / 末節（mm）</span><span style="display:flex;gap:6px"><input id="sLm" type="number" step="0.5"><input id="sLd" type="number" step="0.5"></span></div>
-  <div class="field"><span>指の太さ（mm）</span><input id="sDia" type="number" step="0.5"></div>
-  <div class="field"><span>固定視点の目 左 / 手前 / 高さ（mm）</span><span style="display:flex;gap:4px"><input id="sEyeX" type="number" step="10"><input id="sEyeY" type="number" step="10"><input id="sEyeZ" type="number" step="10"></span></div>
-  <div class="field"><span>前面カメラの横の画角（°）</span><input id="sFov" type="number" step="1"></div>
-</div>
-
-<div id="rotate">iPadを横向きにしてください</div>
+<canvas id="cal" hidden></canvas>
+<div id="card"></div>
+<div id="tap">タップ</div>
+<div id="rotate">横向きにしてください</div>
 <div id="flash"></div>
 <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});</script>
-<script type="module" src="./ipad.js?v=4"></script>
+<script type="module" src="./ipad.js?v=5"></script>
 </body>
 </html>

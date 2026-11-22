@@ -2,7 +2,7 @@
 // camera, showing what the iPad shows (black / calibration dot / grid / scene), and a finger at known angles.
 const THREE_URL = 'https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.module.js';
 
-export async function createSim3D({ width = 1280, height = 720, fps = 30, Wmm = 227, Hmm = 158, pip = { x: 74.9, y: -41.1 } } = {}) {
+export async function createSim3D({ width = 1280, height = 720, fps = 30, Wmm = 227, Hmm = 158, pip = { x: 0, y: 0 } } = {}) {
   const THREE = await import(THREE_URL);
   const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
   renderer.setSize(width, height, false); renderer.setPixelRatio(1);

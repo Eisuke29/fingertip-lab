@@ -58,12 +58,13 @@ function attach(wss) {
     ws.on('pong', () => { ws.alive = true; });
     ws.on('message', (data, isBinary) => {
       ws.alive = true;
-      if (isBinary) { if (role === 'phone') { sendTo(peers.ipad, data, true); for (const m of peers.monitors) sendTo(m, data, true); } return; }
+      if (isBinary) { if (role === 'phone') for (const m of peers.monitors) sendTo(m, data, true); return; }
       let m; try { m = JSON.parse(data.toString()); } catch { return; }
       m.from = role; const s = JSON.stringify(m);
-      if (role === 'phone') { sendTo(peers.ipad, s); for (const x of peers.monitors) sendTo(x, s); }
-      else if (role === 'ipad') { const to = m.to || 'phone'; if (to === 'phone' || to === 'all') sendTo(peers.phone, s); if (to === 'monitor' || to === 'all') for (const x of peers.monitors) sendTo(x, s); }
-      else sendTo(peers.ipad, s);
+      const to = [].concat(m.to || ['ipad', 'phone', 'monitor']).filter((r) => r !== role);
+      if (to.includes('ipad')) sendTo(peers.ipad, s);
+      if (to.includes('phone')) sendTo(peers.phone, s);
+      if (to.includes('monitor')) for (const x of peers.monitors) sendTo(x, s);
     });
     ws.on('close', () => {
       if (role === 'monitor') peers.monitors.delete(ws); else if (peers[role] === ws) peers[role] = null;
@@ -79,37 +80,11 @@ setInterval(() => {
 
 // ---------- static files + status page ----------
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml', '.glb': 'model/gltf-binary' };
-function statusPage(ips) {
-  const ip = ips[0] || '（ネットワーク未接続）';
-  return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>同期サーバー</title>
-<style>body{margin:0;padding:24px;background:#101216;color:#eef0f3;font:16px/1.6 system-ui,"Yu Gothic UI",sans-serif}h1{font-size:18px;margin:0 0 4px}.addr{font:700 44px ui-monospace,monospace;letter-spacing:.04em}
-.card{background:#181b21;border:1px solid #2f343e;border-radius:12px;padding:14px 16px;margin:14px 0;max-width:720px}.dot{font-size:18px}a{color:#5aa9ff}.mut{color:#9aa1ab;font-size:14px}ol{margin:6px 0;padding-left:20px}</style></head><body>
-<h1>PCのアドレス</h1><div class="addr">${ip}</div>
-<div class="card" id="st">接続状況を確認中…</div>
-<div class="card"><b>① 初回だけ：iPhoneとiPadに証明書を入れる</b>
-<ol><li>iPhone（iPadも）のSafariで <b>http://${ip}:${HTTP_PORT}/ca</b> を開き「許可」</li>
-<li>設定 →「プロファイルがダウンロード済み」→ インストール</li>
-<li>設定 → 一般 → 情報 → 証明書信頼設定 →「Fingertip Lab Local CA」をオン</li>
-<li>確認：Safariで <a href="https://${ip}:${HTTPS_PORT}/ok">https://${ip}:${HTTPS_PORT}/ok</a> を開いて「OK」と出ればよい</li></ol>
-<div class="mut">証明書はこのPCのフォルダ certs/ にだけあります。</div></div>
-<div class="card" style="display:flex;gap:28px;flex-wrap:wrap">
-<div id="bp"><b>② iPhone</b>（カメラで読む）<div id="qp"></div><div class="mut">https://${ip}:${HTTPS_PORT}/sync/phone.html</div></div>
-<div id="bi"><b>② iPad</b><div id="qi"></div><div class="mut">https://${ip}:${HTTPS_PORT}/sync/ipad.html</div></div>
-<div class="mut" style="max-width:220px">開いたら 共有 →「ホーム画面に追加」。次からはホーム画面のアイコンで開く</div></div>
-<div class="card"><b><a href="/sync/monitor.html">PCの確認画面を開く</a></b></div>
-<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
-<script>function drawQR(){for(const [id,u] of [['qp','https://${ip}:${HTTPS_PORT}/sync/phone.html'],['qi','https://${ip}:${HTTPS_PORT}/sync/ipad.html']]){const e=document.getElementById(id);if(!e)continue;try{const q=qrcode(0,'M');q.addData(u);q.make();e.innerHTML='<img style="background:#fff;padding:6px;border-radius:8px;width:170px" src="'+q.createDataURL(5,1)+'">';}catch{}}}drawQR();
-const box={bp:document.getElementById('bp').innerHTML,bi:document.getElementById('bi').innerHTML};
-const done=(t)=>'<div style="font-size:20px;font-weight:700;color:#3ecf8e;padding:40px 10px">✓ '+t+' つながりました</div>';
-let last={};
-async function u(){try{const p=await (await fetch('/api/presence')).json();const d=(b,t)=>'<span class="dot" style="color:'+(b?'#3ecf8e':'#ff6b6b')+'">●</span> '+t;document.getElementById('st').innerHTML=d(p.ipad,'iPad')+'　'+d(p.phone,'iPhone')+'　'+d(p.monitors>0,'PC確認画面');
-for(const [id,on,name] of [['bp',p.phone,'iPhone'],['bi',p.ipad,'iPad']]){if(last[id]===on)continue;last[id]=on;const e=document.getElementById(id);if(on)e.innerHTML=done(name);else{e.innerHTML=box[id];}}
-if(p.phone!==last.qr||p.ipad!==last.qr2){last.qr=p.phone;last.qr2=p.ipad;drawQR();}}catch{}}setInterval(u,1000);u();</script></body></html>`;
-}
 function handler(ips) {
   return (req, res) => {
     const u = new URL(req.url, 'http://x');
-    if (u.pathname === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(statusPage(ips)); return; }
+    if (u.pathname === '/') { res.writeHead(302, { location: '/sync/monitor.html' }); res.end(); return; }
+    if (u.pathname === '/api/info') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ips, http: HTTP_PORT, https: HTTPS_PORT })); return; }
     if (u.pathname === '/ok') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'access-control-allow-origin': '*' }); res.end('<meta name="viewport" content="width=device-width"><h1 style="font-family:sans-serif">OK（証明書は信頼されています）</h1>'); return; }
     if (u.pathname === '/ca' || u.pathname === '/ca.crt') { res.writeHead(200, { 'content-type': 'application/x-x509-ca-cert', 'content-disposition': 'attachment; filename="fingertip-lab-ca.crt"' }); res.end(fs.readFileSync(path.join(CERTS, 'ca.crt'))); return; }
     if (u.pathname === '/api/presence') { res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' }); res.end(presence()); return; }
@@ -138,6 +113,6 @@ httpsServer.listen(HTTPS_PORT, '0.0.0.0');
 console.log('');
 console.log('  同期サーバーを起動しました');
 console.log(`  PCのアドレス: ${ips.join(' / ') || '（ネットワーク未接続）'}`);
-console.log(`  状況・証明書: http://localhost:${HTTP_PORT}/`);
+console.log(`  PCの操作画面: http://localhost:${HTTP_PORT}/`);
 console.log('  このウィンドウを閉じると止まります');
 console.log('');
