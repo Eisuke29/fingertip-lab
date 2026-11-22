@@ -56,7 +56,7 @@ export async function client(code, h, role = 'phone') {
   let pendingAt = 0;
   const connect = () => {
     if (!alive || peer.destroyed || conn?.open) return;
-    if (performance.now() - pendingAt < 8000) return; // a connection attempt is already under way
+    if (pendingAt && performance.now() - pendingAt < 8000) return; // a connection attempt is already under way
     pendingAt = performance.now();
     state('iPadを探しています');
     const c = peer.connect(peerIdOf(code), { serialization: 'json', reliable: true, metadata: { role } });
