@@ -5,7 +5,7 @@ const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
 let saved = {}; try { saved = JSON.parse(localStorage.getItem('syncMonitor.v1') || '{}'); } catch {}
 $('#code').value = (params.get('room') || saved.room || '').toUpperCase();
-let link = null, ui = null, status = null, pose = null, poseAt = 0;
+let link = null, ui = null, status = null, statusAt = 0, pose = null, poseAt = 0;
 
 $('#go').onclick = join;
 $('#code').addEventListener('keydown', (e) => { if (e.key === 'Enter') join(); });
@@ -26,7 +26,7 @@ async function join() {
 }
 function onData(m) {
   if (m.type === 'ui') { ui = m; renderUI(); }
-  else if (m.type === 'status') { status = m; renderNums(); }
+  else if (m.type === 'status') { status = m; statusAt = performance.now(); renderNums(); }
   else if (m.type === 'pose') { pose = m; poseAt = performance.now(); }
   else if (m.type === 'ack') renderNums();
 }
@@ -48,6 +48,9 @@ function renderNums() {
     + (s.res != null ? row('角度の分解能（1画素）', `${s.res.toFixed(2)}°`) : '') + (j ? row('PIPの ○ からのずれ', `${j.pipOffsetMm.toFixed(1)} mm`) + row('中節の長さ / 太さ', `${j.LmMm.toFixed(1)} / ${j.diaMm.toFixed(1)} mm`) : '') : row('iPhone', '未接続');
 }
 setInterval(() => {
+  const v = $('#pv'), dot = (ok, t) => `<span><span style="color:${ok ? 'var(--ok)' : 'var(--ng)'}">●</span> ${t}</span>`;
+  const phoneLive = ui?.phone && performance.now() - statusAt < 3000;
+  $('#links').innerHTML = dot(link?.connected, 'iPad') + dot(phoneLive, `iPhone${phoneLive && status ? `（${status.fps} fps）` : ''}`) + dot(v.videoWidth > 0, v.videoWidth ? `映像 ${v.videoWidth}×${v.videoHeight}` : '映像なし');
   const fresh = pose && performance.now() - poseAt < 600;
   $('#p').textContent = fresh ? (pose.fthp ?? pose.thp).toFixed(1) + '°' : '—'; $('#d').textContent = fresh ? (pose.fthd ?? pose.thd).toFixed(1) + '°' : '—';
   $('#trk').textContent = fresh ? (pose.ok ? `一致度 ${pose.sp.toFixed(2)} / ${pose.sd.toFixed(2)}` : '指を見失っています') : '';

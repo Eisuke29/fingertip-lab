@@ -30,13 +30,13 @@ async function startLink() {
     link = await host(st.room, {
       onReady: showQR,
       onOpen: (c) => {
-        if (c.role === 'phone') { c.send({ type: 'finger', Lm: st.Lm, dia: st.dia }); for (const m of link.conns) if (m.role === 'monitor') c.send({ type: 'monitor', id: m.peer }); }
-        else { link.send({ type: 'monitor', id: c.peer }, 'phone'); sendUI(); }
+        if (c.role === 'phone') c.send({ type: 'finger', Lm: st.Lm, dia: st.dia });
+        else { forwardVideo(c.peer); sendUI(); }
         render();
       },
       onClose: (c) => { if (c.role === 'phone') P.status = null; render(); },
       onData: (m, c) => (c.role === 'monitor' ? onMonitor(m) : onPhone(m)),
-      onStream: (s) => { const v = $('#pv'); v.srcObject = s; v.play().catch(() => {}); render(); },
+      onStream: (s) => { P.phoneStream = s; const v = $('#pv'); v.srcObject = s; v.play().catch(() => {}); for (const c of link.conns) if (c.role === 'monitor' && c.open) forwardVideo(c.peer); render(); },
       onError: (e) => { if (e.type === 'unavailable-id') { st.room = newCode(); save(); location.reload(); } else { P.linkErr = e.type || e.message; render(); } },
     });
   } catch (e) { P.linkErr = e.message; render(); }
@@ -61,6 +61,12 @@ function onPhone(m) {
   else if (m.type === 'ack') { P.ack[m.what] = m; P.busy = false; render(); }
   else if (m.type === 'lat-edge') latEdge(m);
   else if (m.type === 'result') onResult(m);
+}
+const fwd = new Map();
+function forwardVideo(id) {
+  if (!P.phoneStream || !link) return;
+  try { fwd.get(id)?.close(); } catch {}
+  fwd.set(id, link.peer.call(id, P.phoneStream));
 }
 function onMonitor(m) {
   if (m.type === 'press') { const v = stageView(); const b = v?.btns.filter(Boolean)[m.i]; if (b && !b.disabled) b.fn(); }
@@ -157,7 +163,7 @@ function render() {
 function sendUI() {
   if (!link?.has('monitor')) return;
   const v = P.stage < 4 ? stageView() : null;
-  link.send({ type: 'ui', room: st.room, stage: P.stage, names: NAMES, done: P.done, busy: P.busy, phone: phoneOn(),
+  link.send({ type: 'ui', room: st.room, video: !!P.phoneStream, stage: P.stage, names: NAMES, done: P.done, busy: P.busy, phone: phoneOn(),
     inst: v?.inst || '体験中', res: P.busy ? '…' : v?.res || '', btns: (v?.btns || []).filter(Boolean).map((b) => ({ label: b.label, disabled: !!b.disabled || (P.busy && !b.next), primary: !!(b.primary || (b.next && !b.disabled)) })),
     calInfo: P.ack.cal?.info || null, joints: P.ack.joints?.info || null, rtt: P.rtt }, 'monitor');
 }
