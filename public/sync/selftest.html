@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>計測の自己診断</title>
+<style>
+  :root { --bg:#0f1115; --fg:#e8eaed; --mut:#9aa0a6; --ok:#34d399; --ng:#f87171; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.6 system-ui, "Hiragino Sans", "Yu Gothic UI", sans-serif; }
+  h1 { font-size:18px; margin:0 0 8px; } p { color:var(--mut); margin:0 0 12px; }
+  canvas { width:100%; max-width:960px; display:block; border-radius:8px; }
+  table { border-collapse:collapse; margin-top:12px; } td,th { border-bottom:1px solid #2a2f3a; padding:4px 12px; text-align:right; }
+  .ok { color:var(--ok); } .ng { color:var(--ng); }
+</style></head>
+<body>
+<h1>計測の自己診断（合成カメラ）</h1>
+<p>角度が分かっている合成映像で、計測のしくみそのものの誤差を確かめます。実カメラの精度は「同期ラボ」の検証で測ります。</p>
+<canvas id="view"></canvas>
+<div id="out">実行中…</div>
+<script type="module">
+import * as T from './tracker.js';
+import { createSimCamera } from './sim.js';
+const sim = createSimCamera();
+const video = document.createElement('video'); video.muted = true; video.playsInline = true; video.srcObject = sim.stream; await video.play();
+const W = 1280, H = 720, work = new OffscreenCanvas(W, H), wctx = work.getContext('2d', { willReadFrequently: true });
+const view = document.getElementById('view'); view.width = W; view.height = H; const vctx = view.getContext('2d');
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const frame = () => new Promise(r => video.requestVideoFrameCallback(() => r()));
+// 1) background without the hand
+sim.state.handIn = false; await wait(300);
+const bg = new T.Background();
+for (let i = 0; i < 20; i++) { await frame(); wctx.drawImage(video, 0, 0, W, H); bg.add(wctx.getImageData(0, 0, W, H)); }
+bg.finish();
+sim.state.handIn = true;
+// 2) auto proposal with the distal flexed
+sim.state.manual = { thp: 70, thd: 45 }; await wait(300); await frame();
+wctx.drawImage(video, 0, 0, W, H);
+const full = T.foreground(wctx.getImageData(0, 0, W, H), { x0: 0, y0: 0, w: W, h: H }, bg);
+const prop = T.proposeJoints(full, sim.truth.glass);
+const tr = sim.truth;
+const gU = T.vec.unit(T.vec.sub(tr.dipC, tr.pipC));
+const propErr = prop ? { pipAlong: T.vec.dot(T.vec.sub(prop.pipC, tr.pipC), gU), dipAlong: T.vec.dot(T.vec.sub(prop.dipC, tr.dipC), gU), pip: Math.hypot(prop.pipC.x - tr.pipC.x, prop.pipC.y - tr.pipC.y), dip: Math.hypot(prop.dipC.x - tr.dipC.x, prop.dipC.y - tr.dipC.y), T: prop.T - tr.T, side: prop.side } : null;
+const thick = T.measureThickness(full, tr.glass, tr.pipC, tr.dipC, tr.side);
+let refined = null;
+if (prop) { const rf = T.refineJoints(full, { glass: tr.glass, pipC: prop.pipC, dipC: prop.dipC, T: prop.T, side: prop.side });
+  refined = { pipAlong: T.vec.dot(T.vec.sub(rf.pipC, tr.pipC), gU), dipAlong: T.vec.dot(T.vec.sub(rf.dipC, tr.dipC), gU) }; }
+// 3) tracking with the true calibration
+const model = T.buildModel({ glass: tr.glass, pipC: tr.pipC, dipC: tr.dipC, T: thick || tr.T, side: tr.side });
+sim.state.manual = null; sim.state.t0 = performance.now();
+const errs = { p: [], d: [] }, still = { p: [], d: [] }, times = []; let prev = {}, lost = 0, n = 0;
+const t0 = performance.now();
+while (performance.now() - t0 < 9000) {
+  await frame();
+  const truth = sim.angles();
+  const ts = performance.now();
+  const roi = T.roiFor(model, W, H);
+  wctx.drawImage(video, 0, 0, W, H);
+  const f = T.foreground(wctx.getImageData(roi.x0, roi.y0, roi.w, roi.h), roi, bg);
+  const r = T.track(f, model, prev);
+  times.push(performance.now() - ts);
+  const okP = r.scoreP > T.SCORE_OK, okD = r.scoreD > T.SCORE_OK; n++;
+  if (!okP || !okD) lost++;
+  prev = { thp: r.thp, thd: r.thd, okP, okD };
+  errs.p.push(r.thp - truth.thp); errs.d.push(r.thd - truth.thd);
+  vctx.drawImage(video, 0, 0);
+  const seg = (c, dir, L, col) => { vctx.strokeStyle = col; vctx.lineWidth = 4; vctx.beginPath(); vctx.moveTo(c.x, c.y); vctx.lineTo(c.x + dir.x * L, c.y + dir.y * L); vctx.stroke(); };
+  seg(model.pip, T.segDir(model, 'prox', r.thp), model.Lp, '#3b82f6');
+  seg(model.dip, T.segDir(model, 'dist', r.thd), model.Ld, '#f59e0b');
+}
+// 4) still hand: jitter
+sim.state.manual = { thp: 80, thd: 30 }; prev = {};
+for (let i = 0; i < 60; i++) {
+  await frame(); const roi = T.roiFor(model, W, H); wctx.drawImage(video, 0, 0, W, H);
+  const r = T.track(T.foreground(wctx.getImageData(roi.x0, roi.y0, roi.w, roi.h), roi, bg), model, prev);
+  prev = { thp: r.thp, thd: r.thd, okP: true, okD: true }; still.p.push(r.thp); still.d.push(r.thd);
+}
+const stat = (a) => { const m = a.reduce((x, y) => x + y, 0) / a.length; const sd = Math.sqrt(a.reduce((x, y) => x + (y - m) ** 2, 0) / a.length); const mae = a.reduce((x, y) => x + Math.abs(y), 0) / a.length; const mx = Math.max(...a.map(Math.abs)); return { m, sd, mae, mx }; };
+const sp = stat(errs.p), sd = stat(errs.d), jp = stat(still.p), jd = stat(still.d);
+times.sort((a, b) => a - b);
+const result = {
+  frames: n, lostRate: lost / n, procMedianMs: times[times.length >> 1], procP95Ms: times[Math.floor(times.length * 0.95)],
+  prox: { mae: sp.mae, max: sp.mx, bias: sp.m }, dist: { mae: sd.mae, max: sd.mx, bias: sd.m },
+  stillErr: { p: jp.m - 80, d: jd.m - 30 }, jitter: { p: jp.sd, d: jd.sd },
+  proposal: propErr, refined, thickness: { measured: thick, truth: tr.T },
+};
+window.result = result;
+const row = (k, v, ok) => `<tr><th style="text-align:left">${k}</th><td class="${ok ? 'ok' : 'ng'}">${v}</td></tr>`;
+document.getElementById('out').innerHTML = '<table>' +
+  row('基節 θp 平均誤差（動作中）', sp.mae.toFixed(2) + '°（最大 ' + sp.mx.toFixed(2) + '°）', sp.mae < 1) +
+  row('末節 θd 平均誤差（動作中）', sd.mae.toFixed(2) + '°（最大 ' + sd.mx.toFixed(2) + '°）', sd.mae < 1) +
+  row('静止時の揺れ θp / θd', jp.sd.toFixed(2) + '° / ' + jd.sd.toFixed(2) + '°', jp.sd < 0.5 && jd.sd < 0.5) +
+  row('見失い', (100 * lost / n).toFixed(1) + '%', lost / n < 0.01) +
+  row('処理時間（中央値／95%）', result.procMedianMs.toFixed(1) + ' / ' + result.procP95Ms.toFixed(1) + ' ms', result.procP95Ms < 20) +
+  row('関節の自動提案のずれ PIP / DIP', propErr ? propErr.pip.toFixed(0) + ' / ' + propErr.dip.toFixed(0) + ' px' : '失敗', propErr && propErr.pip < 25 && propErr.dip < 25) +
+  '</table>';
+sim.stop();
+</script>
+</body></html>
