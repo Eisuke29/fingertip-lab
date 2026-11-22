@@ -28,7 +28,7 @@ export class Display {
     this.pose = { thp: 70, thd: 20, ok: false };
     this.cfg = null;
     this.root = new THREE.Group(); this.scene.add(this.root);
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x50555e, 1.1));
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x6a707a, 1.7));
     this.sun = new THREE.DirectionalLight(0xffffff, 1.6); this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(1024, 1024); this.sun.shadow.radius = 4; this.sun.shadow.bias = -0.0008;
     const sc = this.sun.shadow.camera; sc.left = -160; sc.right = 160; sc.top = 160; sc.bottom = -160; sc.near = 10; sc.far = 900;
@@ -62,7 +62,13 @@ export class Display {
   buildBox() {
     this.root.clear();
     const P = this.pip, Wm = this.Wm, Hm = this.Hm;
-    const bx0 = P.x - 75, bx1 = P.x + 75, by0 = P.y - 40, by1 = P.y + 110, D = 80;
+    // fullBox: the whole screen is a window into the box (iPad). Otherwise a box around the PIP (PC lab).
+    const mg = 6;
+    const [bx0, bx1, by0, by1, D] = this.cfg.fullBox
+      ? [-Wm / 2 + mg, Wm / 2 - mg, -Hm / 2 + mg, Hm / 2 - mg, 90]
+      : [P.x - 75, P.x + 75, P.y - 40, P.y + 110, 80];
+    const sc = this.sun.shadow.camera, ext = Math.max(160, Math.hypot(Wm, Hm) / 2 + 40);
+    sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext; sc.updateProjectionMatrix();
     this.box = { bx0, bx1, by0, by1, D };
     const wall = new THREE.MeshStandardMaterial({ map: this.tex, roughness: 0.9, side: THREE.FrontSide });
     const addPlane = (w, h, pos, rot, rep) => {

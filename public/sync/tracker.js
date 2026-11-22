@@ -352,3 +352,106 @@ export function refineJoints(f, cal) {
   }
   return out;
 }
+
+// ---------- automatic glass-line detection ----------
+// The lens sits in the glass plane, so the glass appears as a straight edge passing near the image centre.
+// Coarse Hough transform on a 1/4 image, then sub-pixel refinement on the full image.
+export function lumaOf(img) {
+  const { width: W, height: H, data: d } = img, L = new Float32Array(W * H);
+  for (let i = 0, k = 0; k < L.length; i += 4, k++) L[k] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+  return { L, W, H };
+}
+export function detectGlass(img, opt = {}) {
+  const full = lumaOf(img), S = 4, w = Math.floor(full.W / S), h = Math.floor(full.H / S);
+  const s = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let a = 0; for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) a += full.L[(y * S + j) * full.W + x * S + i];
+    s[y * w + x] = a / (S * S);
+  }
+  const mags = [], gxA = new Float32Array(w * h), gyA = new Float32Array(w * h);
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const k = y * w + x;
+    const gx = s[k - w + 1] + 2 * s[k + 1] + s[k + w + 1] - s[k - w - 1] - 2 * s[k - 1] - s[k + w - 1];
+    const gy = s[k + w - 1] + 2 * s[k + w] + s[k + w + 1] - s[k - w - 1] - 2 * s[k - w] - s[k - w + 1];
+    gxA[k] = gx; gyA[k] = gy; mags.push(Math.hypot(gx, gy));
+  }
+  const sorted = mags.slice().sort((a, b) => a - b), thr = Math.max(40, sorted[Math.floor(sorted.length * 0.9)]);
+  // accumulator: theta = normal angle 30..150 deg (line within +-60 deg of horizontal), rho in px
+  const T0 = 30, T1 = 150, R = Math.ceil(Math.hypot(w, h)), acc = new Float32Array((T1 - T0 + 1) * (2 * R + 1));
+  const cosT = [], sinT = []; for (let t = T0; t <= T1; t++) { cosT.push(Math.cos(t * Math.PI / 180)); sinT.push(Math.sin(t * Math.PI / 180)); }
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const k = y * w + x, gx = gxA[k], gy = gyA[k], m = Math.hypot(gx, gy); if (m < thr) continue;
+    let th = Math.atan2(gy, gx) * 180 / Math.PI; if (th < 0) th += 180;
+    for (let t = Math.round(th) - 2; t <= Math.round(th) + 2; t++) {
+      if (t < T0 || t > T1) continue; const ti = t - T0;
+      const rho = Math.round(x * cosT[ti] + y * sinT[ti]); acc[ti * (2 * R + 1) + rho + R] += m;
+    }
+  }
+  // peaks with non-maximum suppression
+  const peaks = [];
+  for (let n = 0; n < 8; n++) {
+    let best = 0, bi = -1; for (let i = 0; i < acc.length; i++) if (acc[i] > best) { best = acc[i]; bi = i; }
+    if (bi < 0 || best <= 0) break;
+    const ti = Math.floor(bi / (2 * R + 1)), rho = bi % (2 * R + 1) - R;
+    peaks.push({ t: ti + T0, rho, v: best });
+    for (let a = -4; a <= 4; a++) for (let b = -6; b <= 6; b++) { const t2 = ti + a, r2 = rho + b + R; if (t2 >= 0 && t2 <= T1 - T0 && r2 >= 0 && r2 <= 2 * R) acc[t2 * (2 * R + 1) + r2] = 0; }
+  }
+  if (!peaks.length) return null;
+  const cx = w / 2, cy = h / 2, vmax = peaks[0].v;
+  const cands = peaks.filter(p => p.v > 0.35 * vmax).map(p => {
+    const c = Math.cos(p.t * Math.PI / 180), sn = Math.sin(p.t * Math.PI / 180);
+    const dist = (cx * c + cy * sn - p.rho); // signed distance of the image centre from the line (1/4 px)
+    return { ...p, c, sn, dist, score: p.v / vmax - Math.abs(dist) / (0.25 * h) };
+  }).sort((a, b) => b.score - a.score);
+  const best = cands[0];
+  // line in full-res px: x*c + y*s = rho*S ; build two endpoints across the image
+  const c = best.c, sn = best.sn, rho = best.rho * S + (S - 1) / 2 * (c + sn);
+  const dir = { x: -sn, y: c }, p0 = { x: c * rho, y: sn * rho };
+  const ext = Math.hypot(full.W, full.H);
+  let a = add(p0, mul(dir, -ext)), b = add(p0, mul(dir, ext));
+  const clipped = clipLine(a, b, full.W, full.H); if (!clipped) return null;
+  const refined = refineLine(full, clipped) || clipped;
+  // signed offset of the image centre from the line, in px (+ = line below the centre in the image)
+  const A = refined.a, B = refined.b, yAt = Math.abs(B.x - A.x) > 1e-6 ? A.y + (full.W / 2 - A.x) * (B.y - A.y) / (B.x - A.x) : full.H / 2;
+  return { a: A, b: B, below: yAt - full.H / 2, candidates: cands.length };
+}
+function clipLine(a, b, W, H) {
+  const pts = [], d = sub(b, a);
+  const tryT = (t) => { if (t >= 0 && t <= 1) { const p = add(a, mul(d, t)); if (p.x >= -0.5 && p.x <= W + 0.5 && p.y >= -0.5 && p.y <= H + 0.5) pts.push(p); } };
+  if (d.x) { tryT((0 - a.x) / d.x); tryT((W - 1 - a.x) / d.x); }
+  if (d.y) { tryT((0 - a.y) / d.y); tryT((H - 1 - a.y) / d.y); }
+  if (pts.length < 2) return null;
+  pts.sort((p, q) => p.x - q.x || p.y - q.y);
+  const inset = (p, q) => add(p, mul(unit(sub(q, p)), 8));
+  return { a: inset(pts[0], pts[pts.length - 1]), b: inset(pts[pts.length - 1], pts[0]) };
+}
+// sub-pixel: along the coarse line, find the strongest luminance step across it, then least-squares fit
+function refineLine(full, line) {
+  const { L, W, H } = full, g = unit(sub(line.b, line.a)), n = { x: -g.y, y: g.x }, len0 = len(sub(line.b, line.a));
+  const at = (x, y) => { const ix = Math.floor(x), iy = Math.floor(y); if (ix < 0 || iy < 0 || ix >= W - 1 || iy >= H - 1) return null;
+    const ax = x - ix, ay = y - iy, k = iy * W + ix; return (L[k] * (1 - ax) + L[k + 1] * ax) * (1 - ay) + (L[k + W] * (1 - ax) + L[k + W + 1] * ax) * ay; };
+  let pts = [];
+  for (let s = 0; s <= len0; s += 3) {
+    const base = add(line.a, mul(g, s)), prof = [];
+    for (let t = -8; t <= 8; t += 0.5) { const v = at(base.x + n.x * t, base.y + n.y * t); if (v == null) { prof.length = 0; break; } prof.push(v); }
+    if (prof.length < 5) continue;
+    let bi = -1, bv = 0; for (let i = 1; i < prof.length - 1; i++) { const d = Math.abs(prof[i + 1] - prof[i - 1]); if (d > bv) { bv = d; bi = i; } }
+    if (bi < 2 || bi > prof.length - 3 || bv < 12) continue;
+    const dm = Math.abs(prof[bi] - prof[bi - 2]), dp = Math.abs(prof[bi + 2] - prof[bi]);
+    const den = dm - 2 * bv + dp, off = den < 0 ? 0.5 * (dm - dp) / den : 0;
+    const t = -8 + (bi + Math.max(-1, Math.min(1, off))) * 0.5;
+    pts.push(add(base, mul(n, t)));
+  }
+  if (pts.length < 10) return null;
+  const fit = (P) => { const m = P.reduce((a, p) => ({ x: a.x + p.x / P.length, y: a.y + p.y / P.length }), { x: 0, y: 0 });
+    let sxx = 0, sxy = 0, syy = 0; for (const p of P) { const dx = p.x - m.x, dy = p.y - m.y; sxx += dx * dx; sxy += dx * dy; syy += dy * dy; }
+    const th = 0.5 * Math.atan2(2 * sxy, sxx - syy); return { m, d: { x: Math.cos(th), y: Math.sin(th) } }; };
+  let F = fit(pts);
+  for (let it = 0; it < 2; it++) {
+    const nn = { x: -F.d.y, y: F.d.x };
+    const keep = pts.filter(p => Math.abs(dot(sub(p, F.m), nn)) < 1.5); if (keep.length < 10) break; pts = keep; F = fit(pts);
+  }
+  let d = F.d; if (dot(d, g) < 0) d = mul(d, -1);
+  const ta = dot(sub(line.a, F.m), d), tb = dot(sub(line.b, F.m), d);
+  return { a: add(F.m, mul(d, ta)), b: add(F.m, mul(d, tb)), support: pts.length };
+}

@@ -15,6 +15,7 @@ export function createSimCamera({ width = 1280, height = 720, fps = 30 } = {}) {
   { const n = noise.getContext('2d'), id = n.createImageData(256, 256);
     for (let i = 0; i < id.data.length; i += 4) { const v = Math.random() * 255; id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = 255; }
     n.putImageData(id, 0, 0); }
+  const noisePat = ctx.createPattern(noise, 'repeat');
 
   const P = (o, d, s) => ({ x: o.x + d.x * s, y: o.y + d.y * s });
   function anglesAt(t) {
@@ -57,7 +58,9 @@ export function createSimCamera({ width = 1280, height = 720, fps = 30 } = {}) {
     ctx.restore();
     ctx.strokeStyle = '#6b7280'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(glass.a.x - g.x * 400, glass.a.y - g.y * 400); ctx.lineTo(glass.b.x, glass.b.y); ctx.stroke();
     if (state.handIn) finger(ctx);
-    ctx.globalAlpha = 0.06; ctx.drawImage(noise, -Math.random() * 200, -Math.random() * 200, width + 200, height + 200); ctx.globalAlpha = 1;
+    // fine per-pixel sensor-like noise (tiled 1:1 at a random offset)
+    ctx.save(); ctx.globalAlpha = 0.05; ctx.translate(-Math.floor(Math.random() * 256), -Math.floor(Math.random() * 256));
+    ctx.fillStyle = noisePat; ctx.fillRect(0, 0, width + 256, height + 256); ctx.restore();
   }
   let timer = setInterval(() => draw(performance.now()), 1000 / fps);
   draw(performance.now());

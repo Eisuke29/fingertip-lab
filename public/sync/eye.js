@@ -12,7 +12,8 @@ export class EyeTracker {
   async start(deviceId) {
     this.stop();
     this.status = '前面カメラを起動中…';
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+    const video = deviceId === 'user' ? { facingMode: 'user' } : { deviceId: deviceId ? { exact: deviceId } : undefined };
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { ...video, width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
     this.video = document.createElement('video'); this.video.muted = true; this.video.playsInline = true; this.video.srcObject = stream; await this.video.play();
     if (!this.lm) {
       this.status = '顔の認識モデルを読み込み中…';

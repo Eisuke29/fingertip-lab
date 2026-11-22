@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>ディスプレイ内指触覚</title>
+<style>
+  :root { --bg:#15171c; --panel:rgba(24,27,33,.94); --panel2:#20242c; --line:#30353f; --fg:#eef0f3; --mut:#9aa1ab; --dim:#5f6672;
+    --accent:#5aa9ff; --ok:#3ecf8e; --warn:#f5b84b; --ng:#ff6b6b; --red:#ff4d4d; --blue:#4a86e8; --orange:#f0953a; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); overflow:hidden; overscroll-behavior:none;
+    font:15px/1.5 system-ui, "Hiragino Sans", sans-serif; -webkit-user-select:none; user-select:none; touch-action:none; }
+  button, select, input { font:inherit; color:inherit; }
+  #display { position:fixed; inset:0; width:100vw; height:100vh; display:block; }
+
+  /* corner UI during the experience: small and out of the way */
+  #corner { position:fixed; top:calc(env(safe-area-inset-top) + 10px); left:12px; right:12px; display:flex; justify-content:space-between; pointer-events:none; z-index:5; }
+  #corner > * { pointer-events:auto; }
+  .chip { display:inline-flex; align-items:center; gap:8px; padding:5px 12px; border-radius:999px; background:rgba(0,0,0,.45); border:1px solid rgba(255,255,255,.08); color:var(--mut); font-size:13px; font-variant-numeric:tabular-nums; }
+  .chip i { width:9px; height:9px; border-radius:50%; background:var(--dim); }
+  .chip.ok i { background:var(--ok); } .chip.warn i { background:var(--warn); } .chip.ng i { background:var(--ng); }
+  .chip b { color:var(--fg); font-weight:600; }
+  .cbtns { display:flex; gap:8px; }
+  .cbtn { border:1px solid rgba(255,255,255,.1); background:rgba(0,0,0,.45); border-radius:999px; padding:5px 14px; font-size:13px; color:var(--mut); cursor:pointer; }
+  .cbtn[aria-pressed="true"] { color:var(--fg); border-color:var(--accent); }
+
+  /* setup sheet: upper part of the screen, the PIP ring below stays visible */
+  #sheet { position:fixed; left:0; right:0; top:0; height:58vh; z-index:10; background:var(--panel); border-bottom:1px solid var(--line);
+    backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); display:none; padding:calc(env(safe-area-inset-top) + 10px) 14px 12px; gap:14px; }
+  #sheet.open { display:flex; }
+  #left { flex:1.35; min-width:0; display:flex; flex-direction:column; gap:8px; }
+  #pv { position:relative; flex:1; min-height:0; display:flex; align-items:center; justify-content:center; background:#000; border-radius:12px; border:1px solid var(--line); overflow:hidden; }
+  #pvVideo { max-width:100%; max-height:100%; display:block; }
+  #qr[hidden], #pvVideo[hidden] { display:none !important; }
+  #qr { display:flex; flex-direction:column; align-items:center; gap:8px; padding:12px; text-align:center; }
+  #qr canvas, #qr img { background:#fff; padding:10px; border-radius:10px; width:min(34vh, 240px); height:auto; image-rendering:pixelated; }
+  #qr .url { color:var(--mut); font-size:11px; word-break:break-all; max-width:420px; -webkit-user-select:text; user-select:text; }
+  #checks { display:flex; flex-wrap:wrap; gap:6px; }
+  .check { display:flex; align-items:center; gap:6px; padding:3px 10px; border-radius:8px; background:var(--panel2); border:1px solid var(--line); font-size:12.5px; color:var(--mut); }
+  .check .mk { font-weight:700; } .check.ok .mk { color:var(--ok); } .check.warn .mk { color:var(--warn); } .check.ng .mk { color:var(--ng); } .check.na .mk { color:var(--dim); }
+  .check b { color:var(--fg); font-weight:500; }
+
+  #right { flex:1; min-width:280px; max-width:440px; display:flex; flex-direction:column; gap:8px; overflow:auto; }
+  .tabs { display:flex; gap:4px; background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:3px; align-self:flex-start; }
+  .tabs button { border:0; background:transparent; padding:4px 14px; border-radius:7px; color:var(--mut); cursor:pointer; }
+  .tabs button[aria-pressed="true"] { background:#2b3039; color:var(--fg); }
+  .steps { display:flex; flex-direction:column; gap:6px; }
+  .st { display:flex; gap:10px; align-items:flex-start; padding:9px 11px; border-radius:12px; background:var(--panel2); border:1px solid var(--line); }
+  .st .num { width:24px; height:24px; border-radius:50%; display:grid; place-items:center; background:#2b3039; font-size:12px; font-weight:700; flex:none; }
+  .st .t { font-weight:600; } .st .d { color:var(--mut); font-size:13px; }
+  .st.cur { border-color:var(--accent); } .st.cur .num { background:var(--accent); color:#04203f; }
+  .st.done .num { background:var(--ok); color:#06261a; } .st.done { opacity:.75; }
+  .st.todo { opacity:.45; }
+  #guide { font-size:18px; font-weight:700; line-height:1.4; }
+  #guide.warn { color:#ffd88f; }
+  .bar { height:8px; border-radius:99px; background:#2b3039; overflow:hidden; } .bar > i { display:block; height:100%; width:0; background:var(--accent); transition:width .2s; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; }
+  .btn { border:1px solid var(--line); background:var(--panel2); padding:7px 12px; border-radius:10px; cursor:pointer; font-size:14px; }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:#04203f; font-weight:700; }
+  .btn[aria-pressed="true"] { border-color:var(--warn); color:#ffd88f; }
+  .btn:disabled { opacity:.4; }
+  .note { color:var(--mut); font-size:13px; }
+  .res { width:100%; border-collapse:collapse; font-size:13px; } .res td, .res th { padding:3px 6px; border-bottom:1px solid var(--line); text-align:left; font-variant-numeric:tabular-nums; }
+  .pass { color:var(--ok); font-weight:700; } .fail { color:var(--ng); font-weight:700; }
+  select, input[type=number] { background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:4px 8px; }
+  .field { display:grid; grid-template-columns:1fr 120px; gap:8px; align-items:center; margin:3px 0; font-size:13.5px; }
+  .field input, .field select { width:100%; }
+  #card { border:2px solid var(--accent); border-radius:10px; margin:6px 0; background:rgba(90,169,255,.08); display:grid; place-items:center; color:var(--mut); font-size:12px; }
+
+  #pipLabel { position:fixed; z-index:4; transform:translate(0,-50%); padding:4px 10px; border-radius:8px; background:rgba(255,77,77,.14); border:1px solid rgba(255,77,77,.5);
+    color:#ffd0d0; font-size:13px; pointer-events:none; white-space:nowrap; display:none; }
+  body.setup #pipLabel { display:block; }
+  #done { position:fixed; left:50%; top:30vh; transform:translate(-50%,-50%); z-index:20; padding:14px 26px; border-radius:16px; background:rgba(62,207,142,.15); border:1px solid var(--ok); color:#bff5dc; font-size:20px; font-weight:700; display:none; }
+  #flash { position:fixed; inset:0; z-index:50; background:#000; display:none; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.module.js" } }
+</script>
+</head>
+<body class="setup">
+<canvas id="display"></canvas>
+<div id="pipLabel">ここに第2関節（PIP）</div>
+<div id="corner">
+  <span class="chip" id="chip"><i></i><span id="chipT">iPhone 未接続</span></span>
+  <div class="cbtns">
+    <button class="cbtn" id="eyeBtn" aria-pressed="false">視線追従</button>
+    <button class="cbtn" id="setupBtn">準備</button>
+  </div>
+</div>
+
+<div id="sheet" class="open">
+  <div id="left">
+    <div id="pv">
+      <div id="qr"></div>
+      <video id="pvVideo" muted playsinline autoplay hidden></video>
+    </div>
+    <div id="checks"></div>
+  </div>
+  <div id="right">
+    <div class="tabs"><button data-tab="steps" aria-pressed="true">準備</button><button data-tab="verify" aria-pressed="false">検証</button><button data-tab="settings" aria-pressed="false">設定</button></div>
+    <div id="tabSteps">
+      <div class="steps" id="steps"></div>
+      <div id="guide" style="margin-top:10px"></div>
+      <div class="bar" style="margin:8px 0"><i id="prog"></i></div>
+      <div class="row">
+        <button class="btn" id="adjBtn" aria-pressed="false">手で直す</button>
+        <button class="btn" id="bgBtn">置き直す</button>
+        <button class="btn" id="jBtn">関節を合わせ直す</button>
+        <button class="btn primary" id="closeBtn">閉じる</button>
+      </div>
+      <p class="note" id="adjNote" hidden>映像の上の点をドラッグ：白＝画面の線、赤＝PIP、オレンジ＝DIP。終わったら「手で直す」をもう一度押す。</p>
+    </div>
+    <div id="tabVerify" hidden></div>
+    <div id="tabSettings" hidden>
+      <div class="note">画面の大きさ：学生証やカード（85.6×54mm）を当て、枠と同じ大きさに。</div>
+      <div id="card" style="width:445px;height:281px">カードを当てる</div>
+      <input type="range" id="cardW" min="200" max="800" step="1" style="width:100%">
+      <div class="note" id="mmInfo"></div>
+      <div class="field"><span>中節の長さ（mm）</span><input id="sLm" type="number" step="0.5"></div>
+      <div class="field"><span>末節の長さ（mm）</span><input id="sLd" type="number" step="0.5"></div>
+      <div class="field"><span>指の太さ（mm）</span><input id="sDia" type="number" step="0.5"></div>
+      <div class="field"><span>固定視点：目は ○ の左へ（mm）</span><input id="sEyeX" type="number" step="10"></div>
+      <div class="field"><span>固定視点：手前へ（mm）</span><input id="sEyeY" type="number" step="10"></div>
+      <div class="field"><span>固定視点：画面からの高さ（mm）</span><input id="sEyeZ" type="number" step="10"></div>
+      <div class="field"><span>前面カメラの位置</span><select id="sCamPos"><option value="top">上の辺の中央</option><option value="left">左の辺の中央</option><option value="right">右の辺の中央</option></select></div>
+      <div class="field"><span>前面カメラの横の画角（°）</span><input id="sFov" type="number" step="1"></div>
+      <div class="field"><span>○ の位置（下から %）</span><input id="sPipY" type="number" step="1"></div>
+    </div>
+  </div>
+</div>
+<div id="done">合いました</div>
+<div id="flash"></div>
+<script type="module" src="./ipad.js?v=1"></script>
+</body>
+</html>

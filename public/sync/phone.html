@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>横カメラ</title>
+<style>
+  :root { --bg:#0d0f13; --fg:#eef0f3; --mut:#9aa1ab; --line:#2b3039; --accent:#5aa9ff; --ok:#3ecf8e; --warn:#f5b84b; --ng:#ff6b6b; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); overflow:hidden; font:15px/1.5 system-ui, "Hiragino Sans", sans-serif; -webkit-user-select:none; user-select:none; }
+  #view { position:fixed; inset:0; width:100vw; height:100vh; object-fit:contain; display:block; }
+  #top { position:fixed; left:0; right:0; top:0; padding:calc(env(safe-area-inset-top) + 8px) 14px 8px; display:flex; gap:10px; align-items:center;
+    background:linear-gradient(rgba(0,0,0,.7), rgba(0,0,0,0)); }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--mut); flex:none; }
+  .dot.ok { background:var(--ok); } .dot.warn { background:var(--warn); } .dot.ng { background:var(--ng); }
+  #msg { font-weight:600; flex:1; }
+  #meta { color:var(--mut); font-size:12px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  #start { position:fixed; inset:0; display:flex; flex-direction:column; gap:16px; align-items:center; justify-content:center; padding:24px; text-align:center; background:var(--bg); }
+  #start button { font:inherit; font-size:18px; font-weight:700; padding:14px 28px; border-radius:14px; border:0; background:var(--accent); color:#04203f; }
+  #start p { color:var(--mut); margin:0; max-width:520px; }
+  #start .warn { color:var(--warn); }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="top"><span class="dot" id="linkDot"></span><span id="msg">準備中</span><span id="meta"></span></div>
+<div id="start">
+  <div style="font-size:20px;font-weight:700">横カメラ（iPhone）</div>
+  <p>iPhoneを<b>横向き</b>にして、iPadの ○ の<b>真左</b>に、背面カメラを右に向けて立てます。操作と映像の確認は iPad で行います。</p>
+  <button id="go">カメラを開始</button>
+  <p id="startErr" class="warn"></p>
+</div>
+<script type="module" src="./phone.js?v=1"></script>
+</body>
+</html>
