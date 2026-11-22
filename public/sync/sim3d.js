@@ -3,7 +3,9 @@
 import { drawPattern } from './pattern.js';
 const THREE_URL = 'https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.module.js';
 
-export async function createSim3D({ width = 1920, height = 1080, fps = 30, Wmm = 227, Hmm = 158, pip = { x: 0, y: 0 } } = {}) {
+// the iPad (A16) in landscape: 1180 x 820 CSS px at 0.1924 mm/px -> the same numbers the real iPad page reports
+export async function createSim3D({ width = 1920, height = 1080, fps = 30, sw = 1180, sh = 820, mmPerPx = 0.1924, pip = { x: 0, y: 0 } } = {}) {
+  const Wmm = sw * mmPerPx, Hmm = sh * mmPerPx;
   const THREE = await import(THREE_URL);
   const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
   renderer.setSize(width, height, false); renderer.setPixelRatio(1);
@@ -28,7 +30,7 @@ export async function createSim3D({ width = 1920, height = 1080, fps = 30, Wmm =
   const pxmm = sc.width / Wmm, toPx = (x, y) => [(x + Wmm / 2) * pxmm, (Hmm / 2 - y) * pxmm];
   function drawScreen(state) {
     if (state.kind === 'scene') { sx.fillStyle = '#3c4048'; sx.fillRect(0, 0, sc.width, sc.height); const [x, y] = toPx(pip.x, pip.y); sx.strokeStyle = '#ff4d4d'; sx.lineWidth = 6; sx.beginPath(); sx.arc(x, y, 10 * pxmm, 0, 7); sx.stroke(); }
-    else drawPattern(sx, sc.width, sc.height, state, Math.round(Wmm / 0.1924), Math.round(Hmm / 0.1924), 0.1924);
+    else drawPattern(sx, sc.width, sc.height, state, sw, sh, mmPerPx);
     tex.needsUpdate = true;
   }
   drawScreen({ kind: 'black' });
@@ -66,7 +68,7 @@ export async function createSim3D({ width = 1920, height = 1080, fps = 30, Wmm =
   }, 1000 / fps);
   const stream = out.captureStream(fps);
   return {
-    stream, state, truth: { f, C: [C.x, C.y, C.z], pip },
+    stream, state, cam, THREE, truth: { f, C: [C.x, C.y, C.z], pip },
     setScreen(s) { state.screen = s; drawScreen(s); },
     angles: () => ({ thp: state.thp, thd: state.thd }),
     stop() { clearInterval(timer); stream.getTracks().forEach((t) => t.stop()); },

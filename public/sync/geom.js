@@ -75,7 +75,11 @@ export function estimatePose(src, dst, W, Hh) {
   const cost = (f) => { const p = poseForF(Hm, f, cx, cy); return rms(p, src, dst) + prior * ((f - f0) / f0) ** 2; };
   let lo = 0.45 * W, hi = 1.6 * W;
   for (let it = 0; it < 60; it++) { const m1 = lo + (hi - lo) * 0.382, m2 = lo + (hi - lo) * 0.618; if (cost(m1) < cost(m2)) hi = m2; else lo = m1; }
-  const f = (lo + hi) / 2, pose = poseForF(Hm, f, cx, cy);
+  const f = (lo + hi) / 2;
+  let pose = poseForF(Hm, f, cx, cy);
+  // the homography-based pose is only approximately a rotation: refine rotation, position and focal length
+  // together so that the projected screen points land on the observed ones (least squares)
+  if (src.length > 50) pose = refinePose(pose, src, dst);
   pose.H = Hm; pose.rms = rms(pose, src, dst);
   // camera centre in screen coords: C = -R^T t
   const Rt = [0, 1, 2].map((j) => [0, 1, 2].map((i) => pose.R[i][j]));
@@ -186,4 +190,38 @@ export function ransacHomography(src, dst, thr = 3, iters = 300) {
   if (!best) return null;
   const inl = []; for (let i = 0; i < n; i++) if (err(best, i) < thr) inl.push(i);
   return { inliers: inl };
+}
+
+// Levenberg-Marquardt on 7 parameters: small rotation (3), translation (3), focal length (1)
+function rotExp(w) {
+  const th = Math.hypot(w[0], w[1], w[2]); if (th < 1e-12) return [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  const k = w.map((v) => v / th), c = Math.cos(th), s = Math.sin(th), v = 1 - c;
+  return [[c + k[0] * k[0] * v, k[0] * k[1] * v - k[2] * s, k[0] * k[2] * v + k[1] * s],
+    [k[1] * k[0] * v + k[2] * s, c + k[1] * k[1] * v, k[1] * k[2] * v - k[0] * s],
+    [k[2] * k[0] * v - k[1] * s, k[2] * k[1] * v + k[0] * s, c + k[2] * k[2] * v]];
+}
+function applyParams(pose, q) {
+  const R = mat3mul(rotExp([q[0], q[1], q[2]]), pose.R);
+  return { ...pose, R, t: [pose.t[0] + q[3], pose.t[1] + q[4], pose.t[2] + q[5]], f: pose.f * (1 + q[6]) };
+}
+export function refinePose(pose, src, dst) {
+  const step = Math.max(1, Math.floor(src.length / 4000)), S2 = [], D2 = [];
+  for (let i = 0; i < src.length; i += step) { S2.push(src[i]); D2.push(dst[i]); }
+  const res = (p) => { const r = new Float64Array(S2.length * 2); for (let i = 0; i < S2.length; i++) { const q = project(p, [S2[i].x, S2[i].y, 0]); r[2 * i] = q ? q.x - D2[i].x : 1e3; r[2 * i + 1] = q ? q.y - D2[i].y : 1e3; } return r; };
+  const sq = (r) => r.reduce((a, v) => a + v * v, 0);
+  let cur = pose, r0 = res(cur), e0 = sq(r0), lam = 1e-3;
+  const hs = [1e-5, 1e-5, 1e-5, 1e-3, 1e-3, 1e-3, 1e-5];
+  for (let it = 0; it < 15; it++) {
+    const J = hs.map((h, j) => { const q = [0, 0, 0, 0, 0, 0, 0]; q[j] = h; const rp = res(applyParams(cur, q)); q[j] = -h; const rm = res(applyParams(cur, q)); return rp.map((v, i) => (v - rm[i]) / (2 * h)); });
+    const A = J.map((a) => J.map((b) => a.reduce((x, v, i) => x + v * b[i], 0))), g = J.map((a) => a.reduce((x, v, i) => x + v * r0[i], 0));
+    let improved = false;
+    for (let tries = 0; tries < 6 && !improved; tries++) {
+      const Ad = A.map((row, i) => row.map((v, j) => (i === j ? v * (1 + lam) + 1e-12 : v)));
+      const d = solve(Ad, g.map((v) => -v)); if (!d) { lam *= 10; continue; }
+      const cand = applyParams(cur, d), rc = res(cand), ec = sq(rc);
+      if (ec < e0) { cur = cand; r0 = rc; improved = e0 - ec > 1e-9 * e0; e0 = ec; lam = Math.max(1e-7, lam / 10); improved = true; } else lam *= 10;
+    }
+    if (!improved) break;
+  }
+  return cur;
 }

@@ -17,7 +17,14 @@ const toIpad = (m) => link.send({ type: 'ipad', ...m, to: 'ipad' });
 function onData(m) {
   if (m.type === 'status') { C.status = m; C.statusAt = performance.now(); }
   else if (m.type === 'ipadinfo') { const first = !C.ipad; C.ipad = m; C.ipadAt = performance.now(); if (first) enterStep(C.step); }
-  else if (m.type === 'pose') { C.pose = m; C.poseAt = performance.now(); }
+  else if (m.type === 'pose') {
+    C.pose = m; C.poseAt = performance.now();
+    (C.hist ||= []).push([C.poseAt, m.thp, m.thd, m.ok]); while (C.hist.length && C.poseAt - C.hist[0][0] > 1000) C.hist.shift();
+    const h = C.hist.filter((x) => x[3]); if (h.length >= 10) {
+      const sd = (k) => { const v = h.map((x) => x[k]), mu = v.reduce((a, b) => a + b, 0) / v.length; return Math.sqrt(v.reduce((a, b) => a + (b - mu) ** 2, 0) / v.length); };
+      const sp = sd(1), sdd = sd(2); if (sp < 2 && sdd < 2) C.jit = { p: sp, d: sdd }; // only while held still
+    }
+  }
   else if (m.type === 'ack') { C.ack[m.what] = m; C.busy = ''; }
   else if (m.type === 'pong') C.rtt = performance.now() - m.t0;
   else if (m.type === 'caminfo') { C.cam = m; renderCam(); }
@@ -69,6 +76,10 @@ const NAMES = ['つなぐ', 'iPadの位置', '背景', '指', '描画'];
 const chk = (state, text, value = '') => ({ state, text, value }); // state: ok / ng / na / warn
 function stepView() {
   const s = C.status, a = C.ack, ip = C.ipad, ci = a.cal?.ok ? a.cal.info : null;
+  const drift = a.verify?.ok ? a.verify.info.driftMm : null;
+  const driftChk = chk(drift == null ? 'na' : drift <= 0.5 ? 'ok' : 'ng', '②から iPhone・iPad が動いていない（［ずれを確認］）', drift == null ? '' : `${drift.toFixed(2)} mm`);
+  const driftFix = drift != null && drift > 0.5 ? ['iPhoneかiPadが動いています → ②からやり直す'] : [];
+  const driftBtn = btn('ずれを確認', () => run('verify'), false);
   switch (C.step) {
     case 1: return {
       why: 'iPad・iPhoneをPCにつなぐ', todo: 'QRをiPadとiPhoneで読む → iPadは画面を1回タップ、iPhoneは［開始］',
@@ -80,20 +91,22 @@ function stepView() {
       why: 'iPhoneから見たiPadの位置と傾きを測る（指の角度の基準になる）',
       todo: '映像の黄色い枠に ○ が入るようにiPhoneを置いて固定 → ［枠に入れた］（枠の中だけで ○ を探す） → 手を離して［測る］（iPadにしま模様が出る・約5秒）',
       checks: [chk(a.find ? (a.find.ok ? 'ok' : 'ng') : ci ? 'ok' : 'na', '枠の中に ○ がある', a.find?.ok ? `距離 約${a.find.info.dist.toFixed(0)} cm` : ''),
-        chk(!ci ? 'na' : ci.rms <= 1.0 ? 'ok' : 'ng', '点のずれ 1.0 画素以下', ci ? `${ci.rms.toFixed(2)} 画素` : ''),
-        chk(!ci ? 'na' : ci.n >= 200 ? 'ok' : 'ng', 'iPadの画面を読み取れた点 200 以上', ci ? `${ci.n}（${ci.of}中）` : ''),
+        chk(!ci ? 'na' : ci.n >= 200 ? 'ok' : 'ng', 'iPadの画面を読み取れた点 200 以上', ci ? `${ci.n}` : ''),
+        chk(!ci ? 'na' : ci.checkMm <= 0.5 ? 'ok' : 'ng', '画面上の位置の誤差 0.5 mm 以下（計算に使わなかった点で確認）', ci ? `${ci.checkMm.toFixed(2)} mm（95%: ${ci.checkMm95.toFixed(2)}）` : ''),
+        chk(!ci ? 'na' : ci.angleDeg <= 0.5 ? 'ok' : 'ng', '角度の基準のぶれ 0.5° 以下（指の角度の誤差になる）', ci ? `${ci.angleDeg.toFixed(2)}°` : ''),
+        chk(!ci ? 'na' : ci.pipMm <= 0.5 ? 'ok' : 'ng', '○ の位置のぶれ 0.5 mm 以下', ci ? `${ci.pipMm.toFixed(2)} mm` : ''),
         chk(!ci ? 'na' : ci.inside ? 'ok' : 'ng', '指を測る範囲（黄色の点線）が映像に入っている'),
         chk(!ci ? 'na' : 'warn', '映像のピンクの線がiPadの白い格子に重なる（目で確認）'),
         chk(!ci || ci.tiltCam == null || ip?.tilt == null ? 'na' : Math.abs(ci.tiltCam - ip.tilt) <= 3 ? 'ok' : 'warn', '傾きの照合（カメラから／iPadのセンサー）', ci && ci.tiltCam != null && ip?.tilt != null ? `${ci.tiltCam.toFixed(1)}° / ${ip.tilt.toFixed(1)}°` : '')],
       fixes: a.find && !a.find.ok && !ci ? ['枠の中に ○ が見つからない → 映像の黄色い枠の中に iPad の ○ が入るよう iPhone の向きを直してから、もう一度［枠に入れた］', 'iPadの画面の明るさを最大にする'] : a.cal && !a.cal.ok ? [a.cal.msg, '読み取れない → iPadの画面の明るさを最大に、照明が画面に映り込まない向きにする', 'iPhoneを ○ の方へ向け、15〜30cm・見下ろし15〜30°にする', '測っている間はiPhone・iPadを動かさない'] :
         ci && !ci.inside ? ['黄色の点線が映像からはみ出している → iPhoneを少し離す、または ○ が映像の中央下に来るよう向きを直す'] :
-        ci && ci.rms > 1.0 ? ['ずれが大きい → iPhone・iPadを固定し、照明の映り込みを減らしてもう一回'] : [],
-      btns: [btn('枠に入れた', () => run('find'), !a.find?.ok && !ci), btn(ci ? 'もう一回測る' : '測る', () => run('cal', { Wmm: ip.Wmm, Hmm: ip.Hmm, pip: ip.pip, w: ip.w, h: ip.h, mmPerPx: ip.mmPerPx }), !ci, !ip), next(!!ci && ci.rms <= 1.0 && ci.n >= 200 && ci.inside)] };
+        ci && (ci.checkMm > 0.5 || ci.angleDeg > 0.5) ? ['誤差が大きい → ピントが合っているか見る（合わなければ○から離す・カメラを「デュアル広角」に）', '照明が画面に映り込まない向きにする・iPadの明るさを最大に', 'iPhoneを ○ に近づけて画面を大きく映す（15〜25cm）'] : [],
+      btns: [btn('枠に入れた', () => run('find'), !a.find?.ok && !ci), btn(ci ? 'もう一回測る' : '測る', () => run('cal', { Wmm: ip.Wmm, Hmm: ip.Hmm, pip: ip.pip, w: ip.w, h: ip.h, mmPerPx: ip.mmPerPx }), !ci, !ip), next(!!ci && ci.n >= 200 && ci.checkMm <= 0.5 && ci.angleDeg <= 0.5 && ci.inside)] };
     case 3: return {
       why: '指がないときの映像を覚える（指だけを取り出すため）', todo: '手を映像から出して［撮る］ → 3秒後に撮影',
-      checks: [chk(s?.still ? 'ok' : 'ng', '映像が止まっている'), chk(!a.bg ? 'na' : a.bg.ok ? 'ok' : 'ng', '背景が撮れた')],
-      fixes: a.bg && !a.bg.ok ? [a.bg.msg, '撮っている3秒間は、手・人の影・iPhoneを動かさない'] : [],
-      btns: [btn(a.bg?.ok ? 'もう一回' : '撮る', countdownBg, !a.bg?.ok), next(!!a.bg?.ok)] };
+      checks: [chk(s?.still ? 'ok' : 'ng', '映像が止まっている'), chk(!a.bg ? 'na' : a.bg.ok ? 'ok' : 'ng', '背景が撮れた'), driftChk],
+      fixes: [...(a.bg && !a.bg.ok ? [a.bg.msg, '撮っている3秒間は、手・人の影・iPhoneを動かさない'] : []), ...driftFix],
+      btns: [btn(a.bg?.ok ? 'もう一回' : '撮る', countdownBg, !a.bg?.ok), driftBtn, next(!!a.bg?.ok)] };
     case 4: {
       const p = C.pose, fresh = p && performance.now() - C.poseAt < 600, j = a.joints?.ok ? a.joints.info : null;
       return {
@@ -108,15 +121,17 @@ function stepView() {
       const p = C.pose, fresh = p && performance.now() - C.poseAt < 600;
       return {
         why: '仮想指が指に合わせて動くか確かめる', todo: '指を曲げ伸ばしして、iPadの仮想指と映像の青・オレンジの棒を見る',
-        checks: [chk(fresh && p.ok ? 'ok' : 'ng', '指を追えている', fresh ? `${p.sp.toFixed(2)} / ${p.sd.toFixed(2)}` : ''), chk(C.ipad?.eyeOn ? 'ok' : 'na', '視線追従', C.ipad?.eyeStatus || 'オフ（正面から見た絵）')],
-        fixes: fresh && !p.ok ? ['見失う → 指が黄色の点線の中にあるか、背景を撮り直す（③）'] : [],
-        btns: [btn(C.ipad?.eyeOn ? '視線追従を切る' : '視線追従を入れる', () => toIpad({ eye: !C.ipad?.eyeOn }), false), btn('指合わせからやり直す', () => goStep(4), false)] };
+        checks: [chk(fresh && p.ok ? 'ok' : 'ng', '指を追えている', fresh ? `${p.sp.toFixed(2)} / ${p.sd.toFixed(2)}` : ''),
+          chk(!C.jit ? 'na' : C.jit.p <= 0.5 && C.jit.d <= 0.5 ? 'ok' : 'warn', '指を止めたときの揺れ 0.5° 以下（直近1秒）', C.jit ? `θp ±${C.jit.p.toFixed(2)}° θd ±${C.jit.d.toFixed(2)}°` : '指を止めると出ます'),
+          driftChk, chk(C.ipad?.eyeOn ? 'ok' : 'na', '視線追従', C.ipad?.eyeStatus || 'オフ（正面から見た絵）')],
+        fixes: [...(fresh && !p.ok ? ['見失う → 指が黄色の点線の中にあるか、背景を撮り直す（③）'] : []), ...driftFix],
+        btns: [driftBtn, btn(C.ipad?.eyeOn ? '視線追従を切る' : '視線追従を入れる', () => toIpad({ eye: !C.ipad?.eyeOn }), false), btn('指合わせからやり直す', () => goStep(4), false)] };
     }
   }
 }
 const btn = (label, fn, primary, disabled = false) => ({ label, fn, primary, disabled });
 const next = (enabled) => ({ label: '次へ ▶', fn: () => { C.done[C.step] = true; goStep(C.step + 1); }, next: true, disabled: !enabled, primary: enabled });
-function run(name, extra = {}) { C.ack[name] = null; C.busy = name === 'find' ? '枠の中で ○ を探しています…' : name === 'cal' ? 'iPadにしま模様を出して測っています（約5秒）…' : name === 'joints' ? '指を合わせています（最長10秒）…' : '実行中…'; toPhone(name, extra); render(); }
+function run(name, extra = {}) { C.ack[name] = null; C.busy = name === 'verify' ? 'しま模様でずれを確認しています（約5秒、手を映さない）…' : name === 'find' ? '枠の中で ○ を探しています…' : name === 'cal' ? 'iPadにしま模様を出して測っています（約5秒）…' : name === 'joints' ? '指を合わせています（最長10秒）…' : '実行中…'; toPhone(name, extra); render(); }
 function countdownBg() {
   C.ack.bg = null; let n = 3;
   const tick = () => { if (n > 0) { C.busy = `${n} 秒後に撮ります（手を出して、動かさない）`; toPhone('countdown', { n }); n--; render(); setTimeout(tick, 1000); } else { C.busy = '撮影中…'; toPhone('bg'); render(); } };

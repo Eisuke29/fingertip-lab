@@ -174,12 +174,8 @@ async function grab(k = 1) { let acc = null; for (let i = 0; i < k; i++) { await
 async function showGrab(state, k = 1) { await show(state); await nextFrames(2); return grab(k); }
 
 // The iPad shows Gray-code stripes (each with its inverse). Every camera pixel that sees the screen decodes
-// which screen column and row it looks at -> thousands of correspondences -> camera pose.
-async function calibrate(m) {
-  S.busy = 'しま模様で測っています';
-  while (placing) await nextFrames(1); // let the placement blinking stop first
-  S.screen = m; S.pose = null; S.rect = null; S.bg.reset(); S.cal = null; S.raw = null; S.ok = false; S.showGrid = false; S.calPts = null;
-  if (sim) sim.state.handIn = false;
+// which screen column and row it looks at -> thousands of correspondences (screen mm <-> image px).
+async function captureScreen(m) {
   const w = m.w, h = m.h, mm = m.mmPerPx, Bx = G.grayBits(w), By = G.grayBits(h), MIN = 2; // finest stripe 4 px (0.8 mm)
   const white = await showGrab({ kind: 'white' }, 2), black = await showGrab({ kind: 'black' }, 2);
   const N = white.length, amp = new Float32Array(N);
@@ -199,25 +195,83 @@ async function calibrate(m) {
       }
     }
   }
-  await show({ kind: 'grid' }); S.busy = null;
-  // one correspondence per decoded cell: average of the camera pixels that see it
-  const HW = S.W >> 1, cells = new Map();
-  for (let k = 0; k < N; k++) {
-    if (amp[k] < 40 || depth.x[k] < 4 || depth.y[k] < 4) continue;
-    const cx = G.grayCellCentre(code.x[k], depth.x[k], Bx), cy = G.grayCellCentre(code.y[k], depth.y[k], By);
-    if (cx.cell > 16 || cy.cell > 16) continue; // cell larger than ~3 mm: too coarse
-    const key = cx.c * 4096 + cy.c; let e = cells.get(key);
-    if (!e) cells.set(key, e = { px: cx.c, py: cy.c, u: 0, v: 0, n: 0 });
-    e.u += (k % HW + 0.5) * 2; e.v += (((k / HW) | 0) + 0.5) * 2; e.n++;
+  // One correspondence per screen cell = the centroid of the camera pixels that decoded exactly that cell.
+  // Only pixels decoded down to the SAME (finest possible) stripe level are used: a pixel that stopped early lies
+  // near a stripe edge, so mixing it into a coarser cell would pull that cell's centroid off its centre.
+  const HW = S.W >> 1, fullX = Bx - MIN, fullY = By - MIN;
+  const build = (dx, dy) => {
+    const cells = new Map();
+    for (let k = 0; k < N; k++) {
+      if (amp[k] < 40 || depth.x[k] !== dx || depth.y[k] !== dy) continue;
+      const cx = G.grayCellCentre(code.x[k], dx, Bx), cy = G.grayCellCentre(code.y[k], dy, By);
+      const key = cx.c * 4096 + cy.c; let e = cells.get(key);
+      if (!e) cells.set(key, e = { px: cx.c, py: cy.c, u: 0, v: 0, n: 0 });
+      e.u += (k % HW + 0.5) * 2; e.v += (((k / HW) | 0) + 0.5) * 2; e.n++;
+    }
+    const src = [], dst = [];
+    for (const e of cells.values()) { if (e.n < 3) continue; src.push({ x: (e.px - w / 2) * mm, y: (h / 2 - e.py) * mm }); dst.push({ x: e.u / e.n, y: e.v / e.n }); }
+    return { src, dst };
+  };
+  let out = build(fullX, fullY);
+  if (out.src.length < 300) { const b = build(fullX - 1, fullY - 1); out = { src: out.src.concat(b.src), dst: out.dst.concat(b.dst) }; }
+  return out;
+}
+// screen position (mm) that an image point maps to under a pose: intersect the viewing ray with the screen (z = 0)
+function toScreen(pose, p) {
+  const { R, t, f, cx, cy } = pose, ray = [(p.x - cx) / f, (p.y - cy) / f, 1];
+  const Rt = (v) => [0, 1, 2].map((j) => R[0][j] * v[0] + R[1][j] * v[1] + R[2][j] * v[2]);
+  const C = Rt(t).map((v) => -v), d = Rt(ray), s = -C[2] / d[2];
+  return { x: C[0] + d[0] * s, y: C[1] + d[1] * s };
+}
+const sampleIdx = (arr, n) => { const out = []; for (let i = 0; i < n; i++) out.push(arr[(Math.random() * arr.length) | 0]); return out; };
+// accuracy from the iPad itself:
+//  (1) 30% of the points are kept out of the fit; where the fit says they are vs where they really are (screen mm)
+//  (2) the reference directions (screen normal, finger direction) re-estimated from random subsets -> spread in degrees
+function accuracy(pose, isrc, idst, m) {
+  const idx = isrc.map((_, i) => i).sort(() => Math.random() - 0.5), cut = Math.floor(idx.length * 0.7);
+  const fitI = sampleIdx(idx.slice(0, cut), Math.min(4000, cut)), chkI = idx.slice(cut);
+  const pf = G.refinePose(pose, fitI.map((i) => isrc[i]), fitI.map((i) => idst[i])); // refit on 70 % only
+  const errs = chkI.map((i) => { const q = toScreen(pf, idst[i]); return Math.hypot(q.x - isrc[i].x, q.y - isrc[i].y); }).sort((a, b) => a - b);
+  const med = errs[errs.length >> 1] || 0, p95 = errs[Math.floor(errs.length * 0.95)] || 0;
+  const axes = (p) => [[p.R[0][2], p.R[1][2], p.R[2][2]], [p.R[0][1], p.R[1][1], p.R[2][1]]];
+  const ang = (a, b) => Math.acos(Math.min(1, Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2]))) * 180 / Math.PI;
+  const [n0, y0] = axes(pose), dev = [], pipDev = [];
+  for (let r = 0; r < 8; r++) {
+    const ii = sampleIdx(idx, Math.min(3000, idx.length)), p = G.refinePose(pose, ii.map((i) => isrc[i]), ii.map((i) => idst[i])); if (!p) continue;
+    const [n1, y1] = axes(p); dev.push(Math.hypot(ang(n0, n1), ang(y0, y1)));
+    const q = toScreen(pose, G.project(p, [m.pip.x, m.pip.y, 0])); pipDev.push(Math.hypot(q.x - m.pip.x, q.y - m.pip.y));
   }
-  const src = [], dst = [];
-  for (const e of cells.values()) { if (e.n < 2) continue; src.push({ x: (e.px - w / 2) * mm, y: (h / 2 - e.py) * mm }); dst.push({ x: e.u / e.n, y: e.v / e.n }); }
-  if (src.length < 30) { ack('cal', false, `iPadの画面が読み取れません（使えた点 ${src.length}）`, { n: src.length }); return; }
+  const rmsOf = (a) => Math.sqrt(a.reduce((x, y) => x + y * y, 0) / Math.max(1, a.length));
+  return { checkMm: med, checkMm95: p95, angleDeg: rmsOf(dev), pipMm: rmsOf(pipDev) };
+}
+// has the iPhone or the iPad moved since the measurement? re-read the screen and compare with the saved pose
+async function verifyPose() {
+  if (!S.pose || !S.screen) { ack('verify', false, '先に②でiPadの位置を測ってください'); return; }
+  S.busy = 'ずれを確認しています';
+  const { src, dst } = await captureScreen(S.screen);
+  await show({ kind: 'scene' }); S.busy = null;
+  if (src.length < 30) { ack('verify', false, `iPadの画面が読み取れません（${src.length}）`); return; }
+  const e = []; for (let i = 0; i < src.length; i += Math.max(1, (src.length / 3000) | 0)) { const q = toScreen(S.pose, dst[i]); e.push(Math.hypot(q.x - src[i].x, q.y - src[i].y)); }
+  e.sort((a, b) => a - b);
+  ack('verify', true, '', { driftMm: e[e.length >> 1], n: e.length });
+}
+async function calibrate(m) {
+  S.busy = 'しま模様で測っています';
+  while (placing) await nextFrames(1); // let the placement blinking stop first
+  S.screen = m; S.pose = null; S.rect = null; S.bg.reset(); S.cal = null; S.raw = null; S.ok = false; S.showGrid = false; S.calPts = null;
+  if (sim) sim.state.handIn = false;
+  const { src, dst } = await captureScreen(m);
+  await show({ kind: 'grid' });
+  if (src.length < 30) { S.busy = null; ack('cal', false, `iPadの画面が読み取れません（使えた点 ${src.length}）`, { n: src.length }); return; }
   const rs = G.ransacHomography(src, dst, 3);
   const isrc = rs ? rs.inliers.map((i) => src[i]) : [], idst = rs ? rs.inliers.map((i) => dst[i]) : [];
-  if (isrc.length < 30) { ack('cal', false, `読み取れた点が合いません（${isrc.length}/${src.length}）`, { n: isrc.length }); return; }
+  if (isrc.length < 30) { S.busy = null; ack('cal', false, `読み取れた点が合いません（${isrc.length}/${src.length}）`, { n: isrc.length }); return; }
+  S.busy = '精度を計算しています';
+  await nextFrames(1);
   const pose = G.estimatePose(isrc, idst, S.W, S.H);
-  if (!pose || pose.rms > 3) { ack('cal', false, `計算が合いません（ずれ ${pose ? pose.rms.toFixed(1) : '?'} 画素）`, { n: isrc.length }); return; }
+  if (!pose || pose.rms > 3) { S.busy = null; ack('cal', false, `計算が合いません（ずれ ${pose ? pose.rms.toFixed(1) : '?'} 画素）`, { n: isrc.length }); return; }
+  S.lastCorr = { isrc, idst }; // kept for checking
+  const acc = accuracy(pose, isrc, idst, m); S.busy = null;
   S.pose = pose; S.showGrid = true;
   const step = Math.max(1, Math.floor(isrc.length / 80));
   S.calPts = []; for (let i = 0; i < isrc.length; i += step) S.calPts.push({ seen: idst[i], pred: G.project(pose, [isrc[i].x, isrc[i].y, 0]) });
@@ -226,7 +280,7 @@ async function calibrate(m) {
   const C = pose.C, dx = C[0] - m.pip.x, dy = C[1] - m.pip.y, dist = Math.hypot(dx, dy, C[2]);
   const corners = [[S.rect.y0, S.rect.z0], [S.rect.y1, S.rect.z0], [S.rect.y1, S.rect.z1], [S.rect.y0, S.rect.z1]].map(([y, z]) => G.project(pose, [m.pip.x, y, z]));
   const inside = corners.every((p) => p && p.x >= 0 && p.y >= 0 && p.x <= S.W && p.y <= S.H);
-  S.calInfo = { rms: pose.rms, n: isrc.length, of: src.length, fW: pose.f / S.W, dist, C, inside,
+  S.calInfo = { rms: pose.rms, n: isrc.length, of: src.length, fW: pose.f / S.W, dist, C, inside, ...acc,
     elev: Math.atan2(C[2], Math.hypot(dx, dy)) * 180 / Math.PI, side: Math.atan2(Math.abs(dy), Math.abs(dx)) * 180 / Math.PI, scale: S.rect.s,
     tiltCam: tiltFromCamera(pose) };
   ack('cal', true, '', S.calInfo);
@@ -432,6 +486,7 @@ async function onData(m) {
     case 'caminfo': sendCamInfo(); break;
     case 'countdown': S.countdown = m.n; break;
     case 'cal': calibrate(m); break;
+    case 'verify': verifyPose(); break;
     case 'bg': S.countdown = null; captureBackground(); break;
     case 'joints': if (!S.bg.ready) { ack('joints', false, '背景がありません'); break; } startJoints(); break;
     case 'go': if (sim) sim.state.manual = null; break;
