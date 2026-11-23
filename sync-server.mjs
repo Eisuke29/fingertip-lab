@@ -24,6 +24,29 @@ function hashPages() {
   return h.digest('hex').slice(0, 8);
 }
 const VERSION = hashPages();
+// ---------- log: one line per command / result / error / connection, also to logs/<date>.txt (Fable P2-4) ----------
+const stamp = () => new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+const LOGS = path.join(ROOT, 'logs'), REC = path.join(ROOT, 'recordings'), DATA = path.join(ROOT, 'data');
+for (const d of [LOGS, REC, DATA]) fs.mkdirSync(d, { recursive: true });
+const logFile = path.join(LOGS, `${stamp()}.txt`);
+function log(line, show = true) {
+  const t = new Date().toLocaleTimeString('ja-JP');
+  if (show) console.log(`  ${t} ${line}`);
+  try { fs.appendFileSync(logFile, `${t} ${line}\n`); } catch {}
+}
+const NAME = { ipad: 'iPad', phone: 'iPhone', monitor: 'PC' };
+function logMessage(role, m) {
+  if (m.type === 'cmd' && !['step', 'countdown', 'caminfo', 'preview'].includes(m.name)) log(`${NAME[role]} → 命令 ${m.name}${m.jobId ? `（${m.jobId}）` : ''}`);
+  else if (m.type === 'ack') log(`${NAME[role]} → 結果 ${m.what}：${m.ok ? '成功' : `失敗（${m.msg}）`}`);
+  else if (m.type === 'error') log(`${NAME[role]} のエラー：${m.msg}`);
+}
+// saved focal length per camera (Fable P1-2): the first measurements are kept, then their median is used
+const FOCAL = path.join(DATA, 'focal.json');
+const readFocal = () => { try { return JSON.parse(fs.readFileSync(FOCAL, 'utf8')); } catch { return {}; } };
+function focalOf(key) {
+  const l = readFocal()[key] || []; if (l.length < 3) return { fixed: null, list: l };
+  const first = l.slice(0, 5).sort((a, b) => a - b); return { fixed: first[first.length >> 1], list: l };
+}
 const lanIPs = () => Object.values(os.networkInterfaces()).flat().filter((a) => a && a.family === 'IPv4' && !a.internal).map((a) => a.address);
 
 // ---------- certificates (local CA, created once; server certificate re-issued for the current addresses) ----------
@@ -69,11 +92,13 @@ function attach(wss) {
     console.log(`  つながりました: ${role === 'ipad' ? 'iPad' : role === 'phone' ? 'iPhone' : 'PC確認画面'}（${req.socket.remoteAddress}）`);
     for (const c of all()) sendTo(c, presence());
     ws.on('pong', () => { ws.alive = true; });
+    log(`つながりました：${NAME[role]}（${req.socket.remoteAddress}）`, false);
     ws.on('message', (data, isBinary) => {
       ws.alive = true;
       if (isBinary) { if (role === 'phone') for (const m of peers.monitors) sendTo(m, data, true); return; }
       let m; try { m = JSON.parse(data.toString()); } catch { return; }
       if (role === 'monitor' && ws !== peers.controller) return; // a second PC page only watches
+      logMessage(role, m);
       m.from = role; const s = JSON.stringify(m);
       const to = [].concat(m.to || ['ipad', 'phone', 'monitor']).filter((r) => r !== role);
       if (to.includes('ipad')) sendTo(peers.ipad, s);
@@ -85,7 +110,7 @@ function attach(wss) {
         peers.monitors.delete(ws);
         if (peers.controller === ws) { peers.controller = [...peers.monitors][0] || null; if (peers.controller) sendTo(peers.controller, '{"type":"primary"}'); }
       } else if (peers[role] === ws) peers[role] = null;
-      console.log(`  切れました: ${role === 'ipad' ? 'iPad' : role === 'phone' ? 'iPhone' : 'PC確認画面'}`);
+      log(`切れました：${NAME[role]}`);
       for (const c of all()) sendTo(c, presence());
     });
   });
@@ -94,13 +119,13 @@ function attach(wss) {
 setInterval(() => {
   for (const ws of all()) {
     ws.missed = ws.alive ? 0 : (ws.missed || 0) + 1; ws.alive = false;
-    if (ws.missed >= 3) { console.log(`  応答がないので切りました：${ws.role}`); ws.terminate(); continue; }
+    if (ws.missed >= 3) { log(`応答がないので切りました：${NAME[ws.role]}`); ws.terminate(); continue; }
     try { ws.ping(); } catch {} sendTo(ws, '{"type":"beat"}');
   }
 }, 2000);
 
 // ---------- static files + status page ----------
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml', '.glb': 'model/gltf-binary' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.glb': 'model/gltf-binary' };
 function handler(ips) {
   return (req, res) => {
     const u = new URL(req.url, 'http://x');
@@ -109,6 +134,35 @@ function handler(ips) {
     const vendor = u.pathname.startsWith('/vendor/three/') ? path.join(ROOT, 'node_modules', 'three', 'build', path.basename(u.pathname))
       : u.pathname === '/vendor/qrcode.js' ? path.join(ROOT, 'node_modules', 'qrcode-generator', 'dist', 'qrcode.js') : null;
     if (vendor) { fs.readFile(vendor, (e, buf) => { if (e) { res.writeHead(404); res.end(); return; } res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'max-age=86400' }); res.end(buf); }); return; }
+    // recordings from the iPhone (Fable P0-10): POST /api/rec/<id>/<name>, list /api/recs, files under /rec/<id>/<name>
+    const safe = (x) => /^[\w.-]{1,80}$/.test(x) && !x.startsWith('.');
+    if (u.pathname.startsWith('/api/rec/') && req.method === 'POST') {
+      const [id, name] = u.pathname.slice(9).split('/').map(decodeURIComponent);
+      if (!safe(id) || !safe(name)) { res.writeHead(400); res.end(); return; }
+      const dir = path.join(REC, id); fs.mkdirSync(dir, { recursive: true });
+      const out = fs.createWriteStream(path.join(dir, name)); req.pipe(out);
+      out.on('finish', () => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}'); });
+      out.on('error', () => { res.writeHead(500); res.end(); });
+      return;
+    }
+    if (u.pathname === '/api/recs') {
+      const list = fs.readdirSync(REC).filter(safe).sort().reverse().map((id) => ({ id, files: fs.readdirSync(path.join(REC, id)).filter(safe).sort() }));
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(list)); return;
+    }
+    if (u.pathname.startsWith('/rec/')) {
+      const [id, name] = u.pathname.slice(5).split('/').map(decodeURIComponent);
+      if (!safe(id) || !safe(name || '')) { res.writeHead(400); res.end(); return; }
+      fs.readFile(path.join(REC, id, name), (e, buf) => { if (e) { res.writeHead(404); res.end(); return; } res.writeHead(200, { 'content-type': TYPES[path.extname(name)] || 'application/octet-stream', 'cache-control': 'no-store' }); res.end(buf); });
+      return;
+    }
+    if (u.pathname === '/api/focal') {
+      if (req.method === 'POST') {
+        let b = ''; req.on('data', (c) => { b += c; if (b.length > 1e4) req.destroy(); });
+        req.on('end', () => { try { const { key, fW } = JSON.parse(b); if (typeof key === 'string' && fW > 0.3 && fW < 2) { const all = readFocal(); (all[key] ||= []).push(+fW.toFixed(5)); all[key] = all[key].slice(0, 20); fs.writeFileSync(FOCAL, JSON.stringify(all, null, 1)); } } catch {} res.writeHead(200); res.end('{}'); });
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(focalOf(u.searchParams.get('key') || ''))); return;
+    }
     if (u.pathname === '/api/info') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ips, http: HTTP_PORT, https: HTTPS_PORT })); return; }
     if (u.pathname === '/ok') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'access-control-allow-origin': '*' }); res.end('<meta name="viewport" content="width=device-width"><h1 style="font-family:sans-serif">OK（証明書は信頼されています）</h1>'); return; }
     if (u.pathname === '/ca' || u.pathname === '/ca.crt') { res.writeHead(200, { 'content-type': 'application/x-x509-ca-cert', 'content-disposition': 'attachment; filename="fingertip-lab-ca.crt"' }); res.end(fs.readFileSync(path.join(CERTS, 'ca.crt'))); return; }
@@ -140,5 +194,6 @@ console.log('  同期サーバーを起動しました');
 console.log(`  PCのアドレス: ${ips.join(' / ') || '（ネットワーク未接続）'}`);
 console.log(`  PCの操作画面: http://localhost:${HTTP_PORT}/`);
 console.log(`  ページの版: ${VERSION}`);
+console.log(`  記録: ${REC}　ログ: ${logFile}`);
 console.log('  このウィンドウを閉じると止まります');
 console.log('');

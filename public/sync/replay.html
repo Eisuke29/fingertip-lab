@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>記録の再生</title>
+<style>
+  :root { --bg:#101216; --panel:#181b21; --line:#2f343e; --fg:#eef0f3; --mut:#9aa1ab; --ok:#3ecf8e; --ng:#ff6b6b; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.55 system-ui, "Hiragino Sans", "Yu Gothic UI", sans-serif; }
+  select, button { font:inherit; color:inherit; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:6px 10px; }
+  table { border-collapse:collapse; font-variant-numeric:tabular-nums; margin-top:8px; } td, th { padding:3px 10px; border-bottom:1px solid var(--line); text-align:right; }
+  .note { color:var(--mut); } .ok { color:var(--ok); } .ng { color:var(--ng); }
+  canvas { max-width:100%; border:1px solid var(--line); border-radius:8px; margin-top:8px; background:#000; }
+</style>
+</head>
+<body>
+<h2 style="margin:0 0 8px">記録の再生</h2>
+<div class="note">iPhoneが保存した実機の画像を、同じ計算（geom.js・tracker.js）にもう一度通します。直したあとはここで確かめます。</div>
+<div style="margin-top:10px"><select id="sel"></select> <button id="go">再生する</button></div>
+<div id="out"></div>
+<script type="module" src="./replay.js"></script>
+</body>
+</html>

@@ -68,9 +68,16 @@ export function project(pose, X) { // X in screen mm -> image px (null if behind
 const rms = (pose, src, dst) => Math.sqrt(src.reduce((a, s, i) => { const p = project(pose, [s.x, s.y, 0]); return a + (p ? (p.x - dst[i].x) ** 2 + (p.y - dst[i].y) ** 2 : 1e6); }, 0) / src.length);
 
 // src: screen points (mm), dst: image points (px). W,H image size. f is searched (weak prior around 0.78 W).
-export function estimatePose(src, dst, W, Hh) {
+export function estimatePose(src, dst, W, Hh, opt = {}) {
   const Hm = homography(src, dst); if (!Hm) return null;
   const cx = W / 2, cy = Hh / 2, f0 = 0.78 * W;
+  if (opt.f) { // focal length known (saved from earlier measurements): only rotation and position are solved
+    let pose = poseForF(Hm, opt.f, cx, cy); if (src.length > 50) pose = refinePose(pose, src, dst, true);
+    pose.H = Hm; pose.rms = rms(pose, src, dst);
+    const Rt = [0, 1, 2].map((j) => [0, 1, 2].map((i) => pose.R[i][j]));
+    pose.C = Rt.map((r) => -(r[0] * pose.t[0] + r[1] * pose.t[1] + r[2] * pose.t[2]));
+    return pose;
+  }
   const prior = src.length > 50 ? 0.02 : 0.6; // with many points the data decide the focal length
   const cost = (f) => { const p = poseForF(Hm, f, cx, cy); return rms(p, src, dst) + prior * ((f - f0) / f0) ** 2; };
   let lo = 0.45 * W, hi = 1.6 * W;
@@ -126,34 +133,6 @@ export function warp(rect, frame, x0, y0, w, h, out, ox = 0, oy = 0) {
   return out;
 }
 
-// ---------- calibration dots on the iPad ----------
-export function dotLayout(Wmm, Hmm, pip) {
-  // a 3 x 3 grid around the PIP ring (where the side camera is looking), kept on the screen
-  const cx = (v, lim) => Math.max(-lim, Math.min(lim, v));
-  const xs = [-60, -20, 25].map((d) => cx(pip.x + d, Wmm / 2 - 10)), ys = [-30, 15, 60].map((d) => cx(pip.y + d, Hmm / 2 - 10)), pts = [];
-  for (const y of ys) for (const x of xs) pts.push({ x, y });
-  return pts;
-}
-// centroid of the brightest change between two luma frames (Float32Array), or null
-export function findDot(on, off, W, H) {
-  let best = 0, bi = -1;
-  for (let k = 0; k < on.length; k++) { const d = on[k] - off[k]; if (d > best) { best = d; bi = k; } }
-  if (best < 25) return null;
-  const thr = Math.max(18, best * 0.45), seen = new Uint8Array(on.length), stack = [bi];
-  let sw = 0, sx = 0, sy = 0, n = 0; seen[bi] = 1;
-  while (stack.length && n < 40000) {
-    const k = stack.pop(), x = k % W, y = (k / W) | 0, wgt = on[k] - off[k] - thr * 0.5;
-    sw += wgt; sx += wgt * x; sy += wgt * y; n++;
-    for (const q of [k - 1, k + 1, k - W, k + W]) {
-      if (q < 0 || q >= on.length || seen[q]) continue;
-      const qx = q % W; if (Math.abs(qx - x) > 1) continue;
-      seen[q] = 1; if (on[q] - off[q] > thr) stack.push(q);
-    }
-  }
-  if (n < 4 || sw <= 0) return null;
-  return { x: sx / sw, y: sy / sw, n, peak: best };
-}
-
 // the part of the camera image needed to warp a region of the rectified image
 export function srcBox(rect, x0, y0, w, h, W, H) {
   let a = Infinity, b = Infinity, c = -Infinity, e = -Infinity;
@@ -204,24 +183,84 @@ function applyParams(pose, q) {
   const R = mat3mul(rotExp([q[0], q[1], q[2]]), pose.R);
   return { ...pose, R, t: [pose.t[0] + q[3], pose.t[1] + q[4], pose.t[2] + q[5]], f: pose.f * (1 + q[6]) };
 }
-export function refinePose(pose, src, dst) {
+export function refinePose(pose, src, dst, fixF = false) {
   const step = Math.max(1, Math.floor(src.length / 4000)), S2 = [], D2 = [];
   for (let i = 0; i < src.length; i += step) { S2.push(src[i]); D2.push(dst[i]); }
   const res = (p) => { const r = new Float64Array(S2.length * 2); for (let i = 0; i < S2.length; i++) { const q = project(p, [S2[i].x, S2[i].y, 0]); r[2 * i] = q ? q.x - D2[i].x : 1e3; r[2 * i + 1] = q ? q.y - D2[i].y : 1e3; } return r; };
   const sq = (r) => r.reduce((a, v) => a + v * v, 0);
   let cur = pose, r0 = res(cur), e0 = sq(r0), lam = 1e-3;
-  const hs = [1e-5, 1e-5, 1e-5, 1e-3, 1e-3, 1e-3, 1e-5];
-  for (let it = 0; it < 15; it++) {
+  const hs = fixF ? [1e-5, 1e-5, 1e-5, 1e-3, 1e-3, 1e-3] : [1e-5, 1e-5, 1e-5, 1e-3, 1e-3, 1e-3, 1e-5];
+  for (let it = 0; it < 60; it++) {
     const J = hs.map((h, j) => { const q = [0, 0, 0, 0, 0, 0, 0]; q[j] = h; const rp = res(applyParams(cur, q)); q[j] = -h; const rm = res(applyParams(cur, q)); return rp.map((v, i) => (v - rm[i]) / (2 * h)); });
     const A = J.map((a) => J.map((b) => a.reduce((x, v, i) => x + v * b[i], 0))), g = J.map((a) => a.reduce((x, v, i) => x + v * r0[i], 0));
     let improved = false;
     for (let tries = 0; tries < 6 && !improved; tries++) {
       const Ad = A.map((row, i) => row.map((v, j) => (i === j ? v * (1 + lam) + 1e-12 : v)));
       const d = solve(Ad, g.map((v) => -v)); if (!d) { lam *= 10; continue; }
-      const cand = applyParams(cur, d), rc = res(cand), ec = sq(rc);
-      if (ec < e0) { cur = cand; r0 = rc; improved = e0 - ec > 1e-9 * e0; e0 = ec; lam = Math.max(1e-7, lam / 10); improved = true; } else lam *= 10;
+      const cand = applyParams(cur, d.length === 7 ? d : [...d, 0]), rc = res(cand), ec = sq(rc);
+      if (ec < e0) { const gain = (e0 - ec) / e0; cur = cand; r0 = rc; e0 = ec; lam = Math.max(1e-7, lam / 10); improved = true; if (gain < 1e-10) it = 1e9; } else lam *= 10;
     }
-    if (!improved) break;
+    if (!improved) break; // converged: no step lowers the error any more
   }
   return cur;
+}
+
+// frames: { white, black, gray: { 'x:bit': [P, I] , ... } } as luma arrays of size HW x HH (half the camera size).
+// m: { w, h, mmPerPx } of the iPad screen. Returns screen<->image correspondences and how much of the image is screen.
+export function decodeGray(frames, m, HW, HH, MIN = 3) {
+  const w = m.w, h = m.h, mm = m.mmPerPx, Bx = grayBits(w), By = grayBits(h), N = HW * HH;
+  const amp = new Float32Array(N); let lit = 0;
+  for (let k = 0; k < N; k++) { amp[k] = frames.white[k] - frames.black[k]; if (amp[k] >= 40) lit++; }
+  const code = { x: new Uint32Array(N), y: new Uint32Array(N) }, depth = { x: new Uint8Array(N), y: new Uint8Array(N) }, dead = { x: new Uint8Array(N), y: new Uint8Array(N) };
+  for (const [axis, B] of [['x', Bx], ['y', By]]) {
+    for (let bit = B - 1; bit >= MIN; bit--) {
+      const pair = frames.gray[`${axis}:${bit}`]; if (!pair) continue;
+      const [P, I] = pair, c = code[axis], dp = depth[axis], dd = dead[axis];
+      for (let k = 0; k < N; k++) {
+        if (dd[k] || amp[k] < 40) continue;
+        const d = P[k] - I[k];
+        if (Math.abs(d) < 0.25 * amp[k]) { dd[k] = 1; continue; } // too fine to see here: stop at the previous bit
+        c[k] = (c[k] << 1) | (d > 0 ? 1 : 0); dp[k]++;
+      }
+    }
+  }
+  // one correspondence per screen cell = centroid of the pixels decoded to exactly that cell, at the same (finest) level
+  const fullX = Bx - MIN, fullY = By - MIN;
+  const build = (dx, dy) => {
+    const cells = new Map();
+    for (let k = 0; k < N; k++) {
+      if (amp[k] < 40 || depth.x[k] !== dx || depth.y[k] !== dy) continue;
+      const cx = grayCellCentre(code.x[k], dx, Bx), cy = grayCellCentre(code.y[k], dy, By);
+      const key = cx.c * 4096 + cy.c; let e = cells.get(key);
+      if (!e) cells.set(key, e = { px: cx.c, py: cy.c, u: 0, v: 0, n: 0 });
+      e.u += (k % HW + 0.5) * 2; e.v += (((k / HW) | 0) + 0.5) * 2; e.n++;
+    }
+    const src = [], dst = [];
+    for (const e of cells.values()) { if (e.n < 3) continue; src.push({ x: (e.px - w / 2) * mm, y: (h / 2 - e.py) * mm }); dst.push({ x: e.u / e.n, y: e.v / e.n }); }
+    return { src, dst };
+  };
+  let out = build(fullX, fullY);
+  if (out.src.length < 300) { const b = build(fullX - 1, fullY - 1); out = { src: out.src.concat(b.src), dst: out.dst.concat(b.dst) }; }
+  return { ...out, screenFrac: lit / N, amp };
+}
+// bits that decodeGray needs, in the order they are shown
+export function grayPlan(m, MIN = 3) {
+  const out = [];
+  for (const [axis, B] of [['x', grayBits(m.w)], ['y', grayBits(m.h)]]) for (let bit = B - 1; bit >= MIN; bit--) out.push({ axis, bit });
+  return out;
+}
+// screen points (mm) whose view from the camera passes through the measuring box of the bending plane:
+// anything drawn there would sit behind the finger in the camera picture (Fable P1-5)
+export function behindZone(C, rect, Wmm, Hmm, margin = 10) {
+  const X = rect.x0, poly = [], lo = [], hi = [], xs = [];
+  const dir = Math.sign(X - C[0]) || 1, xEdge = dir > 0 ? Wmm / 2 : -Wmm / 2;
+  for (let i = 0; i <= 12; i++) {
+    const x = X + dir * margin + (xEdge - X - dir * margin) * i / 12, t = (x - X) / (x - C[0]); // P = S + t (C - S)
+    if (t >= 1) continue;
+    const yA = (rect.y0 - t * C[1]) / (1 - t), yB = (rect.y1 - t * C[1]) / (1 - t);
+    xs.push(x); lo.push(Math.max(-Hmm / 2, Math.min(yA, yB))); hi.push(Math.min(Hmm / 2, Math.max(yA, yB)));
+  }
+  for (let i = 0; i < xs.length; i++) poly.push({ x: xs[i], y: lo[i] });
+  for (let i = xs.length - 1; i >= 0; i--) poly.push({ x: xs[i], y: hi[i] });
+  return poly;
 }

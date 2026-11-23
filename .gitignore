@@ -9,3 +9,6 @@ playwright-report/
 public/vendor/
 
 certs/
+recordings/
+logs/
+data/

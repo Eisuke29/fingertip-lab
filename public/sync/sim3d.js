@@ -1,7 +1,7 @@
 // Synthetic side camera in 3D (for tests without hardware): an iPad screen tilted in front of a freely placed
 // camera, showing what the iPad shows (black / calibration dot / grid / scene), and a finger at known angles.
 import { drawPattern } from './pattern.js';
-const THREE_URL = 'https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.module.js';
+const THREE_URL = '/vendor/three/three.module.js';
 
 // the iPad (A16) in landscape: 1180 x 820 CSS px at 0.1924 mm/px -> the same numbers the real iPad page reports
 export async function createSim3D({ width = 1920, height = 1080, fps = 30, sw = 1180, sh = 820, mmPerPx = 0.1924, pip = { x: 0, y: 0 } } = {}) {

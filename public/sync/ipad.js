@@ -28,6 +28,7 @@ const link = connect('ipad', VERSION, {
     if (m.type === 'pose') { P.pose = m; P.poseAt = performance.now(); return; }
     if (m.type === 'show') return show(m);
     if (m.type === 'ipad') return control(m);
+    if (m.type === 'still') { P.zone = m.poly; freeze(); return; }
   },
 });
 
@@ -60,6 +61,7 @@ async function control(m) {
     P.eyeOn = m.eye;
     if (P.eyeOn) { try { await eye.start('user'); } catch (e) { P.eyeOn = false; eye.status = `前面カメラを使えません：${e.message}`; } } else eye.stop();
   }
+  if (m.sweep) P.sweepUntil = performance.now() + 4500;
   if (m.flash != null) { const f = $('#flash'); f.style.display = m.flash === 'off' ? 'none' : 'block'; f.style.background = m.flash === 'white' ? '#fff' : '#000'; requestAnimationFrame((t) => toMon({ type: 'flashed', t, white: m.flash === 'white' })); }
   report();
 }
@@ -83,15 +85,41 @@ function layout() {
   display.layout({ mmPerPx: st.mmPerPx, pipFrac: { x: 0.5, y: 0.5 }, Lm: st.Lm, Ld: st.Ld, dia: st.dia, fullBox: true, sideLight: true });
   eye.configure({ hfov: st.hfov, camPos: { x: 0, y: display.Hm / 2 + 10, z: 0 } });
 }
-addEventListener('resize', () => { layout(); if (lastShow.kind !== 'scene') show(lastShow, false); report(); });
+addEventListener('resize', () => { layout(); freeze(); if (lastShow.kind !== 'scene') show(lastShow, false); report(); });
 function loop() {
   const p = P.pose, fresh = p && performance.now() - P.poseAt < 500;
-  display.setFingerVisible(P.finger);
-  if (p) display.setPose(p.fthp ?? p.thp, p.fthd ?? p.thd, !!(fresh && p.ok)); else display.setPose(70, 25, false);
+  if (performance.now() < (P.sweepUntil || 0)) { // check from the PC: only the picture moves, the real finger stays still
+    const s = performance.now() / 1000; display.setFingerVisible(true); display.setPose(75 + 30 * Math.sin(s * 2.1), 35 + 30 * Math.sin(s * 3.3), true);
+  } else {
+    display.setFingerVisible(P.finger);
+    if (p) display.setPose(p.fthp ?? p.thp, p.fthd ?? p.thd, !!(fresh && p.ok)); else display.setPose(70, 25, false);
+  }
   // the eye position decides how the recess looks; by default straight in front of the screen
   display.render(P.eyeOn && eye.eye ? eye.eye : st.eye);
   requestAnimationFrame(loop);
 }
 layout(); requestAnimationFrame(loop);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') try { navigator.wakeLock?.request('screen').catch(() => {}); } catch {} });
+// ---------------- the part of the screen behind the finger (seen by the camera) is kept still (Fable P1-5) ----------------
+const sc = $('#still'), sx = sc.getContext('2d');
+function freeze() {
+  const dpr = devicePixelRatio || 1; sc.width = Math.round(innerWidth * dpr); sc.height = Math.round(innerHeight * dpr);
+  sx.clearRect(0, 0, sc.width, sc.height); if (!P.zone?.length) return;
+  // render once without the virtual finger and copy that area over the live picture
+  display.setFingerVisible(false); display.render(P.eyeOn && eye.eye ? eye.eye : st.eye);
+  const X = (x) => (innerWidth / 2 + x / st.mmPerPx) * dpr, Y = (y) => (innerHeight / 2 - y / st.mmPerPx) * dpr;
+  sx.save(); sx.beginPath(); P.zone.forEach((q, i) => (i ? sx.lineTo(X(q.x), Y(q.y)) : sx.moveTo(X(q.x), Y(q.y)))); sx.closePath(); sx.clip();
+  sx.drawImage($('#display'), 0, 0, sc.width, sc.height); sx.restore();
+}
+// ---------------- touch: is something on the glass, and where (mm from the ring) ----------------
+let touchSent = 0;
+function sendTouch(e, on) {
+  const now = performance.now(); if (on && now - touchSent < 50) return; touchSent = now;
+  const x = (e.clientX - innerWidth / 2) * st.mmPerPx, y = (innerHeight / 2 - e.clientY) * st.mmPerPx;
+  link.send({ type: 'touch', to: ['phone', 'monitor'], on, x, y, w: (e.width || 0) * st.mmPerPx, h: (e.height || 0) * st.mmPerPx });
+}
+addEventListener('pointerdown', (e) => sendTouch(e, true));
+addEventListener('pointermove', (e) => { if (e.buttons || e.pointerType === 'touch') sendTouch(e, true); });
+addEventListener('pointerup', (e) => sendTouch(e, false));
+addEventListener('pointercancel', (e) => sendTouch(e, false));
 window.ipad = { P, st, display };

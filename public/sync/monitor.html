@@ -32,7 +32,8 @@
   .checks .v { color:var(--mut); margin-left:auto; font-variant-numeric:tabular-nums; white-space:nowrap; }
   .fix { background:rgba(255,107,107,.08); border:1px solid rgba(255,107,107,.35); border-radius:10px; padding:8px 10px; margin-top:8px; }
   .fix ul { margin:4px 0 0; padding-left:18px; }
-  #btns { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  #act { position:sticky; bottom:-14px; background:var(--panel); padding:8px 0 4px; z-index:3; border-top:1px solid var(--line); margin-top:8px; }
+  #btns { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
   .btn { border:1px solid var(--line); background:var(--panel2); padding:9px 16px; border-radius:10px; cursor:pointer; font-weight:700; }
   .btn.primary { background:var(--accent); border-color:var(--accent); color:#04203f; }
   .btn.next { margin-left:auto; } .btn:disabled { opacity:.35; cursor:default; }
@@ -54,10 +55,9 @@
       <div class="lbl">何のため</div><div class="txt" id="why"></div>
       <div class="lbl">やること</div><div class="txt" id="todo"></div>
       <div class="lbl">合格の目安</div><ul class="checks" id="checks"></ul>
-      <div id="busy" class="busy"></div>
-      <div id="errs" class="note" style="color:var(--ng)"></div>
       <div id="fix" class="fix" hidden></div>
-      <div id="btns"></div>
+      <div id="extra"></div>
+      <div id="act"><div id="busy" class="busy"></div><div id="errs" class="note" style="color:var(--ng)"></div><div id="btns"></div></div>
       <div id="camBox"></div>
     </div>
     <div class="card"><div style="display:flex;gap:22px"><div class="big"><small>θp</small><span id="p">—</span></div><div class="big"><small>θd</small><span id="d">—</span></div></div><div class="note" id="trk"></div></div>

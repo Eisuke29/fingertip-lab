@@ -1,13 +1,12 @@
 // 横カメラ（iPhone）. The PC control page drives the steps; this page measures and draws the guidance
 // (targets + current state) onto the preview that the PC shows.
-//  cal    : the iPad lights dots one by one -> camera pose relative to the iPad screen
+//  cal    : the iPad shows Gray-code stripes -> camera pose relative to the iPad screen
 //  bg     : background of the bending plane (rectified view)
 //  joints : PIP is on the ring; refine PIP/DIP and confirm
 // Every frame afterwards: rectify the bending plane, fit the 2-link model, send theta_p / theta_d.
 import * as T from './tracker.js';
 import * as G from './geom.js';
 import { connect } from './wslink.js';
-import { discInBox } from './ring.js';
 import { boot } from './boot.js';
 
 const $ = (s) => document.querySelector(s);
@@ -23,6 +22,7 @@ const S = {
   cal: null, model: null, jt: null, why: '', raw: null, filt: null, ok: false, prev: {},
   fP: new T.OneEuro(1.2, 0.25), fD: new T.OneEuro(1.2, 0.25), Lm: 25, dia: 15,
   collect: null, previewOn: true, presence: null, lat: false, latLo: 255, latHi: 0, latWhite: null, waiters: [], gravity: null,
+  skin: null, gain: 1, settleMs: [], screenMask: null, touch: null, rec: null, place: null,
 };
 let link = null, sim = null;
 const work = document.createElement('canvas'), wctx = work.getContext('2d', { willReadFrequently: true });
@@ -81,7 +81,7 @@ async function switchCamera(id, remember = true) {
   try {
     const s2 = await openCamera(id); S.stream?.getTracks().forEach((t) => t.stop()); S.stream = s2; S.video.srcObject = s2; await S.video.play();
     if (remember) { saved.camId = id; try { localStorage.setItem(STORE, JSON.stringify(saved)); } catch {} }
-    S.pose = null; S.rect = null; S.bg.reset(); S.cal = null; S.raw = null; S.ok = false; S.ring = null; S.W = 0; resize();
+    S.pose = null; S.rect = null; S.bg.reset(); S.cal = null; S.raw = null; S.ok = false; S.W = 0; resize();
   } catch (e) { S.camErr = e.message; }
   sendCamInfo();
 }
@@ -189,27 +189,7 @@ function stats() {
   S.center = c / cn; S.diff = S.prevSmall ? diff / L.length : 99; S.prevSmall = L;
   S.stillN = S.diff < 2 ? S.stillN + 1 : 0;
 }
-// before the iPad position is measured: the iPad blinks a white disc at the ring; find it in the picture
 let placing = false;
-const BOX = { x0: 0.3, x1: 0.7, y0: 0.5, y1: 0.82 }; // target zone for the ring (also drawn on the preview)
-function lumaSmall() { const W = 320, H = Math.round(320 * S.H / S.W); sctx.canvas.width = W; sctx.canvas.height = H; sctx.drawImage(S.video, 0, 0, W, H); const d = sctx.getImageData(0, 0, W, H).data, L = new Float32Array(W * H); for (let i = 0, k = 0; k < L.length; i += 4, k++) L[k] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; sctx.canvas.width = 160; sctx.canvas.height = 90; return { L, W, H }; }
-// only when the user says the ring is in the box: blink the disc 5 times and look inside the box only
-async function findRing() {
-  placing = true; phase('枠の中で ○ を探しています'); S.ring = null;
-  let sum = null, W = 0, H = 0;
-  for (let i = 0; i < 5; i++) {
-    await show({ kind: 'black' }); await nextFrames(3); const off = lumaSmall();
-    await show({ kind: 'dot', x: 0, y: 0, r: 10 }); await nextFrames(3); const on = lumaSmall();
-    W = on.W; H = on.H; if (!sum) sum = new Float32Array(on.L.length);
-    for (let k = 0; k < sum.length; k++) sum[k] += (on.L[k] - off.L[k]) / 5;
-  }
-  await show({ kind: 'scene' });
-  S.ring = discInBox(sum, W, H, BOX); S.ringAt = performance.now(); placing = false;
-  if (!S.ring) { ack('find', false, '枠の中に ○ が見つかりません'); return; }
-  const dist = 20 * 0.78 * S.W / Math.max(1, S.ring.w * S.W) / 10; // disc diameter 20 mm
-  S.ring.dist = dist;
-  ack('find', true, '', { dist, x: S.ring.x, y: S.ring.y });
-}
 // A job = one command from the PC. The PC gets: "got" at once, the job/phase in every status (4 per second),
 // and the result, which is repeated in the status until the PC confirms it. Nothing waits forever.
 let job = null, result = null;
@@ -254,50 +234,42 @@ function lumaHalf() {
   return L;
 }
 async function grab(k = 1) { let acc = null; for (let i = 0; i < k; i++) { await nextFrames(1); const L = lumaHalf(); if (!acc) acc = L; else for (let j = 0; j < L.length; j++) acc[j] += L[j]; } if (k > 1) for (let j = 0; j < acc.length; j++) acc[j] /= k; return acc; }
-async function showGrab(state, k = 1) { await show(state); await nextFrames(2); return grab(k); }
+// after the iPad says "shown": wait at least 150 ms, then until two frames in a row differ by < 1.0 (max 1.2 s)
+async function settle() {
+  const t0 = performance.now(); await wait(150);
+  let still = 0;
+  while (still < 2 && performance.now() - t0 < 1350) { await nextFrames(1); still = S.diff < 1.0 ? still + 1 : 0; }
+  S.settleMs.push(performance.now() - t0); if (S.settleMs.length > 60) S.settleMs.shift();
+}
+async function showGrab(state, k = 1) { await show(state); await settle(); return grab(k); }
 
 // The iPad shows Gray-code stripes (each with its inverse). Every camera pixel that sees the screen decodes
 // which screen column and row it looks at -> thousands of correspondences (screen mm <-> image px).
-async function captureScreen(m) {
-  const w = m.w, h = m.h, mm = m.mmPerPx, Bx = G.grayBits(w), By = G.grayBits(h), MIN = 2; // finest stripe 4 px (0.8 mm)
-  const white = await showGrab({ kind: 'white' }, 2), black = await showGrab({ kind: 'black' }, 2);
-  const N = white.length, amp = new Float32Array(N);
-  for (let k = 0; k < N; k++) amp[k] = white[k] - black[k];
-  const code = { x: new Uint32Array(N), y: new Uint32Array(N) }, depth = { x: new Uint8Array(N), y: new Uint8Array(N) }, dead = { x: new Uint8Array(N), y: new Uint8Array(N) };
-  const total = (Bx - MIN) + (By - MIN); let done = 0;
-  for (const [axis, B] of [['x', Bx], ['y', By]]) {
-    for (let bit = B - 1; bit >= MIN; bit--) {
-      phase(`しま模様 ${++done}/${total}`, done / total);
-      const P = await showGrab({ kind: 'gray', axis, bit }), I = await showGrab({ kind: 'gray', axis, bit, inv: true });
-      const c = code[axis], dp = depth[axis], dd = dead[axis];
-      for (let k = 0; k < N; k++) {
-        if (dd[k] || amp[k] < 40) continue;
-        const d = P[k] - I[k];
-        if (Math.abs(d) < 0.25 * amp[k]) { dd[k] = 1; continue; } // too fine to see here: stop at the previous bit
-        c[k] = (c[k] << 1) | (d > 0 ? 1 : 0); dp[k]++;
-      }
-    }
+async function captureScreen(m, tag = 'cal') {
+  const plan = G.grayPlan(m, MIN_STRIPE), total = plan.length;
+  const HW = S.W >> 1, HH = S.H >> 1;
+  const frames = { white: await showGrab({ kind: 'white' }, 2), black: await showGrab({ kind: 'black' }, 2), gray: {} };
+  recLuma(`${tag}_white.png`, frames.white, HW, HH); recLuma(`${tag}_black.png`, frames.black, HW, HH);
+  sendDiffImage(frames.white, frames.black, HW, HH);
+  const screenFrac = (() => { let c = 0; for (let k = 0; k < frames.white.length; k++) if (frames.white[k] - frames.black[k] >= 40) c++; return c / frames.white.length; })();
+  if (screenFrac < 0.15) throw new Error(`iPadが映っていません（画面が映像の ${(screenFrac * 100).toFixed(0)}%。15%以上必要）→ iPhoneを ○ の方へ向ける`);
+  let done = 0;
+  for (const { axis, bit } of plan) {
+    phase(`しま模様 ${++done}/${total}`, done / total);
+    const P = await showGrab({ kind: 'gray', axis, bit }), I = await showGrab({ kind: 'gray', axis, bit, inv: true });
+    frames.gray[`${axis}:${bit}`] = [P, I];
+    recLuma(`${tag}_${axis}${bit}_p.png`, P, HW, HH); recLuma(`${tag}_${axis}${bit}_i.png`, I, HW, HH);
   }
-  // One correspondence per screen cell = the centroid of the camera pixels that decoded exactly that cell.
-  // Only pixels decoded down to the SAME (finest possible) stripe level are used: a pixel that stopped early lies
-  // near a stripe edge, so mixing it into a coarser cell would pull that cell's centroid off its centre.
-  const HW = S.W >> 1, fullX = Bx - MIN, fullY = By - MIN;
-  const build = (dx, dy) => {
-    const cells = new Map();
-    for (let k = 0; k < N; k++) {
-      if (amp[k] < 40 || depth.x[k] !== dx || depth.y[k] !== dy) continue;
-      const cx = G.grayCellCentre(code.x[k], dx, Bx), cy = G.grayCellCentre(code.y[k], dy, By);
-      const key = cx.c * 4096 + cy.c; let e = cells.get(key);
-      if (!e) cells.set(key, e = { px: cx.c, py: cy.c, u: 0, v: 0, n: 0 });
-      e.u += (k % HW + 0.5) * 2; e.v += (((k / HW) | 0) + 0.5) * 2; e.n++;
-    }
-    const src = [], dst = [];
-    for (const e of cells.values()) { if (e.n < 3) continue; src.push({ x: (e.px - w / 2) * mm, y: (h / 2 - e.py) * mm }); dst.push({ x: e.u / e.n, y: e.v / e.n }); }
-    return { src, dst };
-  };
-  let out = build(fullX, fullY);
-  if (out.src.length < 300) { const b = build(fullX - 1, fullY - 1); out = { src: out.src.concat(b.src), dst: out.dst.concat(b.dst) }; }
-  return out;
+  const out = G.decodeGray(frames, m, HW, HH, MIN_STRIPE);
+  return { src: out.src, dst: out.dst, screenFrac: out.screenFrac };
+}
+const MIN_STRIPE = 3; // finest stripe 8 px = 1.5 mm (Fable P1-2)
+// white minus black, small, for the PC: the iPad screen must look clearly white (Fable P0-4 check)
+function sendDiffImage(W1, B1, HW, HH) {
+  const c = document.createElement('canvas'), w = 320, h = Math.round(320 * HH / HW); c.width = w; c.height = h;
+  const x = c.getContext('2d'), id = x.createImageData(w, h);
+  for (let y = 0; y < h; y++) for (let i = 0; i < w; i++) { const k = Math.floor(y * HH / h) * HW + Math.floor(i * HW / w), v = Math.max(0, Math.min(255, W1[k] - B1[k])), o = (y * w + i) * 4; id.data[o] = id.data[o + 1] = id.data[o + 2] = v; id.data[o + 3] = 255; }
+  x.putImageData(id, 0, 0); toMon({ type: 'diffimg', url: c.toDataURL('image/jpeg', 0.7) });
 }
 // screen position (mm) that an image point maps to under a pose: intersect the viewing ray with the screen (z = 0)
 function toScreen(pose, p) {
@@ -307,21 +279,22 @@ function toScreen(pose, p) {
   return { x: C[0] + d[0] * s, y: C[1] + d[1] * s };
 }
 const sampleIdx = (arr, n) => { const out = []; for (let i = 0; i < n; i++) out.push(arr[(Math.random() * arr.length) | 0]); return out; };
-// accuracy from the iPad itself:
+// spread (NOT accuracy: Fable P1-3) from the iPad itself:
 //  (1) 30% of the points are kept out of the fit; where the fit says they are vs where they really are (screen mm)
 //  (2) the reference directions (screen normal, finger direction) re-estimated from random subsets -> spread in degrees
-function accuracy(pose, isrc, idst, m) {
+function accuracy(pose, isrc, idst, m, fixF = false) {
   const idx = isrc.map((_, i) => i).sort(() => Math.random() - 0.5), cut = Math.floor(idx.length * 0.7);
   const fitI = sampleIdx(idx.slice(0, cut), Math.min(4000, cut)), chkI = idx.slice(cut);
-  const pf = G.refinePose(pose, fitI.map((i) => isrc[i]), fitI.map((i) => idst[i])); // refit on 70 % only
+  const pf = G.refinePose(pose, fitI.map((i) => isrc[i]), fitI.map((i) => idst[i]), fixF); // refit on 70 % only
   const errs = chkI.map((i) => { const q = toScreen(pf, idst[i]); return Math.hypot(q.x - isrc[i].x, q.y - isrc[i].y); }).sort((a, b) => a - b);
   const med = errs[errs.length >> 1] || 0, p95 = errs[Math.floor(errs.length * 0.95)] || 0;
   const axes = (p) => [[p.R[0][2], p.R[1][2], p.R[2][2]], [p.R[0][1], p.R[1][1], p.R[2][1]]];
   const ang = (a, b) => Math.acos(Math.min(1, Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2]))) * 180 / Math.PI;
   const [n0, y0] = axes(pose), dev = [], pipDev = [];
-  for (let r = 0; r < 8; r++) {
-    const ii = sampleIdx(idx, Math.min(3000, idx.length)), p = G.refinePose(pose, ii.map((i) => isrc[i]), ii.map((i) => idst[i])); if (!p) continue;
-    const [n1, y1] = axes(p); dev.push(Math.hypot(ang(n0, n1), ang(y0, y1)));
+  // two halves of the points, each solved from scratch (same focal-length rule as the measurement)
+  for (let r = 0; r < 4; r++) {
+    const ii = idx.filter(() => Math.random() < 0.5), p = G.estimatePose(ii.map((i) => isrc[i]), ii.map((i) => idst[i]), S.W, S.H, fixF ? { f: pose.f } : {}); if (!p) continue;
+    const [n1] = axes(p); dev.push(ang(n0, n1)); // tilt of the screen normal (the reference of the angles)
     const q = toScreen(pose, G.project(p, [m.pip.x, m.pip.y, 0])); pipDev.push(Math.hypot(q.x - m.pip.x, q.y - m.pip.y));
   }
   const rmsOf = (a) => Math.sqrt(a.reduce((x, y) => x + y * y, 0) / Math.max(1, a.length));
@@ -351,10 +324,19 @@ async function calibrate(m) {
   if (isrc.length < 30) { ack('cal', false, `読み取れた点が合いません（${isrc.length}/${src.length}）`, { n: isrc.length }); return; }
   phase('計算しています');
   await nextFrames(1);
-  const pose = G.estimatePose(isrc, idst, S.W, S.H);
+  // focal length: free this time (for the check), fixed from the saved value once there is one (Fable P1-2)
+  const fkey = `${S.stream?.getVideoTracks()[0]?.label || 'sim'}|${S.W}x${S.H}`, fsaved = await focalGet(fkey);
+  // the pose from the points within 70 mm of the ring (where the finger is), if there are enough
+  const near = isrc.map((q, i) => i).filter((i) => Math.abs(isrc[i].x - m.pip.x) <= 70 && Math.abs(isrc[i].y - m.pip.y) <= 70);
+  const ps = near.length >= 200 ? near.map((i) => isrc[i]) : isrc, pd = near.length >= 200 ? near.map((i) => idst[i]) : idst;
+  const free = G.estimatePose(ps, pd, S.W, S.H); // focal length from this measurement alone (for the check / saving)
+  if (!free || free.rms > 3) { ack('cal', false, `計算が合いません（ずれ ${free ? free.rms.toFixed(1) : '?'} 画素）`, { n: isrc.length }); return; }
+  const pose = fsaved ? G.estimatePose(ps, pd, S.W, S.H, { f: fsaved * S.W }) : free;
   if (!pose || pose.rms > 3) { ack('cal', false, `計算が合いません（ずれ ${pose ? pose.rms.toFixed(1) : '?'} 画素）`, { n: isrc.length }); return; }
+  const focal = { now: free.f / S.W, saved: fsaved, used: pose.f / S.W, off: fsaved ? Math.abs(free.f / S.W - fsaved) / fsaved : 0 };
+  if (!fsaved || focal.off < 0.03) focalPut(fkey, free.f / S.W);
   S.lastCorr = { isrc, idst }; // kept for checking
-  const acc = accuracy(pose, isrc, idst, m);
+  const acc = accuracy(pose, ps, pd, m, !!fsaved);
   S.pose = pose; S.showGrid = true;
   const step = Math.max(1, Math.floor(isrc.length / 80));
   S.calPts = []; for (let i = 0; i < isrc.length; i += step) S.calPts.push({ seen: idst[i], pred: G.project(pose, [isrc[i].x, isrc[i].y, 0]) });
@@ -363,11 +345,40 @@ async function calibrate(m) {
   const C = pose.C, dx = C[0] - m.pip.x, dy = C[1] - m.pip.y, dist = Math.hypot(dx, dy, C[2]);
   const corners = [[S.rect.y0, S.rect.z0], [S.rect.y1, S.rect.z0], [S.rect.y1, S.rect.z1], [S.rect.y0, S.rect.z1]].map(([y, z]) => G.project(pose, [m.pip.x, y, z]));
   const inside = corners.every((p) => p && p.x >= 0 && p.y >= 0 && p.x <= S.W && p.y <= S.H);
-  S.calInfo = { rms: pose.rms, n: isrc.length, of: src.length, fW: pose.f / S.W, dist, C, inside, ...acc,
-    elev: Math.atan2(C[2], Math.hypot(dx, dy)) * 180 / Math.PI, side: Math.atan2(Math.abs(dy), Math.abs(dx)) * 180 / Math.PI, scale: S.rect.s,
-    tiltCam: tiltFromCamera(pose) };
+  const elev = Math.atan2(C[2], Math.hypot(dx, dy)) * 180 / Math.PI, side = Math.atan2(Math.abs(dy), Math.abs(dx)) * 180 / Math.PI;
+  S.place = placement(C, m);
+  S.calInfo = { rms: pose.rms, n: isrc.length, near: near.length, of: src.length, fW: pose.f / S.W, focal, dist, C, inside, ...acc,
+    elev, side, scale: S.rect.s, place: S.place, tiltCam: tiltFromCamera(pose) };
+  // what the iPad must keep still: the part of the screen seen behind the measuring box (Fable P1-5)
+  const zone = G.behindZone(C, S.rect, m.Wmm, m.Hmm, S.dia / 2 + 3);
+  link.send({ type: 'still', to: 'ipad', poly: zone });
+  S.screenMask = screenMaskFor(pose, S.rect, m);
+  recJSON('cal.json', { screen: m, W: S.W, H: S.H, MIN: MIN_STRIPE, pose: { R: pose.R, t: pose.t, f: pose.f, cx: pose.cx, cy: pose.cy, C: pose.C }, info: S.calInfo });
   ack('cal', true, '', S.calInfo);
 }
+// Placement verdict in numbers (Fable P1-1): side <= 10 deg, looking down 10-20 deg, 20-30 cm.
+// The hints say how far to move the iPhone, in the user's terms (toward the fingertip / wrist, up / down, closer / away).
+function placement(C, m) {
+  const dx = C[0] - m.pip.x, dy = C[1] - m.pip.y, hor = Math.hypot(dx, dy), dist = Math.hypot(dx, dy, C[2]);
+  const side = Math.atan2(Math.abs(dy), Math.abs(dx)) * 180 / Math.PI, elev = Math.atan2(C[2], hor) * 180 / Math.PI;
+  const ok = { side: side <= 10, elev: elev >= 10 && elev <= 20, dist: dist >= 200 && dist <= 300 };
+  const hints = [];
+  if (!ok.side) { const mv = Math.abs(dy) - Math.abs(dx) * Math.tan(8 * Math.PI / 180); hints.push({ k: 'side', text: `iPhoneを${dy > 0 ? '手首側' : '指先側'}へ ${(mv / 10).toFixed(1)} cm 動かす（真横からのずれ ${side.toFixed(0)}° → 10°以内）`, dir: dy > 0 ? -1 : 1 }); }
+  if (!ok.elev) { const want = hor * Math.tan(15 * Math.PI / 180), mv = C[2] - want; hints.push({ k: 'elev', text: `iPhoneを ${(Math.abs(mv) / 10).toFixed(1)} cm ${mv > 0 ? '下げる' : '上げる'}（見下ろし ${elev.toFixed(0)}° → 10〜20°）`, dir: mv > 0 ? 1 : -1 }); }
+  if (!ok.dist) { const mv = dist < 200 ? 220 - dist : dist - 280; hints.push({ k: 'dist', text: `iPhoneを ${(mv / 10).toFixed(1)} cm ${dist < 200 ? '離す' : '近づける'}（距離 ${(dist / 10).toFixed(0)} cm → 20〜30 cm）`, dir: dist < 200 ? 1 : -1 }); }
+  return { side, elev, dist, ok, pass: ok.side && ok.elev && ok.dist, hints };
+}
+// rectified pixels where the iPad screen is seen behind (the ray from the camera through the point meets the screen)
+function screenMaskFor(pose, R, m) {
+  const C = pose.C, out = new Uint8Array(R.W * R.H);
+  for (let v = 0; v < R.H; v++) { const z = R.z1 - v / R.s; if (z >= C[2]) continue;
+    for (let u = 0; u < R.W; u++) { const y = R.y0 + u / R.s, sc = C[2] / (C[2] - z), X = C[0] + (R.x0 - C[0]) * sc, Y = C[1] + (y - C[1]) * sc;
+      if (Math.abs(X) <= m.Wmm / 2 && Math.abs(Y) <= m.Hmm / 2) out[v * R.W + u] = 1; } }
+  return out;
+}
+// saved focal length of this camera (kept on the PC)
+async function focalGet(key) { try { const j = await (await fetch(`/api/focal?key=${encodeURIComponent(key)}`, { cache: 'no-store' })).json(); return j.fixed || null; } catch { return null; } }
+function focalPut(key, fW) { fetch('/api/focal', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key, fW }) }).catch(() => {}); }
 // tilt of the iPad screen from the table, using the iPhone's gravity in camera coordinates (reference only)
 function tiltFromCamera(pose) {
   const g = S.gravity; if (!g) return null;
@@ -391,9 +402,9 @@ function bgFrame() {
   if (S.bgFrames < 0) { S.bgFrames++; return; }
   if (!S.bgRef) S.bgRef = S.prevSmall.slice();
   else { let d = 0; for (let k = 0; k < S.bgRef.length; k++) d += Math.abs(S.prevSmall[k] - S.bgRef[k]); if (d / S.bgRef.length > 6) { S.bgBusy = false; S.bg.reset(); ack('bg', false, '撮っている間に映像が動きました'); finishFrameJob(); return; } }
-  S.bg.add(rectFull()); S.bgFrames++;
+  S.bg.add(rectFull()); if (S.bgFrames % 3 === 0) recFrame(`bg_${String(S.bgFrames).padStart(2, '0')}.jpg`); S.bgFrames++;
   if (S.bgFrames >= 30) {
-    S.bg.finish(); S.bgBusy = false; ack('bg', true, ''); finishFrameJob();
+    S.bg.finish(); S.bgBusy = false; S.skin = null; S.gain = 1; ack('bg', true, ''); finishFrameJob();
     if (sim) setTimeout(() => { sim.state.handIn = true; sim.state.manual = { thp: 70, thd: 45 }; }, 300);
   }
 }
@@ -405,7 +416,8 @@ function rectCalInit() {
   return { glass: { a: { x: 0, y: vg }, b: { x: R.W, y: vg } }, side: -1,
     pipC: { x: R.uPip, y: vg }, dipC: { x: R.uPip + S.Lm * R.s, y: vg }, T: S.dia * R.s };
 }
-function fgFull() { return T.foreground(rectFull(), { x0: 0, y0: 0, w: S.rect.W, h: S.rect.H }, S.bg); }
+const fgOpt = () => ({ screen: S.screenMask, skin: S.skin, gain: S.gain });
+function fgFull() { const img = rectFull(); S.gain = T.cornerGain(img, S.bg); return T.foregroundC(img, { x0: 0, y0: 0, w: S.rect.W, h: S.rect.H }, S.bg, fgOpt()); }
 function startJoints() { S.jt = { n: 0, last: null, good: 0 }; S.why = ''; S.cal = rectCalInit(); S.model = null; S.prev = {}; S.raw = null; S.ok = false; }
 function jointTry() {
   if (job?.abort) { S.jt = null; ack('joints', false, '中止されました'); finishFrameJob(); return; }
@@ -418,7 +430,16 @@ function jointTry() {
   const bent = S.raw && S.raw.thd >= 12 && S.raw.thp > 25 && S.raw.thp < 160;
   S.why = !S.raw || Math.max(S.raw.scoreP, S.raw.scoreD) < 0.4 ? '指が見えません' : !bent ? '第1関節の曲げが足りません' : !S.ok ? '指の形が合いません' : moved >= 3 ? '指が動いています' : '';
   J.good = !S.why ? J.good + 1 : 0;
-  if (J.good >= 3) { S.jt = null; S.fP.reset(); S.fD.reset(); finishFrameJobAfter(); ack('joints', true, '', { pipOffsetMm: (ref.pipC.x - S.rect.uPip) / S.rect.s, LmMm: (ref.dipC.x - ref.pipC.x) / S.rect.s, diaMm: ref.T / S.rect.s }); return; }
+  if (J.good >= 3) {
+    S.jt = null; S.fP.reset(); S.fD.reset();
+    // learn this person's finger colour now (nothing about skin is fixed in advance)
+    const skin = T.learnSkin(rectFull(), T.buildModel(ref), S.raw.thp, S.raw.thd), sep = skin ? T.skinVsBackground(skin, S.bg) : null;
+    S.skin = skin && sep >= 3 ? skin : null; S.model = null;
+    finishFrameJobAfter();
+    ack('joints', true, '', { pipOffsetMm: (ref.pipC.x - S.rect.uPip) / S.rect.s, LmMm: (ref.dipC.x - ref.pipC.x) / S.rect.s, diaMm: ref.T / S.rect.s,
+      skinSep: sep, skinUsed: !!S.skin, touch: S.touch && performance.now() - S.touch.at < 1000 ? S.touch : null });
+    return;
+  }
   if (J.n >= 100) { S.jt = null; if (!S.ok) S.cal = null; ack('joints', false, S.why); finishFrameJob(); }
 }
 
@@ -431,7 +452,8 @@ function trackFrame(now) {
   if (S.roiKey !== key) { S.roiKey = key; S.roiBox = G.srcBox(S.rect, roi.x0, roi.y0, roi.w, roi.h, S.W, S.H); }
   const bx = S.roiBox, fr = wctx.getImageData(bx.x, bx.y, bx.w, bx.h);
   G.warp(S.rect, fr, roi.x0, roi.y0, roi.w, roi.h, S.roiBuf, bx.x, bx.y);
-  const f = T.foreground(S.roiBuf, roi, S.bg);
+  if (n % 30 === 0) S.gain = T.cornerGain(rectFull(), S.bg); // overall light change
+  const f = T.foregroundC(S.roiBuf, roi, S.bg, fgOpt());
   const r = T.track(f, m, S.prev);
   const okP = r.scoreP > T.SCORE_OK, okD = r.scoreD > T.SCORE_OK;
   S.prev = { thp: r.thp, thd: r.thd, okP, okD }; S.raw = r; S.ok = okP && okD;
@@ -456,24 +478,10 @@ function drawPreview() {
   const line = (a, b, col, w = 2) => { if (!a || !b) return; c.strokeStyle = col; c.lineWidth = w; c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke(); };
   const pr = S.pose && S.screen ? (x, y, z = 0) => P(G.project(S.pose, [x, y, z])) : null;
   const lines = []; // status lines (text, colour) drawn bottom-left
-  // ---- before the iPad position is known: guide the placement with the red ring
+  // ---- before the iPad position is known: a light frame where the screen and the ring should appear
   if (!S.pose) {
-    // target zone for the ring: centre horizontally, lower half (the finger rises above it)
-    const zx0 = BOX.x0 * PW, zx1 = BOX.x1 * PW, zy0 = BOX.y0 * PH, zy1 = BOX.y1 * PH;
-    c.setLineDash([10, 8]); c.strokeStyle = TGT; c.lineWidth = 2; c.strokeRect(zx0, zy0, zx1 - zx0, zy1 - zy0); c.setLineDash([]);
-    label(c, zx0, zy0 - 30, '目標：○ がこの枠に入る', TGT, 18);
-    if (S.ring) {
-      const rx = S.ring.x * PW, ry = S.ring.y * PH, inside = rx > zx0 && rx < zx1 && ry > zy0 && ry < zy1;
-      c.strokeStyle = OK; c.lineWidth = 3; c.beginPath(); c.ellipse(rx, ry, Math.max(12, S.ring.w * PW / 2 + 6), Math.max(8, S.ring.h * PH / 2 + 6), 0, 0, 7); c.stroke();
-      if (!inside) {
-        const tx = Math.min(Math.max(rx, zx0 + 20), zx1 - 20), ty = Math.min(Math.max(ry, zy0 + 20), zy1 - 20);
-        const hx = rx < zx0 ? 'iPhoneを少し左に向ける' : rx > zx1 ? 'iPhoneを少し右に向ける' : '', hy = ry < zy0 ? 'iPhoneを少し上に向ける' : ry > zy1 ? 'iPhoneを少し下に向ける' : '';
-        arrow(c, { x: rx, y: ry }, { x: tx, y: ty }, NG); lines.push([`今：○ が枠の外 → ${[hx, hy].filter(Boolean).join('・')}`, NG]);
-      } else lines.push(['○ を確認しました ✓（PCで［測る］へ）', OK]);
-      // distance from the blinking disc (diameter 20 mm)
-      const fpx = 0.78 * PW, dist = 20 * fpx / Math.max(1, S.ring.w * PW) / 10;
-      lines.push([`○までの距離 約 ${dist.toFixed(0)} cm（目標 20〜30 cm）`, dist < 20 ? NG : dist > 30 ? WARN : OK]);
-    } else lines.push([S.step === 2 ? '○ を枠に入れたら、PCで［枠に入れた］を押す' : '②で ○ の位置を確かめます', TGT]);
+    c.setLineDash([10, 8]); c.strokeStyle = 'rgba(255,216,74,.55)'; c.lineWidth = 2; c.strokeRect(PW * 0.12, PH * 0.42, PW * 0.76, PH * 0.5); c.setLineDash([]);
+    label(c, PW * 0.12, PH * 0.42 - 30, 'iPadの画面と ○ がこのあたりに映るように', TGT, 18);
   }
   // ---- after calibration: predicted iPad outline / grid / ring / measuring box
   if (pr) {
@@ -491,10 +499,17 @@ function drawPreview() {
       c.setLineDash([8, 6]); for (let i = 0; i < 4; i++) line(q[i], q[i + 1], TGT, 2); c.setLineDash([]); }
     const ci = S.calInfo;
     if (S.step === 2 && ci) {
-      lines.push([`点のずれ ${ci.rms.toFixed(2)} 画素（目標 1.0 以下）・使えた点 ${ci.n}`, ci.rms <= 1.0 && ci.n >= 200 ? OK : NG]);
-      lines.push(['確認：ピンクの線が iPad の白い格子に重なっているか', TGT]);
-      lines.push([`距離 ${(ci.dist / 10).toFixed(0)} cm（15〜30）・見下ろし ${ci.elev.toFixed(0)}°（0〜35）`, ci.dist >= 150 && ci.dist <= 300 && ci.elev <= 35 ? OK : WARN]);
+      const pl = ci.place;
+      lines.push([`真横から ${pl.side.toFixed(0)}°（10°以内）・見下ろし ${pl.elev.toFixed(0)}°（10〜20°）・距離 ${(pl.dist / 10).toFixed(0)} cm（20〜30）`, pl.pass ? OK : NG]);
+      for (const h of pl.hints) lines.push([h.text, NG]);
       if (!ci.inside) lines.push(['黄色の枠（指を測る範囲）が映像からはみ出しています → iPhoneを離すか向きを直す', NG]);
+      // arrows: side = along the finger (left/right in the picture), elev = up/down, dist = toward/away
+      const ctr = { x: PW / 2, y: PH * 0.3 };
+      for (const h of pl.hints) {
+        if (h.k === 'side') { const a = pr(S.screen.pip.x, S.screen.pip.y, 30), b = pr(S.screen.pip.x, S.screen.pip.y + 30 * h.dir, 30); if (a && b) arrow(c, a, { x: a.x + (b.x - a.x) * 2, y: a.y + (b.y - a.y) * 2 }, NG); }
+        if (h.k === 'elev') arrow(c, ctr, { x: ctr.x, y: ctr.y + 60 * h.dir }, NG);
+        if (h.k === 'dist') { c.strokeStyle = NG; c.lineWidth = 4; c.beginPath(); c.arc(ctr.x + 120, ctr.y, h.dir > 0 ? 18 : 34, 0, 7); c.stroke(); }
+      }
     }
   }
   // ---- background
@@ -504,6 +519,7 @@ function drawPreview() {
     lines.push([S.diff < 2 ? '今：映像は止まっています ✓' : '今：映像が動いています（手・iPhoneを動かさない）', S.diff < 2 ? OK : NG]);
   }
   // ---- finger: model on the finger, PIP vs ring, what is missing
+  if (S.touch && performance.now() - S.touch.at < 500 && pr) { const q = pr(S.touch.x, S.touch.y); if (q) { c.fillStyle = 'rgba(62,207,142,.8)'; c.beginPath(); c.arc(q.x, q.y, 8, 0, 7); c.fill(); } }
   if (S.rect && S.cal && S.bg.ready && S.raw) {
     const m = S.model || T.buildModel(S.cal), I = (q) => P(S.rect.toImage(q.x, q.y)), a = S.ok ? 1 : 0.45;
     const seg = (p, d, L, col) => { c.globalAlpha = a; line(I(p), I({ x: p.x + d.x * L, y: p.y + d.y * L }), col, 5); c.globalAlpha = 1; };
@@ -528,8 +544,8 @@ function drawPreview() {
   }
   if (rectCtx && S.rect && S.step >= 3) { const w = 280, h = w * S.rect.H / S.rect.W; c.drawImage(rectCtx.canvas, PW - w - 8, 8, w, h); c.strokeStyle = '#fff'; c.lineWidth = 1; c.strokeRect(PW - w - 8, 8, w, h); label(c, PW - w - 4, 8 + h + 6, '真横から見た図（指を測っている面）', '#fff', 14); }
   vctx.drawImage(prev, 0, 0, view.width, view.height);
-  $('#msg').textContent = !link?.connected ? (S.linkState || 'PCに接続中…') : 'つながっています（操作はPCで）';
-  $('#meta').textContent = `${S.fps} fps・処理 ${S.procMs.toFixed(1)} ms`;
+  $('#msg').textContent = !link?.connected ? (S.linkState || 'PCに接続中…') : `つながっています（操作はPCで）・${job ? `測定中：${job.phase}` : S.camState ? S.camState : '待機'}`;
+  $('#meta').textContent = `版 ${S.version || '—'}・${S.fps} fps・処理 ${S.procMs.toFixed(1)} ms${S.rec ? '・記録中' : ''}`;
   $('#linkDot').className = 'dot ' + (link?.connected ? 'ok' : 'warn');
 }
 function drawRectOverlay(c) {
@@ -557,7 +573,8 @@ function sendStatus() {
   const lat = showStats.lat.slice().sort((a, b) => a - b);
   toMon({ type: 'status', version: S.version, job: job && { name: job.name, jobId: job.jobId, phase: job.phase, progress: job.progress, sec: (performance.now() - job.t0) / 1000 }, result,
     camState: S.camState || null, sharp: S.sharp ?? null, locks: S.locks || null, showMs: lat.length ? lat[lat.length >> 1] : null, showTimeouts: showStats.timeouts, fps: S.fps, proc: +S.procMs.toFixed(1), W: S.W, H: S.H, busy: !!S.busy || S.bgBusy || !!S.jt,
-    calibrated: !!S.pose, bg: S.bg.ready, cal: !!S.cal, calInfo: S.calInfo, sim: SIM, still: S.diff < 2, ring: !!S.ring, why: S.why,
+    calibrated: !!S.pose, bg: S.bg.ready, cal: !!S.cal, calInfo: S.calInfo, sim: SIM, still: S.diff < 2, why: S.why, rec: S.rec?.id || null, skin: !!S.skin,
+    settleMs: S.settleMs.length ? S.settleMs.slice().sort((a, b) => a - b)[S.settleMs.length >> 1] : null, touch: S.touch && performance.now() - S.touch.at < 1000 ? S.touch : null,
     gravity: S.gravity, res: S.cal && S.rect ? Math.atan(1 / (0.55 * (S.model || T.buildModel(S.cal)).Lp)) * 180 / Math.PI : null });
 }
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -571,11 +588,11 @@ async function onData(m) {
     if (result && result.jobId === m.jobId) { toMon({ type: 'ack', ...result }); return; } // it missed the result
   }
   if (m.type === 'finger') { S.Lm = m.Lm; S.dia = m.dia; return; }
+  if (m.type === 'touch') { S.touch = { ...m, at: performance.now() }; return; }
   if (m.type !== 'cmd') return;
   switch (m.name) {
     case 'step': S.step = m.step; break;
     case 'abort': if (job) { job.abort = true; phase('中止しています'); } break;
-    case 'find': runJob(m, findRing); break;
     case 'camera': switchCamera(m.id); break;
     case 'focus': setFocus(m); break;
     case 'caminfo': sendCamInfo(); break;
@@ -586,6 +603,9 @@ async function onData(m) {
     case 'joints': runJob(m, async () => { if (!S.bg.ready) throw new Error('背景がありません'); phase('指を合わせています'); await frameJob(startJoints); }); break;
     case 'go': if (sim) sim.state.manual = null; break;
     case 'preview': S.previewOn = !!m.on; break;
+    case 'rec': S.rec = m.on ? { id: m.id, n: 0 } : null; break;
+    case 'recFinger': runJob(m, recordFinger); break;
+    case 'ruler': runJob(m, () => rulerCheck(m)); break;
     case 'lat': S.lat = !!m.on; S.latLo = 255; S.latHi = 0; S.latWhite = null; break;
     case 'jitter': {
       if (sim) sim.state.manual = { thp: 80, thd: 30 };
@@ -596,6 +616,87 @@ async function onData(m) {
       break;
     }
   }
+}
+// ---------------- recordings: raw pictures sent to the PC (recordings/<date>/) (Fable P0-10) ----------------
+const upq = [], uploaded = new Set(); let uploading = 0;
+function upload(name, blob) {
+  if (!S.rec || !blob) return;
+  upq.push([S.rec.id, name, blob, 0]); pump();
+}
+function pump() {
+  while (uploading < 2 && upq.length) {
+    const it = upq.shift(), [id, name, blob] = it; uploading++;
+    fetch(`/api/rec/${encodeURIComponent(id)}/${encodeURIComponent(name)}`, { method: 'POST', body: blob })
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); uploaded.add(name); })
+      .catch((e) => { if (++it[3] < 3) upq.push(it); else report(`記録を送れません（${name}）：${e.message}`); })
+      .finally(() => { uploading--; pump(); });
+  }
+}
+const drained = async () => { const t0 = performance.now(); while ((upq.length || uploading) && performance.now() - t0 < 15000) await wait(100); };
+function recLuma(name, L, W, H) {
+  if (!S.rec) return;
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d'), id = x.createImageData(W, H);
+  for (let k = 0; k < L.length; k++) { const v = Math.max(0, Math.min(255, Math.round(L[k]))); id.data[4 * k] = id.data[4 * k + 1] = id.data[4 * k + 2] = v; id.data[4 * k + 3] = 255; }
+  x.putImageData(id, 0, 0); c.toBlob((b) => upload(name, b), 'image/png');
+}
+function recFrame(name) { if (S.rec) work.toBlob((b) => upload(name, b), 'image/jpeg', 0.92); }
+// the frame is encoded before the next camera frame overwrites the work canvas
+const recFrameNow = (name) => new Promise((res) => work.toBlob((b) => { upload(name, b); res(); }, 'image/jpeg', 0.92));
+function recJSON(name, obj) { if (S.rec) upload(name, new Blob([JSON.stringify(obj)], { type: 'application/json' })); }
+// 10 s of the finger moving: full frames (up to ~8 per second) with what the tracker said for each
+async function recordFinger() {
+  if (!S.rec) throw new Error('先に［記録］を入れてください');
+  if (!S.bg.ready) throw new Error('背景がありません（③）');
+  const rows = [], t0 = performance.now(); let i = 0, last = 0;
+  recJSON('finger_setup.json', { cal: S.cal, Lm: S.Lm, dia: S.dia, skin: S.skin, gain: S.gain });
+  while (performance.now() - t0 < 10000) {
+    await nextFrames(1);
+    phase(`指を記録しています ${((performance.now() - t0) / 1000).toFixed(0)}/10 秒（曲げ伸ばしする）`, (performance.now() - t0) / 10000);
+    if (performance.now() - last < 120 || upq.length > 6) continue;
+    last = performance.now(); const name = `finger_${String(i++).padStart(3, '0')}.jpg`;
+    // what the tracker said for THIS frame, read before waiting for the picture to be encoded
+    rows.push({ name, t: last - t0, thp: S.raw?.thp ?? null, thd: S.raw?.thd ?? null, ok: S.ok, truth: sim ? sim.angles() : null, touch: S.touch && performance.now() - S.touch.at < 300 ? { x: S.touch.x, y: S.touch.y } : null });
+    await recFrameNow(name);
+  }
+  phase('記録をPCに送っています'); await drained();
+  const kept = rows.filter((r) => uploaded.has(r.name));
+  recJSON('finger.json', kept); await drained();
+  ack('recFinger', true, '', { n: kept.length, lost: rows.length - kept.length });
+}
+
+// ---------------- ruler check: the real angle of a straight edge standing on the ring (Fable P1-6) ----------------
+// Edges of whatever stands on the glass (triangle ruler, card) in the side view; angle to the glass for the longest lines.
+async function rulerCheck(m) {
+  if (!S.rect || !S.bg.ready) throw new Error('先に②③（位置・背景）を済ませてください');
+  phase('定規の辺を探しています'); await nextFrames(2);
+  const R = S.rect, img = rectFull(), f = T.foreground(img, { x0: 0, y0: 0, w: R.W, h: R.H }, S.bg), d = f.data, W = R.W, H = R.H;
+  const pts = [];
+  for (let v = 2; v < Math.min(H - 2, R.vGlass - 4); v++) for (let u = 2; u < W - 2; u++) {
+    const k = v * W + u; if (d[k] < 0.5) continue;
+    if (d[k - 1] < 0.5 || d[k + 1] < 0.5 || d[k - W] < 0.5 || d[k + W] < 0.5) pts.push([u, v]);
+  }
+  if (pts.length < 40) throw new Error('定規が見えません（○ に立てて、曲がる面に沿わせる）');
+  const NA = 360, diag = Math.hypot(W, H), NR = Math.ceil(2 * diag), acc = new Uint32Array(NA * NR);
+  const cs = [], sn = []; for (let a = 0; a < NA; a++) { cs.push(Math.cos(a * Math.PI / NA)); sn.push(Math.sin(a * Math.PI / NA)); }
+  for (const [u, v] of pts) for (let a = 0; a < NA; a++) acc[a * NR + Math.round(u * cs[a] + v * sn[a] + diag)]++;
+  const lines = [], used = new Uint8Array(acc.length);
+  for (let tries = 0; tries < 6; tries++) {
+    let best = -1, bi = 0; for (let i = 0; i < acc.length; i++) if (!used[i] && acc[i] > best) { best = acc[i]; bi = i; }
+    if (best < 15 * R.s) break; // shorter than 15 mm
+    const a = Math.floor(bi / NR), r = (bi % NR) - diag;
+    for (let da = -10; da <= 10; da++) for (let dr = -6; dr <= 6; dr++) { const aa = (a + da + NA) % NA, rr = bi % NR + dr; if (rr >= 0 && rr < NR) used[aa * NR + rr] = 1; }
+    // least squares on the points near this line
+    const near = pts.filter(([u, v]) => Math.abs(u * cs[a] + v * sn[a] - r) < 2); if (near.length < 15) continue;
+    const mu = near.reduce((s, p) => [s[0] + p[0] / near.length, s[1] + p[1] / near.length], [0, 0]);
+    let sxx = 0, sxy = 0, syy = 0; for (const [u, v] of near) { sxx += (u - mu[0]) ** 2; sxy += (u - mu[0]) * (v - mu[1]); syy += (v - mu[1]) ** 2; }
+    const th = 0.5 * Math.atan2(2 * sxy, sxx - syy); // direction of the line in the side view (u along the glass, v down)
+    let deg = Math.abs(th * 180 / Math.PI); if (deg > 90) deg = 180 - deg; // angle to the glass, 0..90
+    if (deg < 5) continue; // the glass itself / the finger lying on it
+    lines.push({ deg, lenMm: near.length / R.s });
+  }
+  if (!lines.length) throw new Error('まっすぐな辺が見つかりません');
+  const truth = m.truth, best = truth ? lines.reduce((a, b) => (Math.abs(b.deg - truth) < Math.abs(a.deg - truth) ? b : a)) : lines[0];
+  ack('ruler', true, '', { truth, read: best.deg, lines });
 }
 function latencyFrame() {
   const c = S.center; S.latLo = Math.min(S.latLo * 0.99 + c * 0.01, c); S.latHi = Math.max(S.latHi * 0.99 + c * 0.01, c);

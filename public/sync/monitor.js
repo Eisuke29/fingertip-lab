@@ -5,7 +5,7 @@ import { boot } from './boot.js';
 const VERSION = await boot();
 
 const $ = (s) => document.querySelector(s);
-const C = { step: 1, done: {}, ack: {}, pending: null, countdown: '', errors: [], secondary: false, status: null, statusAt: 0, ipad: null, ipadAt: 0, pose: null, poseAt: 0, frameAt: 0, results: [], rtt: null, eyeOn: false };
+const C = { step: 1, done: {}, ack: {}, ruler: {}, rec: null, pending: null, countdown: '', errors: [], secondary: false, status: null, statusAt: 0, ipad: null, ipadAt: 0, pose: null, poseAt: 0, frameAt: 0, results: [], rtt: null, eyeOn: false };
 const link = connect('monitor', VERSION, {
   onData, onBinary: showFrame, onPresence: () => render(),
   onState: (t) => { C.linkState = t; render(); },
@@ -15,7 +15,7 @@ const toPhone = (name, extra = {}) => { if (!C.secondary) link.send({ type: 'cmd
 const toIpad = (m) => { if (!C.secondary) link.send({ type: 'ipad', ...m, to: 'ipad' }); };
 
 function onData(m) {
-  if (m.type === 'status') { C.status = m; C.statusAt = performance.now(); if (m.result && C.pending && m.result.jobId === C.pending.jobId) finish(m.result); }
+  if (m.type === 'status') { C.status = m; C.statusAt = performance.now(); if (m.result?.what === 'ruler' && m.result.ok) C.ruler[m.result.info.truth] = m.result.info.read; if (m.result && C.pending && m.result.jobId === C.pending.jobId) finish(m.result); }
   else if (m.type === 'secondary') C.secondary = true;
   else if (m.type === 'primary') C.secondary = false;
   else if (m.type === 'got') { if (C.pending && m.jobId === C.pending.jobId) C.pending.gotAt = performance.now(); }
@@ -32,7 +32,9 @@ function onData(m) {
   else if (m.type === 'ack') { if (C.pending && (m.jobId === C.pending.jobId || (!m.jobId && m.what === C.pending.name))) finish(m); else if (!C.pending) C.ack[m.what] = m; }
   else if (m.type === 'pong') C.rtt = performance.now() - m.t0;
   else if (m.type === 'caminfo') { C.cam = m; renderCam(); }
-  else if (m.type === 'result') { C.results.push(m); renderTools(); }
+  else if (m.type === 'touch') C.touch = { ...m, at: performance.now() };
+  else if (m.type === 'diffimg') C.diffimg = m.url;
+  else if (m.type === 'result') { if (C.sweeping && m.kind === 'jitter') { m.kind = 'sweep'; C.sweeping = false; } C.results.push(m); renderTools(); }
   else if (m.type === 'lat-edge') latEdge(m);
   render();
 }
@@ -92,35 +94,37 @@ function stepView() {
         chk(live.phone() ? 'ok' : 'ng', 'iPhoneがつながっている'), chk(!live.phone() ? 'na' : s.fps >= 20 ? 'ok' : 'warn', 'iPhoneのカメラ 20 fps 以上', live.phone() ? `${s.fps} fps` : '')],
       fixes: [!live.ipad() || !live.phone() ? 'QRで開けない → 右上の「証明書」の手順を初回だけ行う' : '', live.phone() && s.fps < 20 ? 'fps が低い → iPhoneの低電力モードを切る・他のアプリを閉じる' : ''],
       btns: [next(live.ipad() && ip?.tapped && live.phone())] };
-    case 2: return {
+    case 2: {
+      const pl = ci?.place, tilt = ci && ci.tiltCam != null && ip?.tilt != null ? Math.abs(ci.tiltCam - ip.tilt) : null;
+      return {
       why: 'iPhoneから見たiPadの位置と傾きを測る（指の角度の基準になる）',
-      todo: '映像の黄色い枠に ○ が入るようにiPhoneを置いて固定 → ［枠に入れた］（枠の中だけで ○ を探す） → 手を離して［測る］（iPadにしま模様が出る・約5秒）',
-      checks: [chk(a.find ? (a.find.ok ? 'ok' : 'ng') : ci ? 'ok' : 'na', '枠の中に ○ がある', a.find?.ok ? `距離 約${a.find.info.dist.toFixed(0)} cm` : ''),
+      todo: '1. 映像の薄い枠に、iPadの画面と ○ が入るようにiPhoneを置く\n2. 手を離して［測る］（しま模様・約20秒）\n3. 赤い指示が出たら、そのとおり動かして［もう一回測る］',
+      checks: [chk(!ci ? 'na' : pl.ok.side ? 'ok' : 'ng', '真横から見ている（10°以内）', ci ? `${pl.side.toFixed(1)}°` : ''),
+        chk(!ci ? 'na' : pl.ok.elev ? 'ok' : 'ng', '見下ろす角度 10〜20°', ci ? `${pl.elev.toFixed(1)}°` : ''),
+        chk(!ci ? 'na' : pl.ok.dist ? 'ok' : 'ng', '○ までの距離 20〜30 cm', ci ? `${(pl.dist / 10).toFixed(1)} cm` : ''),
         chk(!ci ? 'na' : ci.n >= 200 ? 'ok' : 'ng', 'iPadの画面を読み取れた点 200 以上', ci ? `${ci.n}` : ''),
-        chk(!ci ? 'na' : ci.checkMm <= 0.5 ? 'ok' : 'ng', '画面上の位置の誤差 0.5 mm 以下（計算に使わなかった点で確認）', ci ? `${ci.checkMm.toFixed(2)} mm（95%: ${ci.checkMm95.toFixed(2)}）` : ''),
-        chk(!ci ? 'na' : ci.angleDeg <= 0.5 ? 'ok' : 'ng', '角度の基準のぶれ 0.5° 以下（指の角度の誤差になる）', ci ? `${ci.angleDeg.toFixed(2)}°` : ''),
-        chk(!ci ? 'na' : ci.pipMm <= 0.5 ? 'ok' : 'ng', '○ の位置のぶれ 0.5 mm 以下', ci ? `${ci.pipMm.toFixed(2)} mm` : ''),
         chk(!ci ? 'na' : ci.inside ? 'ok' : 'ng', '指を測る範囲（黄色の点線）が映像に入っている'),
-        chk(!ci ? 'na' : 'warn', '映像のピンクの線がiPadの白い格子に重なる（目で確認）'),
-        chk(!ci || ci.tiltCam == null || ip?.tilt == null ? 'na' : Math.abs(ci.tiltCam - ip.tilt) <= 3 ? 'ok' : 'warn', '傾きの照合（カメラから／iPadのセンサー）', ci && ci.tiltCam != null && ip?.tilt != null ? `${ci.tiltCam.toFixed(1)}° / ${ip.tilt.toFixed(1)}°` : '')],
-      fixes: C.lastJob === 'cal' && a.cal && !a.cal.ok ? [a.cal.msg, '読み取れない → iPadの画面の明るさを最大に、照明が画面に映り込まない向きにする', 'iPhoneを ○ の方へ向け、20〜30cm・見下ろし10〜20°にする', '測っている間はiPhone・iPadを動かさない'] :
-        a.find && !a.find.ok && !ci ? [a.find.msg, '枠の中に ○ が見つからない → 映像の黄色い枠の中に iPad の ○ が入るよう iPhone の向きを直してから、もう一度［枠に入れた］', 'iPadの画面の明るさを最大にする'] : a.cal && !a.cal.ok ? [a.cal.msg, '読み取れない → iPadの画面の明るさを最大に、照明が画面に映り込まない向きにする', 'iPhoneを ○ の方へ向け、15〜30cm・見下ろし15〜30°にする', '測っている間はiPhone・iPadを動かさない'] :
-        ci && !ci.inside ? ['黄色の点線が映像からはみ出している → iPhoneを少し離す、または ○ が映像の中央下に来るよう向きを直す'] :
-        ci && (ci.checkMm > 0.5 || ci.angleDeg > 0.5) ? ['誤差が大きい → ピントが合っているか見る（合わなければ○から離す・カメラを「デュアル広角」に）', '照明が画面に映り込まない向きにする・iPadの明るさを最大に', 'iPhoneを ○ に近づけて画面を大きく映す（15〜25cm）'] : [],
-      btns: [btn('枠に入れた', () => run('find'), !a.find?.ok && !ci), btn(ci ? 'もう一回測る' : '測る', () => run('cal', { Wmm: ip.Wmm, Hmm: ip.Hmm, pip: ip.pip, w: ip.w, h: ip.h, mmPerPx: ip.mmPerPx }), !ci, !ip), next(!!ci && ci.n >= 200 && ci.checkMm <= 0.5 && ci.angleDeg <= 0.5 && ci.inside)] };
+        chk(tilt == null ? 'na' : tilt <= 2 ? 'ok' : 'ng', '傾きの照合：カメラから／iPadのセンサー（差 2°以内）', tilt == null ? '' : `${ci.tiltCam.toFixed(1)}° / ${ip.tilt.toFixed(1)}°`),
+        chk(!ci?.focal?.saved ? 'na' : ci.focal.off < 0.03 ? 'ok' : 'warn', '焦点距離が保存値と合う（差 3%以内）', ci?.focal ? `今回 ${ci.focal.now.toFixed(3)}・保存 ${ci.focal.saved ? ci.focal.saved.toFixed(3) : 'まだ'}` : ''),
+        chk('na', '参考：測り直したときのばらつき（精度ではない）', ci ? `位置 ${ci.checkMm.toFixed(2)} mm・角度 ${ci.angleDeg.toFixed(2)}°` : '')],
+      fixes: C.lastJob === 'cal' && a.cal && !a.cal.ok ? [a.cal.msg, 'iPadの画面の明るさを最大にする', '照明が画面に映り込まない向きにする', '測っている間はiPhone・iPadを動かさない'] :
+        ci ? [...pl.hints.map((h) => h.text), !ci.inside ? '黄色の点線が映像からはみ出している → iPhoneを少し離す' : '', tilt != null && tilt > 2 ? '傾きが合わない → iPadの画面サイズの設定（検証・設定）を確かめる' : '', ci.focal?.saved && ci.focal.off >= 0.03 ? 'ピントが大きく動いた可能性 → もう一回測る' : ''] : [],
+      btns: [btn(ci ? 'もう一回測る' : '測る', () => run('cal', { Wmm: ip.Wmm, Hmm: ip.Hmm, pip: ip.pip, w: ip.w, h: ip.h, mmPerPx: ip.mmPerPx }), !ci || !pl?.pass, !ip), next(!!ci && ci.n >= 200 && ci.inside && pl.pass)] };
+    }
     case 3: return {
-      why: '指がないときの映像を覚える（指だけを取り出すため）', todo: '手を映像から出して［撮る］ → 3秒後に撮影',
+      why: '指がないときの映像を覚える（指だけを取り出すため）', todo: '1. 手を映像から出す\n2. ［撮る］（3秒後に撮影）',
       checks: [chk(s?.still ? 'ok' : 'ng', '映像が止まっている'), chk(!a.bg ? 'na' : a.bg.ok ? 'ok' : 'ng', '背景が撮れた'), driftChk],
       fixes: [...(a.bg && !a.bg.ok ? [a.bg.msg, '撮っている3秒間は、手・人の影・iPhoneを動かさない'] : []), ...driftFix],
       btns: [btn(a.bg?.ok ? 'もう一回' : '撮る', countdownBg, !a.bg?.ok), driftBtn, next(!!a.bg?.ok)] };
     case 4: {
       const p = C.pose, fresh = p && performance.now() - C.poseAt < 600, j = a.joints?.ok ? a.joints.info : null;
       return {
-        why: '指の関節の位置を合わせる（ここから角度を測る）', todo: '右手人差し指の中節の背を ○ に当て、第1・第2関節を曲げて止める → ［合わせる］（最長10秒）',
-        checks: [chk(fresh ? 'ok' : 'ng', '指が見えている'), chk(!j ? 'na' : Math.abs(j.pipOffsetMm) <= 3 ? 'ok' : 'ng', '第2関節が ○ から3mm以内', j ? `${j.pipOffsetMm.toFixed(1)} mm` : ''),
+        why: '指の関節の位置を合わせる（ここから角度を測る）', todo: '1. 右手人差し指の中節の背を ○ に当てる\n2. 第1・第2関節を曲げて止める\n3. ［合わせる］（最長10秒）',
+        checks: [chk(fresh ? 'ok' : 'ng', '指が見えている'), chk(C.touch?.on && performance.now() - C.touch.at < 2000 ? 'ok' : 'warn', 'iPadが指の接触を感じている（タッチ）', C.touch?.on && performance.now() - C.touch.at < 2000 ? `○ から ${Math.hypot(C.touch.x, C.touch.y).toFixed(0)} mm` : '感じていない'),
+          chk(!j || j.skinSep == null ? 'na' : j.skinSep >= 3 ? 'ok' : 'warn', '指と背景の色の違い（この人の指の色をその場で覚える）', j?.skinSep != null ? `${j.skinSep.toFixed(1)}` : ''), chk(!j ? 'na' : Math.abs(j.pipOffsetMm) <= 3 ? 'ok' : 'ng', '第2関節が ○ から3mm以内', j ? `${j.pipOffsetMm.toFixed(1)} mm` : ''),
           chk(!fresh ? 'na' : p.thd >= 12 ? 'ok' : 'ng', '第1関節を12°以上曲げている', fresh ? `θd ${p.thd.toFixed(0)}°` : ''),
           chk(!fresh ? 'na' : p.ok ? 'ok' : 'ng', '指の形が合っている（一致度 0.72 以上）', fresh ? `${p.sp.toFixed(2)} / ${p.sd.toFixed(2)}` : '')],
-        fixes: a.joints && !a.joints.ok ? [a.joints.msg, '指が見えない → 中節の背を ○ に当て、映像の黄色の点線の中に指が入っているか見る', '形が合わない → 背景を撮り直す（③）'] : [],
+        fixes: j && j.skinSep != null && j.skinSep < 3 ? ['背景と指の色が近い → 指の向こう側に、白か濃い色の紙を立てる（③からやり直す）'] : a.joints && !a.joints.ok ? [a.joints.msg, '指が見えない → 中節の背を ○ に当て、映像の黄色の点線の中に指が入っているか見る', '形が合わない → 背景を撮り直す（③）'] : [],
         btns: [btn(j ? 'もう一回' : '合わせる', () => run('joints'), !j), next(!!j)] };
     }
     case 5: {
@@ -139,8 +143,9 @@ const btn = (label, fn, primary, disabled = false) => ({ label, fn, primary, dis
 const next = (enabled) => ({ label: '次へ ▶', fn: () => { C.done[C.step] = true; goStep(C.step + 1); }, next: true, disabled: !enabled, primary: enabled });
 // A job is sent with an id. The iPhone answers "got" at once; without it the command is sent once more after 1 s.
 // While it runs, the iPhone's own phase is shown. Every job has a time limit; then the buttons come back.
-const LIMIT = { find: 12, cal: 30, verify: 30, bg: 10, joints: 15 };
-const NAMES_JA = { find: '○ を探す', cal: 'iPadの位置を測る', verify: 'ずれの確認', bg: '背景を撮る', joints: '指を合わせる' };
+// the stripes wait until the screen has settled after every change: 15-25 s (Fable P0-4)
+const LIMIT = { cal: 60, verify: 60, bg: 10, joints: 15, recFinger: 25, ruler: 10 };
+const NAMES_JA = { cal: 'iPadの位置を測る', verify: 'ずれの確認', bg: '背景を撮る', joints: '指を合わせる', recFinger: '指を記録', ruler: '定規で確かめる' };
 function run(name, extra = {}) {
   if (C.pending || C.secondary) return;
   const jobId = `${name}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -150,6 +155,7 @@ function run(name, extra = {}) {
 }
 function finish(res) {
   const p = C.pending; if (!p) return;
+  if (p.name === 'ruler' && res.ok) C.ruler[res.info.truth] = res.info.read;
   C.ack[p.name] = res; C.lastJob = p.name; C.pending = null;
   link.send({ type: 'resultAck', jobId: p.jobId, to: 'phone' });
   render();
@@ -195,7 +201,8 @@ function render() {
   $('#stages').querySelectorAll('.sg').forEach((e) => (e.onclick = () => { const i = +e.dataset.i; if (i <= C.step || C.done[i - 1]) goStep(i); }));
   const v = stepView();
   $('#title').textContent = `${C.step}. ${NAMES[C.step - 1]}`;
-  $('#why').textContent = v.why; $('#todo').textContent = v.todo;
+  $('#why').textContent = v.why; $('#todo').innerHTML = v.todo.split('\n').map((x) => `<div>${x}</div>`).join('');
+  $('#extra').innerHTML = C.step === 2 && C.diffimg ? `<div class="lbl">白と黒の差（iPadの画面がくっきり白く見えれば良い）</div><img src="${C.diffimg}" style="width:100%;border-radius:8px;border:1px solid var(--line)">` : '';
   $('#checks').innerHTML = v.checks.map((c) => `<li class="c-${c.state}"><b>${{ ok: '○', ng: '×', na: '−', warn: '△' }[c.state]}</b><span>${c.text}</span><span class="v">${c.value}</span></li>`).join('');
   $('#busy').textContent = busyText();
   $('#errs').innerHTML = C.errors.map((e) => `<div>${e.t}　${e.msg}</div>`).join('');
@@ -218,10 +225,13 @@ function renderNums() {
   const lk = s?.locks, lv = (x) => x ? `<span style="color:${/^固定した/.test(x) ? 'var(--ok)' : 'var(--warn)'}">${x}</span>` : '—（②で測る前に調べます）';
   $('#nums').innerHTML = (s ? row('ピント', lv(lk?.focusMode)) + row('露出（明るさ）', lv(lk?.exposureMode)) + row('色（ホワイトバランス）', lv(lk?.whiteBalanceMode))
       + row('映像の鮮明さ', s.sharp == null ? '—' : `${s.sharp.toFixed(0)}${s.sharp < 30 ? '<span style="color:var(--warn)">（ぼけている可能性：○ から離す）</span>' : ''}`)
-      + row('iPadの表示の返事', s.showMs == null ? '—' : `中央値 ${s.showMs.toFixed(0)} ms・時間切れ ${s.showTimeouts} 回`) : '')
+      + row('iPadの表示の返事', s.showMs == null ? '—' : `中央値 ${s.showMs.toFixed(0)} ms・時間切れ ${s.showTimeouts} 回`)
+      + row('表示が落ち着くまで', s.settleMs == null ? '—' : `中央値 ${s.settleMs.toFixed(0)} ms`)
+      + row('iPadのタッチ', C.touch && performance.now() - C.touch.at < 2000 && C.touch.on ? `触れている（○ から x ${C.touch.x.toFixed(1)}・y ${C.touch.y.toFixed(1)} mm）` : '触れていない')
+      + row('指の色', s.skin ? 'この人の色を覚えて使用中' : 'まだ（④で覚える）') : '')
     + (s ? row('カメラ', `${s.fps} fps・${s.W}×${s.H}`) + row('1フレームの処理', `${s.proc} ms`) + row('PC↔iPhone 往復', C.rtt != null ? `${C.rtt.toFixed(0)} ms` : '—') : '')
     + (ip ? row('iPadの画面', `${ip.Wmm.toFixed(0)} × ${ip.Hmm.toFixed(0)} mm`) + row('iPadの傾き（センサー）', ip.tilt != null ? `${ip.tilt.toFixed(1)}°` : '—') : '')
-    + (ci ? row('点のずれ', `${ci.rms.toFixed(2)} 画素（使えた点 ${ci.n}）`) + row('カメラまでの距離', `${(ci.dist / 10).toFixed(1)} cm`) + row('見下ろす角度', `${ci.elev.toFixed(1)}°`) + row('真横からのずれ', `${ci.side.toFixed(1)}°`) + row('焦点距離（画像幅比）', ci.fW.toFixed(3)) + row('指の面の解像度', `${ci.scale.toFixed(1)} px/mm`) : '')
+    + (ci ? row('点のずれ', `${ci.rms.toFixed(2)} 画素（使えた点 ${ci.n}）`) + row('カメラまでの距離', `${(ci.dist / 10).toFixed(1)} cm`) + row('見下ろす角度', `${ci.elev.toFixed(1)}°`) + row('真横からのずれ', `${ci.side.toFixed(1)}°`) + row('焦点距離（画像幅比）', `${ci.fW.toFixed(3)}（今回だけで求めた値 ${ci.focal.now.toFixed(3)}・保存 ${ci.focal.saved ? ci.focal.saved.toFixed(3) : 'まだ'}）`) + row('姿勢に使った点（○ から70mm以内）', `${ci.near}`) + row('指の面の解像度', `${ci.scale.toFixed(1)} px/mm`) : '')
     + (j ? row('第2関節の ○ からのずれ', `${j.pipOffsetMm.toFixed(1)} mm`) + row('中節の長さ / 太さ', `${j.LmMm.toFixed(1)} / ${j.diaMm.toFixed(1)} mm`) : '');
 }
 
@@ -243,13 +253,27 @@ function renderCam() {
 
 // ---------------- verification / settings ----------------
 function renderTools() {
-  const last = (k) => C.results.filter((r) => r.kind === k).slice(-1)[0], j = last('jitter'), l = last('latency');
+  const last = (k) => C.results.filter((r) => r.kind === k).slice(-1)[0], j = last('jitter'), l = last('latency'), sw = last('sweep');
+  const rul = Object.entries(C.ruler), rulOk = rul.filter(([t, r]) => Math.abs(r - t) <= 2).length;
   $('#tools').innerHTML = `
+    <div class="lbl">実機の記録（recordings フォルダに保存。直したときの確かめに使う）</div>
+    <div style="margin-top:4px"><button class="btn" id="tRec">${C.rec ? '記録を止める' : '記録を始める'}</button> <button class="btn" id="tRecF" ${C.rec ? '' : 'disabled'}>指を10秒記録</button> <a class="note" href="./replay.html" target="_blank">記録を再生して確かめる</a></div>
+    <div class="note">${C.rec ? `記録中：${C.rec}（②③の画像も保存されます）` : ''}</div>
+    <div class="lbl">本当の角度と比べる（三角定規かカードを ○ に立て、曲がる面に沿わせる）</div>
+    <div style="margin-top:4px">${[30, 45, 60, 90].map((t) => `<button class="btn tRul" data-t="${t}">${t}°</button>`).join(' ')}</div>
+    <div class="note">${rul.length ? rul.map(([t, r]) => `${t}° → 読み ${r.toFixed(1)}°（差 ${(r - t).toFixed(1)}°）`).join('　') + `　${rulOk >= 2 ? '<b style="color:var(--ok)">合格（2つ以上で差 2°以内）</b>' : '2つ以上の角度で差 2°以内なら合格'}` : 'まだ'}</div>
+    <div class="lbl">iPadの絵だけ動かす確認（手を ○ に置いたまま止める）</div>
+    <div style="margin-top:4px"><button class="btn" id="tSweep">確かめる（4秒）</button> ${sw ? (sw.error || `θp ±${sw.p.toFixed(2)}° / θd ±${sw.d.toFixed(2)}°（0.5°以下なら絵の影響なし）`) : ''}</div>
+    <div class="lbl">ほか</div>
     <div style="margin-top:8px"><button class="btn" id="tJit">揺れを測る（指を止めて3秒）</button> ${j ? (j.error || `θp ${j.p.toFixed(2)}° / θd ${j.d.toFixed(2)}°（目標 0.5°以下）`) : ''}</div>
     <div style="margin-top:8px"><button class="btn" id="tLat">遅れを測る（iPhoneをiPadの画面に向ける）</button> ${l ? (l.error || `往復 中央値 ${l.median.toFixed(0)} ms`) : ''}</div>
     <div style="margin-top:12px" class="note">iPadの画面の大きさ（カードを iPad に当てて枠と合わせる）</div>
     <div><button class="btn" id="tCard">枠を出す / 消す</button> <input type="range" id="tCardW" min="300" max="600" step="1" style="width:200px"></div>`;
   $('#tJit').onclick = () => toPhone('jitter');
+  $('#tRec').onclick = () => { C.rec = C.rec ? null : new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19); toPhone('rec', { on: !!C.rec, id: C.rec }); renderTools(); };
+  $('#tRecF').onclick = () => run('recFinger');
+  document.querySelectorAll('.tRul').forEach((b) => (b.onclick = () => run('ruler', { truth: +b.dataset.t })));
+  $('#tSweep').onclick = () => { C.sweeping = true; toIpad({ sweep: true }); toPhone('jitter'); };
   $('#tLat').onclick = measureLatency;
   let cardOn = false; $('#tCard').onclick = () => { cardOn = !cardOn; toIpad({ card: cardOn }); };
   const w = $('#tCardW'); w.value = C.ipad ? Math.round(85.6 / C.ipad.mmPerPx) : 445;
