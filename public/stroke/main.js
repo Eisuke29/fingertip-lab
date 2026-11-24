@@ -253,6 +253,7 @@ function placeCapsule(mesh, a, b, r = RF) {
   if (Math.abs(mesh.userData.len - len) > 1e-5) { mesh.geometry.dispose(); mesh.geometry = new THREE.CapsuleGeometry(r, len, 10, 28); mesh.userData.len = len; }
 }
 
+const vCap = new THREE.Mesh(new THREE.CircleGeometry(RF, 40), vMidMat); vCap.layers.set(L_VIRTUAL); vCap.visible = false; scene.add(vCap); // closes the finger where the glass cuts it
 // ---------- what is drawn instead of the finger (comparison conditions) ----------
 const stickMat = new THREE.MeshStandardMaterial({ color: 0xd8dcdf, roughness: 0.5, clippingPlanes: BELOW_GLASS });
 const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.0028, 0.0028, 1, 20), stickMat);
@@ -691,6 +692,7 @@ function frame(dt) {
   const need = surfY + RF - M.dent + TIP.bob * (0.4 + 0.6 * Math.min(2, gain)) - vR.y, k = cl(need / (u.y * hand.Lm + d.y * hand.Ld), 0.75, 1.35);
   const vDip = vR.clone().addScaledVector(u, hand.Lm * k), vTip = vDip.clone().addScaledVector(d, hand.Ld * k);
   placeCapsule(vMid, vR, vDip); placeCapsule(vDist, vDip, vTip);
+  { const c = vR.clone().addScaledVector(u, vR.y / Math.max(0.3, -u.y)); vCap.position.set(c.x, -0.00005, c.z); vCap.rotation.set(-Math.PI / 2, 0, Math.atan2(-u.z, u.x)); vCap.scale.set(Math.min(2, 1 / Math.max(0.3, -u.y)), 1, 1); vCap.visible = kind === 'finger'; }
   vMid.visible = vDist.visible = kind === 'finger'; stick.visible = kind === 'stick'; cursorMesh.visible = kind === 'cursor';
   let spheres;
   if (kind === 'stick') { const e = vTip.clone(); e.y -= RF - 0.0028; _ax.copy(e).sub(vR); stick.scale.y = _ax.length(); stick.position.copy(vR).addScaledVector(_ax, 0.5); stick.quaternion.setFromUnitVectors(UP, _ax.normalize()); spheres = [[e, 0.0028]]; }
