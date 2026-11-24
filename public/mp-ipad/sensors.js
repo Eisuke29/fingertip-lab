@@ -68,8 +68,8 @@ export class Point {
       this.id = c.id; this.last = c; this.t = this.tSeen = t; this.down = true; this.p = [c.x + this.off[0], c.y + this.off[1]]; return this.p;
     }
     const dt = Math.max(0.001, Math.min(0.1, (t - this.t) / 1000)), size = (k) => (k.rx || 0) + (k.ry || 0), dr = Math.abs(size(c) - size(this.last)), d = [c.x - this.last.x, c.y - this.last.y], e = [d[0] - this.v[0] * dt, d[1] - this.v[1] * dt], E = Math.hypot(...e);
-    if (dr > 0.15 && E > 0.2) { const keep = Math.min(E, dr * 0.8) / E; this.off = [this.off[0] - e[0] * keep, this.off[1] - e[1] * keep]; } // unexpected, and the area changed: at most as much as the area can explain
-    const L = Math.hypot(...this.off), back = dr > 0.15 ? 0 : Math.min(1, dt * 0.8 + (L > 0.01 ? 0.12 * Math.hypot(...d) / L : 0)); this.off = this.off.map((v) => v * (1 - back) * (L > 6 ? 6 / L : 1));
+    if (dr > 0.15 && E > 0.2) { const keep = Math.min(E, dr * 0.6) / E; this.off = [this.off[0] - e[0] * keep, this.off[1] - e[1] * keep]; } // unexpected, and the area changed: at most as much as the area can explain
+    const L = Math.hypot(...this.off), back = dr > 0.15 || L < 0.01 ? 0 : Math.min(1, 0.15 * Math.hypot(...d) / L); this.off = this.off.map((v) => v * (1 - back) * (L > 4 ? 4 / L : 1)); // nothing moves while the hand rests
     const p = [c.x + this.off[0], c.y + this.off[1]], f = 1 - Math.exp(-dt / 0.02); this.v = this.v.map((v, i) => v + ((p[i] - this.p[i]) / dt - v) * f);
     this.p = p; this.last = c; this.t = this.tSeen = t; return p;
   }
@@ -159,7 +159,7 @@ export async function makeEyes() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { ...(id === 'user' ? { facingMode: 'user' } : { deviceId: id }), width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
       this.video = document.createElement('video'); this.video.muted = true; this.video.playsInline = true; this.video.srcObject = stream; await this.video.play();
       if (!this.worker) {
-        this.status = '顔の認識モデルを読み込み中…'; const w = new Worker(new URL('./eye-worker.js?v=6', import.meta.url));
+        this.status = '顔の認識モデルを読み込み中…'; const w = new Worker(new URL('./eye-worker.js?v=8', import.meta.url));
         await new Promise((res, rej) => { const to = setTimeout(() => rej(new Error('顔の認識の準備が時間切れ')), 25000); w.onmessage = (e) => { if (e.data.type === 'ready') { clearTimeout(to); res(); } else if (e.data.type === 'error') { clearTimeout(to); rej(new Error(e.data.msg)); } }; w.onerror = (e) => { clearTimeout(to); rej(new Error(e.message || 'worker')); }; w.postMessage({ type: 'init' }); });
         this.worker = w; this.mode = 'worker';
       }
@@ -185,9 +185,10 @@ export async function makeEyes() {
 // The eye used for drawing: the measured one, held for a moment when the face is lost, then the default. Never jumps.
 export class Eye {
   constructor() { this.e = null; this.src = 'default'; }
-  update(measured, fallback, t) {
+  // hold: the face was lost: the last place is kept (the person may be looking from the side just then)
+  update(measured, fallback, t, hold = true) {
     if (measured) { this.last = measured; this.tLast = t; }
-    const held = this.last && t - this.tLast < 1500, target = measured || (held ? this.last : fallback);
+    const held = hold && !!this.last, target = measured || (held ? this.last : fallback);
     this.src = measured ? 'measured' : held ? 'held' : 'default';
     if (!this.e) { this.e = [...target]; this.t = t; return this.e; }
     const dt = Math.min(0.1, (t - this.t) / 1000); this.t = t;

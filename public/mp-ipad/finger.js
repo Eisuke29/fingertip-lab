@@ -9,14 +9,20 @@ export const DIPK = 0.67, REST = 2 * Math.PI / 180, REST_PIP = 6 * Math.PI / 180
 export const JOINTS = { mp: { h: 11, theta: 90, off: 12 }, pip: { h: 8.2, theta: 78, off: 12.5 },
   point: { h: 8.2, theta: 75, off: 0 } }; // point: only the PIP knuckle touches, so the joint is exactly at the middle of the contact
 
-// k: how fast the fingertip follows (1/s), hold: how far it sticks before slipping (mm), bump: grain height, drag: pull on the surface, dent: how deep it gives way
+// Surfaces to stroke. k: how fast the fingertip follows (1/s), hold: how far it sticks before slipping (mm), bump: grain height (f: how fine), drag: pull on the surface, dent: how deep it gives way. from: the study that used it
 export const MATS = {
-  smooth: { name: 'つるつる', k: 45, hold: 0, bump: 0, drag: 0, dent: 0.6, color: 0x8fb6ca, rough: 0.5 },
-  rough: { name: 'ざらざら', k: 20, hold: 3.5, bump: 1.3, drag: 0, dent: 0.4, color: 0xb5a17f, rough: 0.95 },
-  catchy: { name: '引っかかる', k: 15, hold: 16, bump: 0, drag: 0.35, dent: 1.8, color: 0x65a085, rough: 0.8 },
-  sticky: { name: 'ねばねば', k: 3, hold: 0, bump: 0, drag: 0.6, dent: 3.0, color: 0xa982ba, rough: 0.4 },
+  smooth: { name: 'つるつる', from: 'なめらかさ：VisualHaptics', k: 45, hold: 0, bump: 0, drag: 0, dent: 0.6 },
+  sand: { name: '細かいざらざら', from: '細かい粗さ：Touchy、宇治土公 2019', k: 24, hold: 1.6, bump: 0.55, f: 2.6, drag: 0, dent: 0.4 },
+  stone: { name: '粗いごつごつ', from: '粗さ：Touchy', k: 20, hold: 3.5, bump: 1.7, f: 0.75, drag: 0, dent: 0.4 },
+  knit: { name: '引っかかる', from: '引っかかる摩擦：Touchy（Stick）', k: 15, hold: 16, bump: 0, drag: 0.35, dent: 1.8 },
+  tape: { name: 'べたべた', from: 'べたべた：傳田 2024（ガムテープ）', k: 9, hold: 11, bump: 0, drag: 0.5, dent: 1.0 },
+  honey: { name: 'ねっとり', from: '流れる摩擦：Touchy（Slide）', k: 3, hold: 0, bump: 0, drag: 0.6, dent: 3.0 },
+  rubber: { name: 'ぷにぷに', from: '柔らかさ：Touchy（Compress）、Elastic Images', k: 26, hold: 8, bump: 0, drag: 0.95, dent: 5.5 },
+  fur: { name: 'ふわふわ', from: '先行研究は見つからず（新しい例）', k: 8, hold: 0, bump: 0, drag: 0.4, dent: 4.0 },
+  water: { name: 'みず', from: '先行研究は見つからず（新しい例）', k: 38, hold: 0, bump: 0, drag: 0, dent: 1.2 },
+  slime: { name: '', k: 20, hold: 0, bump: 0, drag: 0.5, dent: 2.2 },
 };
-export const grain = (x, y) => Math.max(0, Math.sin(x * 1.45) * Math.sin(y * 1.45));
+export const grain = (x, y, f = 1.45) => Math.max(0, Math.sin(x * f) * Math.sin(y * f));
 
 // yaw: which way the hand comes from (0 = straight from the person, + = from the right)
 export const toHand = (yaw) => [Math.sin(yaw), -Math.cos(yaw), 0];
@@ -68,13 +74,13 @@ function solvePoint({ root, theta, yaw, lag, gain = 1, ext = EXT, kind = 'finger
   const A = toHand(yaw), b = frame(theta, yaw, 0), d0 = frame(theta, yaw, -ext).m, L = len[2], dip = add(root, b.u, len[1]), air = floor != null, lo = air ? floor : surf + RF - PRESS - dent;
   if (kind !== 'finger') { const q = add(add(dip, d0, L), lag, gain), tip = [q[0], q[1], Math.max(lo, q[2])], d = norm(add(tip, root, -1)); return { base: { u: b.u, d: d0 }, u: d, d, pip: root, dip, tip, k: 1, eased: 1, bendDeg: 0 }; }
   let x = d0[0] * L + lag[0] * gain, y = d0[1] * L + lag[1] * gain; const want = Math.hypot(x, y), hi = surf + RF - 0.3;
-  const most = air ? 0.95 * L : Math.min(0.95 * L, Math.sqrt(Math.max(0, (L * STRETCH) ** 2 - (dip[2] - hi) ** 2))); // how far sideways it reaches and still touches
+  const most = air ? 0.95 * L : Math.min(0.95 * L, Math.sqrt(Math.max(0, L * L - (dip[2] - hi) ** 2))); // how far sideways it reaches and still touches
   if (want > most) { x *= most / want; y *= most / want; }
   let m = Math.hypot(x, y); const room = dip[2] - lo, need = Math.sqrt(Math.max(0, L * L - Math.max(0, room) ** 2)); // need: how flat it must lie to stay above lo
-  if (air && m < need) { // bent outward by what is under it, the way a fingertip gives
+  if (m < need) { // bent outward by what is under it, the way a fingertip gives
     const w = (need - m) / L, vx = x - A[0] * w * L * 1.4, vy = y - A[1] * w * L * 1.4, n = Math.hypot(vx, vy) || 1; x = vx / n * need; y = vy / n * need; m = need;
   }
-  let drop = Math.min(room, Math.sqrt(Math.max(0, L * L - m * m))); if (!air) drop = Math.max(drop, dip[2] - hi);
+  const drop = Math.sqrt(Math.max(0, L * L - m * m)); // the segment keeps its length
   const tip = [dip[0] + x, dip[1] + y, dip[2] - drop], d = norm(add(tip, dip, -1));
   return { base: { u: b.u, d: d0 }, u: b.u, d, pip: root, dip, tip, k: Math.hypot(x, y, drop) / L, eased: want > most ? most / want : 1, bendDeg: Math.acos(clamp(dot(d, d0), -1, 1)) * 180 / Math.PI };
 }
@@ -102,11 +108,3 @@ export class Tip {
 // where on the glass a point inside the screen is seen from the eye
 export const seenAt = (p, e) => { const q = e[2] / (e[2] - p[2]); return [e[0] + (p[0] - e[0]) * q, e[1] + (p[1] - e[1]) * q]; };
 
-// How much of the virtual finger is not hidden by the real one (0..1), when only the knuckle touches at c. Looking along the own finger one cannot
-// see its continuation: from straight in front nothing is left, with the iPad to the side of the body more than half.
-export function visible(theta, yaw, ext, len, eye, c = [0, 0]) {
-  const root = [c[0], c[1], JOINTS.point.h], f = frame(theta, yaw, 0), H = toHand(yaw), dip = add(root, f.u, len[1]), end = add(dip, frame(theta, yaw, -ext).m, len[2] + RF), r = [c[0], c[1], 9.6], mcp = add(r, f.up, len[0]), back = add(add(r, H, len[1]), [0, 0, 1], 5);
-  const mid = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t), gap = (p, q, a, b) => { let m = 1e9; for (let i = 0; i <= 16; i++) for (let j = 0; j <= 10; j++) { const x = mid(p, q, i / 16), y = mid(a, b, j / 10); m = Math.min(m, Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2])); } return m; };
-  let n = 0, N = 0; for (const [a, b] of [[root, dip], [dip, end]]) for (let i = 0; i < 10; i++) { const p = mid(a, b, (i + 0.5) / 10); if (p[2] > 0) continue; N++; const g = mid(p, eye, -p[2] / (eye[2] - p[2])), far = mid(g, eye, 0.25); if (gap(g, far, r, mcp) > 9.6 && gap(g, far, r, back) > 8.6) n++; }
-  return n / N;
-}

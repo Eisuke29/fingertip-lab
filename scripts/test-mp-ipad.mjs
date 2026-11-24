@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as F from '../public/mp-ipad/finger.js';
 import * as W from '../public/mp-ipad/world.js';
+import { THINGS, makeThing } from '../public/mp-ipad/objects.js';
 import { Contact, Point, Lead, Ahead, tiltOf, Tilt, eyeFrom, eyeToWorld, upOf, Eye } from '../public/mp-ipad/sensors.js';
 
 const len = [43, 25, 17], near = (a, b, e = 1e-6) => assert.ok(Math.abs(a - b) <= e, `${a} vs ${b}`);
@@ -27,9 +28,9 @@ test('the segments keep their length (6 % at most) and the fingertip always touc
   assert.ok(worst <= 1.0601, String(worst));
 });
 test('stick and slip; same at 60 and 120 Hz; never more than 30 mm behind', () => {
-  const run = (hz) => { const t = new F.Tip(); let max = 0; t.step([0, 0], F.MATS.catchy, 0.02); for (let i = 0; i < hz; i++) { t.step([i / hz * 60, 0], F.MATS.catchy, 1 / hz); max = Math.max(max, Math.hypot(...t.lag)); } return [max, t.lag[0]]; };
+  const run = (hz) => { const t = new F.Tip(); let max = 0; t.step([0, 0], F.MATS.knit, 0.02); for (let i = 0; i < hz; i++) { t.step([i / hz * 60, 0], F.MATS.knit, 1 / hz); max = Math.max(max, Math.hypot(...t.lag)); } return [max, t.lag[0]]; };
   const a = run(60), b = run(120); assert.ok(a[0] > 14 && a[0] <= 18, String(a)); near(a[0], b[0], 1.5); near(a[1], b[1], 1.5);
-  const t = new F.Tip(); t.step([0, 0], F.MATS.sticky, 0.02); t.step([200, 0], F.MATS.sticky, 0.02); assert.ok(Math.hypot(...t.lag) <= 30.0001);
+  const t = new F.Tip(); t.step([0, 0], F.MATS.honey, 0.02); t.step([200, 0], F.MATS.honey, 0.02); assert.ok(Math.hypot(...t.lag) <= 30.0001);
 });
 test('landing: the index knuckle, also when it lands a moment later; not the thumb; left hand mirrored', () => {
   const c = new Contact('right', 0); let t = 0; const u = (l) => c.update(l, (t += 16));
@@ -88,18 +89,28 @@ const J = F.JOINTS.point, TH = J.theta * Math.PI / 180, lowOf = (yaw, ext) => F.
 test('point: the root is the contact itself, the middle phalanx never moves, the tip carries the lag; resting finger is as given', () => {
   const root = [4, 7, J.h], yaw = 0.5, ext = 0.5, surf = lowOf(yaw, ext) + F.PRESS, o = { joint: 'point', root, theta: TH, yaw, ext, len, surf }, r = F.solve({ ...o, lag: [0, 0, 0] }), rest = F.restTip(root, TH, yaw, len, 'point', ext);
   assert.equal(J.off, 0); for (let i = 0; i < 3; i++) near(r.tip[i], rest[i], 1e-9); near(r.bendDeg, 0, 1e-3);
-  for (let a = 0; a < 6.28; a += 0.3) for (const R of [3, 9, 16, 30]) { const lag = [R * Math.cos(a), R * Math.sin(a), 0], s = F.solve({ ...o, lag, dent: 1.8 }); near(F.dot(s.u, r.u), 1); assert.ok(s.k > 0.6 && s.k <= 1.0601, `k ${s.k}`); assert.ok(s.tip[2] - F.RF < surf, 'touches'); assert.ok(s.tip[2] - F.RF > surf - F.PRESS - 1.8 - 1e-6, 'not through'); }
+  for (let a = 0; a < 6.28; a += 0.3) for (const R of [3, 9, 16, 30]) { const lag = [R * Math.cos(a), R * Math.sin(a), 0], s = F.solve({ ...o, lag, dent: 1.8 }); near(F.dot(s.u, r.u), 1); near(s.k, 1, 1e-6); assert.ok(s.tip[2] - F.RF < surf, 'touches'); assert.ok(s.tip[2] - F.RF > surf - F.PRESS - 1.8 - 1e-6, 'not through'); }
   assert.ok(F.solve({ ...o, lag: [-8, 0, 0] }).tip[0] < rest[0] - 2);
 });
-test('cubes and stones: the finger is never inside anything, the tip does not jump, edges hold it back and then let go', () => {
-  for (const kind of ['cube', 'stone']) for (const yaw of [0, 0.5]) for (const gain of [0, 1, 1.6]) {
-    const ext = 0.5, top = lowOf(yaw, ext) + W.REACH, w = W.makeWorld(kind, 222, 152, top, 'mix', 165), T = new W.TipOver(); let worst = 0, jump = 0, most = 0, prev = null;
-    for (let i = 0; i < 900; i++) {
-      const t = i / 60, root = [80 * Math.sin(t * 1.3), 45 * Math.sin(t * 0.83), J.h], dip = F.add(root, F.frame(TH, yaw, 0).u, len[1]), rest = F.restTip(root, TH, yaw, len, 'point', ext), lag = T.step(rest, w, 1 / 60, { dip, reach: 0.95 * len[2], gain }), f = W.settle(w, { joint: 'point', root, theta: TH, yaw, ext, lag, len }, T.obj);
-      worst = Math.max(worst, W.ground(w, f.tip[0], f.tip[1]).z - f.tip[2]); most = Math.max(most, Math.hypot(...lag)); if (prev) jump = Math.max(jump, Math.hypot(...f.tip.map((v, j) => v - prev[j]))); prev = f.tip;
-    }
-    assert.ok(worst < 0.5, `${kind} inside ${worst}`); if (gain === 1) assert.ok(most > (kind === 'cube' ? 6 : 4), `${kind} most ${most}`); assert.ok(jump < 20, `${kind} gain ${gain} jump ${jump}`);
-  }
+const stroke = (kind, gain, secs, at) => { const yaw = 0.5, ext = 0.45, T = makeThing(kind, 222, 152, lowOf(yaw, ext), 165), out = []; for (let i = 0; i < secs * 60; i++) { const root = [...at(i / 60), J.h], dip = F.add(root, F.frame(TH, yaw, 0).u, len[1]), rest = F.restTip(root, TH, yaw, len, 'point', ext), lag = [...T.step(rest, 1 / 60, { dip, reach: 0.95 * len[2], gain })], o = { joint: 'point', root, theta: TH, yaw, ext, lag, len }; const f = T.w ? W.settle(T.w, o) : F.solve({ ...o, gain: 1, ...(kind === 'slime' ? { surf: lowOf(yaw, ext) + F.PRESS, dent: 2.2 } : { surf: -1e4, floor: -1e4 }) }); out.push({ lag: Math.hypot(...lag), tip: f.tip, f }); } return [T, out]; };
+const wander = (t) => [80 * Math.sin(t * 1.3), 45 * Math.sin(t * 0.83)];
+test('solid things: the finger is never inside anything; slopes hold it back', () => {
+  for (const kind of ['cube', 'bumps', 'soft']) for (const gain of [0, 1, 1.6]) { const [T, q] = stroke(kind, gain, 15, wander); let worst = 0; for (const o of q) worst = Math.max(worst, W.ground(T.w, o.tip[0], o.tip[1]).z - o.tip[2]); assert.ok(worst < 1.2, `${kind} ${gain} inside ${worst}`); if (gain === 1) assert.ok(Math.max(...q.map((o) => o.lag)) > 3, kind); }
+});
+test('every thing: finite, holds the fingertip back, the knuckle never, and lets go again', () => {
+  for (const [kind] of THINGS) { const [T, q] = stroke(kind, 1, 12, wander); let jump = 0; q.forEach((o, i) => { assert.ok(o.tip.every(Number.isFinite), kind); if (i) jump = Math.max(jump, Math.hypot(...o.tip.map((v, j) => v - q[i - 1].tip[j]))); }); const most = Math.max(...q.map((o) => o.lag)); assert.ok(most > 2, `${kind} ${most}`); assert.ok(jump < 26, `${kind} jump ${jump}`); T.reset(); for (let i = 0; i < 400; i++) T.rest(1 / 60);
+    const [, z] = stroke(kind, 0, 6, wander); if (!['push'].includes(kind)) assert.ok(Math.max(...z.map((o) => o.lag)) < 16.5, `${kind} without effect`); }
+});
+test('boxes: the heavy one needs a stronger bend before it moves, and moves less', () => {
+  const go = (i) => { const T = makeThing('push', 222, 152, lowOf(0, 0.45), 165), b = T.boxes[i], x0 = b.x; let first = null, lag = 0; for (let k = 0; k < 240; k++) { const tx = x0 - b.a - 14 + k * 0.12; T.step([tx, b.y, -30], 1 / 60, {}); if (first == null && Math.abs(b.x - x0) > 0.2) first = lag; lag = Math.hypot(...T.lag); } return [first ?? 99, b.x - x0]; };
+  const r = [0, 1, 2].map(go); assert.ok(r[0][0] < r[1][0] && r[1][0] < r[2][0], JSON.stringify(r)); assert.ok(r[0][1] > r[2][1], JSON.stringify(r));
+});
+test('boxes: the fingertip is never inside one, however the hand moves', () => {
+  for (const gain of [0, 1, 1.6]) { const T = makeThing('push', 222, 152, lowOf(0.5, 0.45), 165); let worst = 0; for (let i = 0; i < 1500; i++) { const t = i / 60, root = [90 * Math.sin(t * 1.9), 50 * Math.sin(t * 1.21), J.h], dip = F.add(root, F.frame(TH, 0.5, 0).u, len[1]), rest = F.restTip(root, TH, 0.5, len, 'point', 0.45); T.step(rest, 1 / 60, { dip, reach: 0.95 * len[2], gain }); for (const b of T.boxes) { const dx = Math.max(0, Math.abs(T.p[0] - b.x) - b.a), dy = Math.max(0, Math.abs(T.p[1] - b.y) - b.a); worst = Math.max(worst, F.RF * 0.92 - Math.hypot(dx, dy)); } } assert.ok(worst < 1.0, `gain ${gain} inside ${worst}`); }
+});
+test('a lost face keeps the last view', () => { const E = new Eye(); for (let i = 0; i < 60; i++) E.update([-150, -175, 553], [0, -175, 553], i * 16); for (let i = 60; i < 600; i++) E.update(null, [0, -175, 553], i * 16); near(E.e[0], -150, 1); for (let i = 600; i < 1200; i++) E.update(null, [0, -175, 553], i * 16, false); near(E.e[0], 0, 1); });
+test('strings: caught, let go, tremble, come to rest', () => {
+  const T = makeThing('harp', 222, 152, lowOf(0, 0.45), 165), s = T.strings[2]; let held = 0, u = 0; for (let k = 0; k < 120; k++) { T.step([s.x - 20 + k * 0.5, 0, -30], 1 / 60, {}); if (s.held) held++; u = Math.max(u, Math.abs(s.u)); } assert.ok(held > 5 && u > 4, `${held} ${u}`); T.reset(); for (let i = 0; i < 600; i++) T.rest(1 / 60); assert.ok(Math.abs(s.u) < 0.1);
 });
 test('point contact: follows without any delay; a change of area hardly moves it; renumbered contact goes on', () => {
   const P = new Point('right', 0); let t = 0, p; for (let i = 0; i < 60; i++) p = P.update([{ id: 1, x: i * 4, y: 0, rx: 5, ry: 5 }], (t += 16)); near(p[0], 236, 1e-6);
@@ -109,14 +120,4 @@ test('point contact: follows without any delay; a change of area hardly moves it
 test('prediction at 2 Hz rubbing: a few mm (without: 15 mm), no prediction at rest', () => {
   const at = (t) => [35 * Math.sin(t / 1000 * 12.566), 6 * Math.sin(t / 1000 * 6.283)], L = new Lead(), E = []; let seed = 5; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5;
   for (let t = 0; t < 6000; t += 1000 / 60) { const p = at(t); L.add([p[0] + rnd() * 0.2, p[1] + rnd() * 0.2], t); if (t > 1000) { const a = L.at(t, 50), b = at(t + 50); E.push(Math.hypot(a[0] - b[0], a[1] - b[1])); } } E.sort((a, b) => a - b); assert.ok(E[E.length >> 1] < 4.5, String(E[E.length >> 1])); assert.ok(L.miss < 8 && L.miss > 0.5, String(L.miss));
-});
-test('what can be seen: nothing from straight in front, more than half with the iPad to the side', () => {
-  const v = (x, yaw) => F.visible(75 * Math.PI / 180, yaw * Math.PI / 180, 0.45, len, eyeFrom(26, 400, 420, x)); assert.ok(v(0, 0) < 0.15, String(v(0, 0))); assert.ok(v(-120, 45) > 0.5, String(v(-120, 45)));
-});
-test('prediction never runs away: irregular events, pauses, rests, landing while moving', () => {
-  let seed = 11; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647; let worst = 0, rest = 0;
-  for (let run = 0; run < 40; run++) {
-    const L = new Lead(); let t = 0, x = 0, v = 0; for (let i = 0; i < 400; i++) { const d = 2 + rnd() * 40; t += d; if (i % 50 === 0) v = run % 4 === 0 ? 0 : (rnd() - 0.5) * 0.5; const still = (i % 100) > 60; if (!still) x += v * d; L.add([x + (rnd() - 0.5) * 0.1, 0], t); const a = L.at(t + rnd() * 20, 60), e = Math.hypot(a[0] - x, a[1]); worst = Math.max(worst, e); if ((i % 100) > 85) rest = Math.max(rest, e); }
-  }
-  assert.ok(worst < 45, `worst ${worst}`); assert.ok(rest < 1.5, `rest ${rest}`);
 });

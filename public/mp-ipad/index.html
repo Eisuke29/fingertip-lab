@@ -22,15 +22,16 @@
   ul { list-style:none; margin:0; padding:0; display:flex; gap:26px; justify-content:center; font-size:15px; color:var(--mut); } li::before { content:"○ "; } li.ok { color:var(--ok); } li.ok::before { content:"● "; } li.ng { color:var(--warn); }
   #sMsg:empty { display:none; }
   /* while stroking nothing covers the picture: one round button; the tray opens from it */
-  #open { position:fixed; left:14px; bottom:14px; z-index:4; width:56px; height:56px; padding:0; border-radius:50%; background:var(--panel); display:grid; place-items:center; transition:opacity .25s; } body.left #open { left:auto; right:14px; } body.touching #open, body.touching #tray { opacity:.12; pointer-events:none; } body.touching #msg { opacity:0; }
-  #tray { position:fixed; left:14px; bottom:84px; z-index:4; width:380px; max-width:calc(100% - 28px); max-height:calc(100% - 110px); overflow:auto; background:var(--panel); border-radius:18px; padding:16px; transition:opacity .25s; touch-action:pan-y; } body.left #tray { left:auto; right:14px; }
+  body.touching #tray { opacity:.12; pointer-events:none; } body.touching #msg { opacity:0; }
+  #tray { position:fixed; left:14px; bottom:84px; z-index:4; width:420px; max-width:calc(100% - 28px); max-height:calc(100% - 110px); overflow:auto; background:var(--panel); border-radius:18px; padding:16px; transition:opacity .25s; touch-action:pan-y; } body.left #tray { left:auto; right:14px; }
   h2 { font-size:14px; font-weight:600; color:var(--mut); margin:18px 0 8px; } h2:first-child { margin-top:0; }
-  #place { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; } #place .btn { min-height:84px; padding:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; font-size:15px; } #place svg { width:36px; height:36px; }
-  #mats { display:grid; grid-template-columns:1fr 1fr; gap:8px; } #mats .btn { text-align:left; display:flex; align-items:center; gap:10px; padding:0 12px; font-size:15px; } #mats .btn i { width:22px; height:22px; border-radius:6px; flex:none; }
+  #group { margin-bottom:12px; } #group .btn { flex:1; }
+  .cards { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; } .cards .btn { min-height:96px; padding:8px 4px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; } .cards svg { width:34px; height:34px; } .cards i { width:34px; height:34px; border-radius:10px; } .cards b { font-size:15px; font-weight:600; line-height:1.3; } .cards small { font-size:11px; line-height:1.25; opacity:.72; }
+  #bar { position:fixed; left:14px; bottom:14px; z-index:4; display:flex; gap:8px; transition:opacity .25s; } body.left #bar { left:auto; right:14px; } #bar .btn { width:56px; height:56px; padding:0; border-radius:50%; background:var(--panel); display:grid; place-items:center; } #bar #cmp { width:auto; border-radius:28px; padding:0 18px; } #bar #cmp[aria-pressed=true] { background:var(--accent); } #now { align-self:center; padding:0 6px; font-weight:600; text-shadow:0 1px 4px #000; pointer-events:none; } body.touching #bar { opacity:.45; } #src { margin:10px 0 0; } #mode .btn { flex:1; }
   #tabs { position:sticky; top:-16px; background:rgb(20,22,26); padding:16px 0 10px; margin-top:-16px; z-index:1; } #tabs .btn { flex:1; padding:0 8px; font-size:15px; }
   label { display:block; font-weight:600; margin-top:14px; font-size:16px; } label span { float:right; color:var(--mut); font-variant-numeric:tabular-nums; } input[type=range] { width:100%; height:40px; margin:0; accent-color:var(--accent); }
   table { width:100%; border-collapse:collapse; font-size:14px; } td { padding:4px 0; border-bottom:1px solid var(--line); } td:last-child { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
-  #msg { position:fixed; left:50%; bottom:26px; transform:translateX(-50%); background:var(--panel); border-radius:14px; padding:10px 20px; font-weight:600; pointer-events:none; transition:opacity .2s; } #msg:empty { display:none; }
+  #msg { position:fixed; left:50%; top:26px; transform:translateX(-50%); background:var(--panel); border-radius:14px; padding:10px 20px; font-weight:600; pointer-events:none; transition:opacity .2s; } #msg:empty { display:none; }
   #rotate { position:fixed; inset:0; z-index:20; background:var(--bg); display:none; place-items:center; font-size:22px; font-weight:700; } @media (orientation:portrait) { #rotate { display:grid; } }
   /* fitting: one thing at a time, the slider for the free hand */
   #lx, #ly { position:fixed; left:0; top:0; display:none; background:#ff3b30; pointer-events:none; z-index:2; } #lx { width:2px; height:100%; margin-left:-1px; } #ly { height:2px; width:100%; margin-top:-1px; }
@@ -42,18 +43,20 @@
 <canvas id="scene"></canvas>
 <div id="lx"></div><div id="ly"></div>
 <div id="msg"></div>
-<button class="btn ui" id="open" aria-label="メニュー"><svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 8h18M4 18h18"/><circle cx="9" cy="8" r="3" fill="#14161a"/><circle cx="17" cy="18" r="3" fill="#14161a"/></svg></button>
+<div id="bar" class="ui"><button class="btn ui" id="open" aria-label="メニュー"><svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 8h18M4 18h18"/><circle cx="9" cy="8" r="3" fill="#14161a"/><circle cx="17" cy="18" r="3" fill="#14161a"/></svg></button><button class="btn ui" id="prev" aria-label="前へ"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4l-7 7 7 7"/></svg></button><button class="btn ui" id="next" aria-label="次へ"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4l7 7-7 7"/></svg></button><button class="btn ui" id="cmp" aria-pressed="false">感触 あり</button><span id="now"></span></div>
 <div id="tray" class="ui" hidden>
   <div id="quick">
-    <h2>場所</h2><div id="place"></div>
-    <h2>素材</h2><div id="mats"></div>
+    <h2>画面に付ける所</h2><div class="seg" id="mode"></div>
+    <h2>触るもの</h2>
+    <div class="seg" id="group"></div>
+    <div class="cards" id="things"></div><div class="cards" id="mats"></div><p id="src" class="mut"></p>
     <h2>感触の強さ</h2><div class="seg" id="power"></div>
     <div class="row" style="margin-top:18px"><button class="btn ui" id="fitGo" style="flex:1">自分の手に合わせる</button><button class="btn ui" id="more">細かい調整</button></div>
   </div>
   <div id="panel" hidden>
     <div class="seg" id="tabs"><button class="btn ui" data-t="hand">指</button><button class="btn ui" data-t="sync">遅れ</button><button class="btn ui" data-t="eye">目</button><button class="btn ui" data-t="data">記録</button><button class="btn ui" id="back">戻る</button></div>
     <section data-t="hand">
-      <h2>画面に付ける所</h2><div class="seg" id="mode"></div>
+      <h2>そのほかの付け方（質感だけ）</h2><div class="seg" id="mode2"></div>
       <h2>手</h2><div class="seg" id="hands"></div>
       <label>手が来る向き（右から） <span></span><input class="ui" id="yaw" type="range" min="-80" max="80" step="1" value="45" data-u="°"></label>
       <label><b id="thetaN" style="font-weight:600"></b> <span></span><input class="ui" id="theta" type="range" min="60" max="110" step="1" value="90" data-u="°"></label>
@@ -71,7 +74,7 @@
     <section data-t="sync" hidden>
       <label>遅れの先読み <span></span><input class="ui" id="lead" type="range" min="0" max="140" step="2" value="60" data-u=" ms"></label>
       <label>接触から関節まで <span></span><input class="ui" id="off" type="range" min="-5" max="35" step="0.5" value="0" data-u=" mm"></label><label>左右 <span></span><input class="ui" id="offx" type="range" min="-12" max="12" step="0.5" value="0" data-u=" mm"></label>
-      <label>動く向きへ付け根を寄せる <span></span><input class="ui" id="ahead" type="range" min="0" max="25" step="1" value="0" data-u=" mm"></label>
+      <label>付け根を広げて隠す（最大） <span></span><input class="ui" id="smear" type="range" min="0" max="7" step="0.5" value="2" data-u=" mm"></label><label>動く向きへ付け根を寄せる <span></span><input class="ui" id="ahead" type="range" min="0" max="25" step="1" value="0" data-u=" mm"></label>
     </section>
     <section data-t="eye" hidden>
       <h2>目の位置</h2><div class="seg" id="eyes"></div>
@@ -90,11 +93,11 @@
   <h1>なでる</h1>
   <p id="how"></p>
   <button class="btn primary" id="go">はじめる</button>
-  <ul><li id="cTilt"><span>傾き</span><span class="v" hidden></span></li><li id="cEye"><span>目の位置</span><span class="v" hidden></span></li><li id="cPlace"><span>置き場所</span><span class="v" hidden></span></li></ul>
+  <ul><li id="cTilt"><span>傾き</span><span class="v" hidden></span></li><li id="cEye"><span>目の位置</span><span class="v" hidden></span></li></ul>
   <div class="mut" id="sMsg">傾きセンサーとカメラの許可を聞かれたら［許可］。映像は外に送りません。</div>
   <button class="btn" id="noeye" hidden>カメラなしで始める</button>
 </div></div>
 <div id="rotate">iPadを横向きにしてください</div>
-<script type="module" src="./main.js?v=6"></script>
+<script type="module" src="./main.js?v=8"></script>
 </body>
 </html>
