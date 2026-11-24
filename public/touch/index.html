@@ -6,33 +6,41 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="タッチ推定">
 <meta name="theme-color" content="#15171c">
-<title>タッチでDIPの曲がりを推定</title>
+<title>タッチで動く仮想指</title>
 <style>
   :root { --bg:#15171c; --panel:#1e2229; --line:#343a45; --fg:#eef0f3; --mut:#9aa1ab; --accent:#5aa9ff; --ok:#3ecf8e; --warn:#f5b84b; --ng:#ff6b6b; }
   * { box-sizing:border-box; } [hidden] { display:none !important; }
   html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); overflow:hidden; overscroll-behavior:none; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; font:15px/1.5 system-ui,"Hiragino Sans","Yu Gothic UI",sans-serif; }
-  #pad { position:fixed; inset:0; width:100%; height:100%; display:block; }
-  #top { position:fixed; left:0; right:0; top:0; padding:14px 20px; display:flex; gap:16px; align-items:flex-start; pointer-events:none; }
-  #now { flex:1; font-size:26px; font-weight:800; line-height:1.3; min-height:68px; }
-  .bar { position:fixed; left:0; top:0; height:5px; width:0; background:var(--accent); }
-  .btn { font:inherit; font-weight:700; color:inherit; border:1px solid var(--line); background:var(--panel); padding:11px 18px; border-radius:10px; pointer-events:auto; }
+  #scene, #pad { position:fixed; inset:0; width:100%; height:100%; display:block; }
+  .card { background:rgba(21,23,28,.9); border-radius:12px; padding:10px 14px; }
+  #top { position:fixed; left:0; right:0; top:0; padding:14px 20px; display:flex; gap:12px; align-items:flex-start; pointer-events:none; }
+  #now { font-size:24px; font-weight:800; line-height:1.3; margin-right:auto; }
+  #now:empty { display:none; } #chip { font-size:18px; font-weight:800; font-variant-numeric:tabular-nums; margin-right:auto; }
+  .bar { position:fixed; left:0; top:0; height:5px; width:0; background:var(--accent); z-index:3; }
+  .btn { font:inherit; font-weight:700; color:inherit; border:1px solid var(--line); background:var(--panel); padding:11px 16px; border-radius:10px; pointer-events:auto; white-space:nowrap; }
   .btn.primary { background:var(--accent); border-color:var(--accent); color:#04203f; }
-  #left { position:fixed; left:20px; top:110px; width:280px; pointer-events:none; }
-  #left canvas { width:280px; height:200px; display:block; }
-  #est { font-size:54px; font-weight:800; line-height:1.1; font-variant-numeric:tabular-nums; } #est.ref { color:var(--mut); }
-  #right { position:fixed; right:20px; top:110px; width:300px; pointer-events:none; }
+  label.card { pointer-events:auto; font-weight:700; display:flex; align-items:center; gap:10px; white-space:nowrap; } input[type=range] { width:130px; height:24px; }
+  #left { position:fixed; left:20px; top:96px; width:328px; pointer-events:none; }
+  #left canvas { width:300px; height:270px; display:block; }
+  #right { position:fixed; right:20px; top:96px; width:310px; pointer-events:none; }
   table { width:100%; border-collapse:collapse; font-size:14px; } td { padding:2px 0; border-bottom:1px solid var(--line); } td:last-child { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
-  .mut { color:var(--mut); font-size:13px; } .big { font-size:20px; font-weight:800; margin-top:14px; } .yes { color:var(--ok); } .some,.mixed { color:var(--warn); } .no,.few { color:var(--ng); }
+  .mut { color:var(--mut); font-size:13px; } .big { font-size:17px; font-weight:800; margin-top:10px; } .yes { color:var(--ok); } .some { color:var(--warn); } .no { color:var(--ng); }
   #rotate { position:fixed; inset:0; z-index:20; background:var(--bg); display:none; place-items:center; font-size:22px; font-weight:700; }
   @media (orientation:portrait) { #rotate { display:grid; } }
 </style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.module.js" } }</script>
 </head>
 <body>
+<canvas id="scene"></canvas>
 <canvas id="pad"></canvas>
 <div class="bar" id="prog"></div>
-<div id="top"><div id="now"></div><button class="btn" id="share" hidden>記録を送る</button><button class="btn primary" id="go">キャリブレート（約1分）</button></div>
-<div id="left"><div id="lab" class="mut"></div><canvas id="fig" width="560" height="400"></canvas><div id="est"></div></div>
-<div id="right"><table id="vals"></table><div id="res"></div></div>
+<div id="top">
+  <div id="now" class="card"></div><div id="chip" class="card" hidden></div>
+  <label class="card ui" id="pipBox" hidden>第二関節 <output id="pipV">70°</output><input id="pip" class="ui" type="range" min="30" max="110" value="70"></label>
+  <button class="btn" id="info" hidden>数字を見る</button><button class="btn" id="share" hidden>記録を送る</button><button class="btn primary" id="go">キャリブレート（約2分）</button>
+</div>
+<div id="left" class="card" hidden><div class="mut">この動きに合わせる（横から見た指）</div><canvas id="fig" width="600" height="540"></canvas></div>
+<div id="right" class="card"><table id="vals"></table><div id="res"></div></div>
 <div id="rotate">iPadを横向きにしてください</div>
 <script type="module" src="./touch.js"></script>
 </body>
