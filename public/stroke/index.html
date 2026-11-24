@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>仮想指でなでる</title>
+<style>
+  :root { --bg:#ebe8e3; --ink:#1d2120; --sub:#6b726f; --ui:rgba(255,255,255,.9); --line:rgba(0,0,0,.08); --accent:#2f6f5b; --soft:rgba(0,0,0,.045); }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:13px/1.4 "Hiragino Sans","Noto Sans JP",system-ui,sans-serif; overflow:hidden; }
+  canvas { display:block; }
+  button { font:inherit; color:inherit; }
+  .card { background:var(--ui); backdrop-filter:blur(14px); border:1px solid var(--line); border-radius:16px; box-shadow:0 8px 28px rgba(0,0,0,.08); }
+
+  /* ---------- bottom dock ---------- */
+  #dock { position:fixed; left:16px; bottom:16px; padding:10px 14px 12px; display:flex; flex-direction:column; gap:10px; max-width:calc(100vw - 300px); box-sizing:border-box; }
+  #playrow { display:flex; align-items:center; gap:10px; }
+  #play { width:34px; height:34px; border-radius:50%; border:0; background:var(--ink); color:#fff; cursor:pointer; font-size:12px; flex:none; }
+  #scrub { flex:1; min-width:120px; accent-color:var(--accent); }
+  #time { font-variant-numeric:tabular-nums; width:3.4em; text-align:right; color:var(--sub); flex:none; }
+  #groups { display:flex; gap:18px; align-items:flex-end; }
+  .group { display:flex; flex-direction:column; gap:4px; flex:none; }
+  .group > label { font-size:11px; font-weight:600; letter-spacing:.06em; color:var(--sub); padding-left:4px; }
+  .seg { display:flex; gap:2px; background:var(--soft); border-radius:10px; padding:3px; }
+  .seg button { border:0; background:transparent; padding:6px 11px; border-radius:8px; cursor:pointer; white-space:nowrap; }
+  .seg button:hover { background:rgba(0,0,0,.05); }
+  .seg button.on { background:var(--ink); color:#fff; }
+  #faceBtn { border:1px solid var(--accent); color:var(--accent); background:#fff; border-radius:9px; padding:6px 10px; cursor:pointer; white-space:nowrap; margin-left:6px; }
+  #faceBtn.on { background:var(--accent); color:#fff; }
+  .row { display:flex; align-items:center; }
+  .switch { display:flex; align-items:center; gap:8px; cursor:pointer; padding:6px 4px; user-select:none; }
+  .switch i { width:34px; height:20px; border-radius:10px; background:rgba(0,0,0,.18); position:relative; transition:background .15s; flex:none; }
+  .switch i::after { content:""; position:absolute; left:2px; top:2px; width:16px; height:16px; border-radius:50%; background:#fff; transition:left .15s; box-shadow:0 1px 3px rgba(0,0,0,.2); }
+  .switch.on i { background:var(--accent); } .switch.on i::after { left:16px; }
+
+  /* ---------- right: controls ---------- */
+  #manual { position:fixed; right:16px; bottom:16px; width:250px; padding:12px 14px 14px; box-sizing:border-box; }
+  #manual .mhead { display:flex; justify-content:space-between; align-items:center; font-weight:700; min-height:26px; }
+  .seg.wrap { flex-wrap:wrap; } #manual .sec > label { margin-top:0; }
+  #manual .mhead button { border:0; background:var(--ink); color:#fff; border-radius:8px; padding:4px 10px; cursor:pointer; }
+  #manual .sec { margin-top:10px; padding-top:10px; border-top:1px solid var(--line); }
+  #manual label { display:flex; justify-content:space-between; margin:6px 0 2px; color:var(--sub); }
+  #manual label span { color:var(--ink); font-variant-numeric:tabular-nums; }
+  #manual input[type=range] { width:100%; accent-color:var(--accent); }
+  #manual .objrow { display:flex; justify-content:space-between; align-items:center; color:var(--sub); }
+  #manual .ends { display:flex; justify-content:space-between; font-size:11px; color:var(--sub); }
+  #manualToggle { display:none; }
+
+  /* ---------- top-left: angles + legend ---------- */
+  #hud { position:fixed; left:16px; top:16px; padding:10px 14px; display:flex; flex-direction:column; gap:8px; font:600 13px/1 "Hiragino Sans","Noto Sans JP",system-ui,sans-serif; color:#3a403e; pointer-events:none; }
+  #hud div { display:grid; grid-template-columns:48px 112px 48px; align-items:center; gap:8px; }
+  #hud span { color:var(--sub); letter-spacing:.04em; }
+  #hud em { display:block; height:4px; background:rgba(0,0,0,.08); border-radius:2px; overflow:hidden; }
+  #hud i { display:block; height:100%; }
+  #hud [data-k=lag] i { background:#4f8fe6; } #hud [data-k=bend] i { background:#f09a3e; }
+  #hud b { font-variant-numeric:tabular-nums; text-align:right; font-weight:600; }
+  #hud .legend { list-style:none; margin:2px 0 0; padding:7px 0 0; border-top:1px solid var(--line); display:flex; flex-direction:column; gap:4px; font-weight:500; font-size:12px; }
+  #hud .legend li { display:flex; align-items:center; gap:7px; }
+  #hud .legend s { width:10px; height:10px; border-radius:3px; display:inline-block; }
+
+  /* ---------- top-right: the 2D screen (canvas draws the image; this is the bezel + caption) ---------- */
+  #panel2d { position:fixed; border:9px solid #141618; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.18); cursor:zoom-in; }
+  #panel2d.big { cursor:zoom-out; box-shadow:0 0 0 100vmax rgba(235,232,227,.6), 0 10px 40px rgba(0,0,0,.25); }
+  #panel2d span { position:absolute; left:-9px; right:-9px; top:-32px; text-align:center; font:600 12px/1.2 "Hiragino Sans","Noto Sans JP",system-ui,sans-serif; color:#3a403e; background:var(--ui); border:1px solid var(--line); border-radius:8px; padding:5px 6px; }
+
+  #faceVideo { position:fixed; left:16px; bottom:16px; width:160px; border-radius:12px; transform:scaleX(-1); box-shadow:0 6px 20px rgba(0,0,0,.15); }
+  #faceMsg { position:fixed; left:50%; top:16px; transform:translateX(-50%); padding:8px 12px; }
+
+  /* capture (scripted video) / clean (no text at all) */
+  body.capture #dock, body.capture #manual, body.capture #manualToggle { display:none !important; }
+  body.capture #hud { transform:scale(2); transform-origin:0 0; left:36px; top:32px; }
+  body.capture #panel2d span { font-size:20px; top:-46px; }
+  body.clean #hud, body.clean #panel2d span { display:none !important; }
+
+  /* ---------- narrow screens ---------- */
+  @media (max-width: 760px) {
+    #dock { left:8px; right:8px; bottom:8px; max-width:none; padding:8px 10px 10px; }
+    #groups { flex-wrap:wrap; gap:8px 12px; } .seg button { padding:6px 9px; }
+    #hud { transform:scale(.82); transform-origin:0 0; left:8px; top:8px; } #hud .legend { display:none !important; }
+    #manualToggle { display:block; position:fixed; right:12px; top:10px; padding:6px 12px; cursor:pointer; }
+    #manual { left:8px; right:8px; width:auto; bottom:auto; top:52px; display:none; } #manual.open { display:block; }
+    #faceVideo { width:110px; bottom:auto; top:120px; }
+  }
+</style>
+</head>
+<body>
+<div id="hud" class="card">
+  <div data-k="lag"><span>遅れ</span><em><i></i></em><b>–</b></div>
+  <div data-k="bend"><span>しなり</span><em><i></i></em><b>–</b></div>
+  <ul class="legend">
+    <li><s style="background:#b9b9b7"></s>実際の手（指は曲げない）</li>
+    <li><s style="background:#4f8fe6"></s>基節 → 仮想の中節</li>
+    <li><s style="background:#f09a3e"></s>仮想の末節（しなる）</li>
+    <li><s style="background:#e0503a;border-radius:50%"></s>支点（PIP）</li>
+  </ul>
+</div>
+
+<div id="panel2d" title="クリックで拡大／縮小"><span>iPadに映る2D画面</span></div>
+
+<div id="dock" class="card">
+  <div id="playrow">
+    <button id="play" title="再生／停止">❚❚</button>
+    <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="時間">
+    <span id="time">0.0</span>
+  </div>
+  <div id="groups">
+    <div class="group"><label>視点</label>
+      <div class="seg" id="cams">
+        <button data-cam="auto" class="on">おまかせ</button>
+        <button data-cam="pov">体験者の目</button>
+        <button data-cam="side">横から</button>
+        <button data-cam="orbit">360°</button>
+      </div>
+    </div>
+    <div class="group"><label>見え方（Space）</label>
+      <div class="seg" id="views">
+        <button data-view="experience" class="on">実際</button>
+        <button data-view="structure">仕組み</button>
+      </div>
+    </div>
+    <div class="group"><label>画面の描き方</label>
+      <div class="row">
+        <div class="seg" id="smode">
+          <button data-mode="fixed" class="on" title="ふつうのタブレット：決めた目の位置で1枚の絵に決まる">固定</button>
+          <button data-mode="track" title="前面カメラで目の位置を測り、見ている位置に合わせて画面の絵を描き直す">視線追従</button>
+        </div>
+      </div>
+    </div>
+    <div class="group"><label>2D画面</label>
+      <div class="switch on" id="panelBtn" role="switch" aria-checked="true"><i></i><span>表示</span></div>
+    </div>
+  </div>
+</div>
+
+<button id="manualToggle" class="card">操作</button>
+<div id="manual" class="card">
+  <div class="mhead"><span id="mtitle">ドラッグで手が動く</span><button id="autoBtn" hidden>自動へ</button></div>
+  <div class="sec"><label>素材</label><div class="seg wrap" id="mats"></div></div>
+  <div class="sec"><label>画面の中に描くもの</label><div class="seg" id="kinds"><button data-kind="finger" class="on">指</button><button data-kind="stick">棒</button><button data-kind="cursor">カーソル</button></div></div>
+  <div class="sec"><label>左右の曲がり方</label><div class="seg" id="bends"><button data-bend="whole" class="on">全体がしなる</button><button data-bend="distal">末節だけ</button></div></div>
+  <div class="sec">
+    <label>しなりの誇張 <span id="gv"></span></label>
+    <input id="gain" type="range" min="0" max="2.5" step="0.1" value="1">
+    <label>手の角度（仮想指の向き） <span id="tpv"></span></label>
+    <input id="tp" type="range" min="60" max="100" step="1" value="78">
+  </div>
+</div>
+<script>document.getElementById('manualToggle').onclick = () => document.getElementById('manual').classList.toggle('open');</script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.0/examples/jsm/"
+} }
+</script>
+<script type="module" src="./main.js?v=20261124a"></script>
+</body>
+</html>
