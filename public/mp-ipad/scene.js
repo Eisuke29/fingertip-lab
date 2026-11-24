@@ -1,6 +1,7 @@
 // The picture: a box behind the glass, the material, the virtual finger. Drawn for one eye position (off-axis projection).
 import * as THREE from 'three';
-import { MATS, RF, grain } from './finger.js';
+import { MATS, RF, grain, toHand } from './finger.js?v=4';
+import { SkinFinger } from './skin.js?v=4';
 
 const V = (a) => new THREE.Vector3(a[0], a[1], a[2]), UP = new THREE.Vector3(0, 1, 0);
 const COL = { prox: 0x35a57a, mid: 0x4f8fe6, dist: 0xf09a3e };
@@ -24,6 +25,7 @@ export class Scene {
     const add = (g, m) => { const x = new THREE.Mesh(g, m); x.castShadow = true; x.visible = false; x.frustumCulled = false; this.scene.add(x); return x; };
     this.seg = [COL.prox, COL.mid, COL.dist].map((c) => add(new THREE.BufferGeometry(), mat(c)));
     this.cap = add(new THREE.CircleGeometry(RF, 40), new THREE.MeshStandardMaterial({ color: COL.prox, roughness: 0.55, transparent: true })); this.cap.castShadow = false; // closes the finger where the glass cuts it
+    this.skin = new SkinFinger(this.scene, clip);
     this.stick = add(new THREE.CylinderGeometry(2.6, 2.6, 1, 20), mat(0xe6e9ec)); this.cursor = add(new THREE.SphereGeometry(5, 28, 18), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 }));
     this.surfMat = new THREE.MeshStandardMaterial({ roughness: 0.7, map: gridTexture() });
     this.box = new THREE.Group(); this.scene.add(this.box); this.surfZ = -78; this.mat = null;
@@ -51,13 +53,13 @@ export class Scene {
   // the finger never goes into the material: the material gives way. spheres: [[x, y, z], r]
   deform(spheres, pull) {
     if (!spheres.length && !this.dirty && !this.was) return;
-    const p = this.surf.geometry.attributes.position.array, r0 = this.rest, M = MATS[this.mat], c = spheres[0]?.[0];
+    const p = this.surf.geometry.attributes.position.array, r0 = this.rest, M = MATS[this.mat], c = spheres[0]?.[0], deep = c ? Math.max(0, this.surfZ - (c[2] - spheres[0][1])) : 0;
     for (let i = 0; i < p.length; i += 3) {
       let x = r0[i], y = r0[i + 1], z = this.surfZ + (M.bump ? M.bump * grain(x, y) : 0);
       if (c) {
         const dx = x - c[0], dy = y - c[1], d2 = dx * dx + dy * dy;
         if (d2 < 2500) {
-          const q = Math.exp(-d2 / 242); x += pull[0] * M.drag * q; y += pull[1] * M.drag * q; z -= M.dent * q;
+          const q = Math.exp(-d2 / 242); x += pull[0] * M.drag * q; y += pull[1] * M.drag * q; z -= Math.min(M.dent, deep) * q;
           for (const [s, r] of spheres) { const ex = x - s[0], ey = y - s[1], e2 = ex * ex + ey * ey; if (e2 < r * r) z = Math.min(z, s[2] - Math.sqrt(r * r - e2) - 0.1); }
         }
       }
@@ -70,15 +72,16 @@ export class Scene {
     if (Math.abs((m.userData.L || 0) - L) > 0.1) { m.geometry.dispose(); m.geometry = new THREE.CapsuleGeometry(r, L, 8, 24); m.userData.L = L; }
   }
   // f: the solved finger (or null), kind: finger / stick / cursor
-  finger(f, kind, root, alpha, lag, joint = 'mp') {
-    const on = !!f; this.seg.forEach((m, i) => { m.visible = on && kind === 'finger' && (i > 0 || joint === 'mp'); }); this.cap.visible = on && kind !== 'cursor' && kind === 'finger'; this.stick.visible = on && kind === 'stick'; this.cursor.visible = on && kind === 'cursor';
+  finger(f, kind, root, alpha, lag, joint = 'mp', look = 'real', yaw = 0) {
+    const on = !!f, real = look === 'real'; this.skin.visible = on && kind === 'finger' && real; this.seg.forEach((m, i) => { m.visible = on && kind === 'finger' && !real && (i > 0 || joint === 'mp'); }); this.cap.visible = on && kind === 'finger' && !real; this.stick.visible = on && kind === 'stick'; this.cursor.visible = on && kind === 'cursor';
     if (!on) { this.spheres = []; this.deform([], [0, 0]); return; }
     for (const m of this.seg) m.material.opacity = alpha; this.cap.material.opacity = alpha;
     let sp;
     if (kind === 'finger') {
+      if (real) this.skin.update(joint === 'mp' ? [root, f.pip, f.dip, f.tip] : [root, f.dip, f.tip], joint, toHand(yaw), alpha); else {
       if (joint === 'mp') this.capsule(this.seg[0], root, f.pip, RF); this.cap.material.color.setHex(joint === 'mp' ? COL.prox : COL.mid);
       this.capsule(this.seg[1], f.pip, f.dip, RF * 0.975); this.capsule(this.seg[2], f.dip, f.tip, RF * 0.95); // a little thinner each: the joints do not flicker
-      const s = Math.max(0.3, -f.u[2]), cx = root[0] + f.u[0] * root[2] / s, cy = root[1] + f.u[1] * root[2] / s; this.cap.position.set(cx, cy, -0.05); this.cap.rotation.z = Math.atan2(f.u[1], f.u[0]); this.cap.scale.set(Math.min(2, 1 / s), 1, 1);
+      const s = Math.max(0.3, -f.u[2]), cx = root[0] + f.u[0] * root[2] / s, cy = root[1] + f.u[1] * root[2] / s; this.cap.position.set(cx, cy, -0.05); this.cap.rotation.z = Math.atan2(f.u[1], f.u[0]); this.cap.scale.set(Math.min(2, 1 / s), 1, 1); }
       sp = [[f.tip, RF]]; for (let i = 1; i <= 5; i++) sp.push([[0, 1, 2].map((j) => f.tip[j] + (f.dip[j] - f.tip[j]) * i / 5), RF]);
     } else if (kind === 'stick') {
       const e = [f.tip[0], f.tip[1], f.tip[2] - RF + 2.6], a = V(e).sub(V(root)); this.stick.scale.y = a.length(); this.stick.position.copy(V(root)).addScaledVector(a, 0.5); this.stick.quaternion.setFromUnitVectors(UP, a.normalize()); sp = [[e, 2.6]];

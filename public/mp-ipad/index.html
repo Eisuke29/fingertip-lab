@@ -45,7 +45,11 @@
   <h2>つなぎ目</h2>
   <label>接触から関節まで <span></span><input class="ui" id="off" type="range" min="-5" max="35" step="0.5" value="12" data-u=" mm"></label>
   <label>左右 <span></span><input class="ui" id="offx" type="range" min="-12" max="12" step="0.5" value="0" data-u=" mm"></label>
-  <label>指の長さ <span></span><input class="ui" id="len" type="range" min="80" max="120" step="1" value="100" data-u=" %"></label>
+  <h2>指</h2><div class="seg" id="looks"></div>
+  <label>肌の色 <span></span><input class="ui" id="tone" type="range" min="0" max="100" step="1" value="28" data-u=""></label>
+  <label>基節の長さ <span></span><input class="ui" id="l0" type="range" min="32" max="55" step="0.5" value="43" data-u=" mm"></label>
+  <label>中節の長さ <span></span><input class="ui" id="l1" type="range" min="18" max="34" step="0.5" value="25" data-u=" mm"></label>
+  <label>末節の長さ（指先まで） <span></span><input class="ui" id="l2" type="range" min="18" max="32" step="0.5" value="25" data-u=" mm"></label>
   <label>遅れの先読み <span></span><input class="ui" id="lead" type="range" min="0" max="120" step="5" value="60" data-u=" ms"></label>
   <label>動く向きへ付け根を寄せる <span></span><input class="ui" id="ahead" type="range" min="0" max="25" step="1" value="8" data-u=" mm"></label>
   <h2>手</h2><div class="seg" id="hands"></div>
@@ -71,6 +75,6 @@
   <div class="mut" id="sMsg">傾きセンサーと前面カメラの許可を聞かれたら［許可］を押してください。カメラの映像はこのiPadの中だけで使います。</div>
 </div></div>
 <div id="rotate">iPadを横向きにしてください</div>
-<script type="module" src="./main.js?v=3"></script>
+<script type="module" src="./main.js?v=4"></script>
 </body>
 </html>

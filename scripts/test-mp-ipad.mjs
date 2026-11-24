@@ -4,18 +4,26 @@ import assert from 'node:assert/strict';
 import * as F from '../public/mp-ipad/finger.js';
 import { Contact, Lead, Ahead, tiltOf, Tilt, eyeFrom, eyeToWorld, upOf, Eye } from '../public/mp-ipad/sensors.js';
 
-const len = [42, 25, 22], near = (a, b, e = 1e-6) => assert.ok(Math.abs(a - b) <= e, `${a} vs ${b}`);
+const len = [43, 25, 17], near = (a, b, e = 1e-6) => assert.ok(Math.abs(a - b) <= e, `${a} vs ${b}`);
 test('virtual proximal is the straight continuation of the back of the hand', () => {
   for (const th of [75, 90, 105]) for (const y of [-20, 0, 16]) { const f = F.frame(th * Math.PI / 180, y * Math.PI / 180, 0.4); near(F.dot(f.u, f.up), -1); near(F.dot(f.n, f.u), 0); near(Math.hypot(...f.m), 1); }
 });
-test('resting finger is straight, on the material, starting at the contact', () => {
-  const root = [10, 5, 11], z = F.restTip(root, Math.PI / 2, 0, len)[2], s = F.solve({ root, theta: Math.PI / 2, yaw: 0, lag: [0, 0, 0], len, tipZ: z });
+const surfOf = (root, th, j) => F.restTip(root, th, 0, len, j)[2] - F.RF + F.PRESS;
+test('resting finger is straight, pressed a little into the material, starting at the contact', () => {
+  const root = [10, 5, 11], s = F.solve({ root, theta: Math.PI / 2, yaw: 0, lag: [0, 0, 0], len, surf: surfOf(root, Math.PI / 2, 'mp') });
   near(s.k, 1, 1e-9); near(s.bendDeg, 0, 1e-4); assert.ok(Math.hypot(s.tip[0] - 10, s.tip[1] - 5) < 3);
 });
 test('the fingertip stays behind: leans to the side it lags, curls toward the person when pushed away', () => {
-  const o = { root: [0, 0, 11], theta: Math.PI / 2, yaw: 0, len, tipZ: -70 };
+  const root = [0, 0, 11], o = { root, theta: Math.PI / 2, yaw: 0, len, surf: surfOf(root, Math.PI / 2, 'mp') };
   assert.ok(F.solve({ ...o, lag: [-12, 0, 0] }).tip[0] < -5); assert.ok(F.solve({ ...o, lag: [12, 0, 0] }).tip[0] > 5); assert.ok(F.solve({ ...o, lag: [0, -12, 0] }).tip[1] < -5);
-  near(F.solve({ ...o, lag: [-12, 0, 0], gain: 0 }).bendDeg, 0, 1e-4); assert.ok(F.solve({ ...o, lag: [-12, 0, 0], gain: 2 }).bendDeg > F.solve({ ...o, lag: [-12, 0, 0] }).bendDeg);
+  near(F.solve({ ...o, lag: [-12, 0, 0], gain: 0 }).bendDeg, 0, 1e-4);
+});
+test('the segments keep their length (6 % at most) and the fingertip always touches and never goes through', () => {
+  let worst = 1; for (const joint of ['mp', 'pip']) for (const th0 of [60, 78, 90, 105]) for (const yaw of [-0.6, 0, 0.3]) for (const bend of ['whole', 'distal']) for (const gain of [0, 1, 2.5]) for (let i = 0; i < 24; i++) for (const R of [5, 16, 30]) {
+    const J = F.JOINTS[joint], root = [0, 0, J.h], lag = [R * Math.cos(i / 24 * 6.283), R * Math.sin(i / 24 * 6.283), 0], surf = surfOf(root, J.theta * Math.PI / 180, joint), s = F.solve({ joint, root, theta: th0 * Math.PI / 180, yaw, lag, gain, bend, len, surf, dent: 1.8 });
+    const D = (a, b) => Math.hypot(...a.map((v, j) => v - b[j])); near(D(s.dip, s.tip) / len[2], s.k, 1e-9); near(D(s.pip, s.dip) / len[1], s.k, 1e-9); if (Math.abs(th0 - J.theta) < 1) { worst = Math.max(worst, s.k, 1 / s.k); const depth = surf - (s.tip[2] - F.RF); assert.ok(depth > 0.25 && depth < F.PRESS + 1.8 + 0.1, `${joint} ${depth}`); }
+  }
+  assert.ok(worst <= 1.0601, String(worst));
 });
 test('stick and slip; same at 60 and 120 Hz; never more than 30 mm behind', () => {
   const run = (hz) => { const t = new F.Tip(); let max = 0; t.step([0, 0], F.MATS.catchy, 0.02); for (let i = 0; i < hz; i++) { t.step([i / hz * 60, 0], F.MATS.catchy, 1 / hz); max = Math.max(max, Math.hypot(...t.lag)); } return [max, t.lag[0]]; };
@@ -49,11 +57,11 @@ test('the root goes ahead in the direction of the movement, within the limit, an
   const A = new Ahead(); let b; for (let i = 0; i < 30; i++) b = A.step([300, 0], 8, 0.016); near(b[0], 8, 0.05); near(b[1], 0);
   for (let i = 0; i < 30; i++) b = A.step([0, -60], 8, 0.016); near(b[1], -4, 0.1); for (let i = 0; i < 60; i++) b = A.step([0, 0], 8, 0.016); assert.ok(Math.hypot(...b) < 0.1);
 });
-test('PIP: the middle phalanx keeps its line and length, only the distal one bends, the tip stays on the material', () => {
-  const j = F.JOINTS.pip, th = j.theta * Math.PI / 180, root = [0, 0, j.h], z = F.restTip(root, th, 0, len, 'pip')[2], o = { joint: 'pip', root, theta: th, yaw: 0, len, tipZ: z };
-  const r = F.solve({ ...o, lag: [0, 0, 0] }); near(r.k, 1, 1e-9); near(r.bendDeg, 0, 1e-4); near(F.dot(r.u, F.frame(th, 0, 0).up), -1);
-  for (const lag of [[-30, 0, 0], [30, 0, 0], [0, -30, 0], [0, 30, 0], [20, -20, 0]]) for (const gain of [0, 1, 2.5]) { const s = F.solve({ ...o, lag, gain }); for (let i = 0; i < 3; i++) { near(s.dip[i], r.dip[i]); } near(s.tip[2], z, 1e-6); assert.ok(gain === 0 || s.bendDeg > 10); }
-  assert.ok(F.solve({ ...o, lag: [-15, 0, 0] }).tip[0] < -8); assert.ok(F.solve({ ...o, lag: [0, -15, 0] }).tip[1] < r.tip[1] - 5);
+test('PIP: the middle phalanx keeps its line, only the distal one bends', () => {
+  const j = F.JOINTS.pip, th = j.theta * Math.PI / 180, root = [0, 0, j.h], o = { joint: 'pip', root, theta: th, yaw: 0, len, surf: surfOf(root, th, 'pip') }, r = F.solve({ ...o, lag: [0, 0, 0] });
+  near(r.k, 1, 1e-9); near(r.bendDeg, 0, 1e-4); near(F.dot(r.u, F.frame(th, 0, 0).up), -1);
+  for (const lag of [[-30, 0, 0], [30, 0, 0], [0, -30, 0], [0, 30, 0], [20, -20, 0]]) for (const gain of [1, 2.5]) { const s = F.solve({ ...o, lag, gain }); near(F.dot(s.u, r.u), 1); assert.ok(s.bendDeg > 10, String(s.bendDeg)); }
+  assert.ok(F.solve({ ...o, lag: [-15, 0, 0] }).tip[0] < -6); assert.ok(F.solve({ ...o, lag: [0, -15, 0] }).tip[1] < r.tip[1] - 4);
 });
 test('tilt: 26 degrees from any sign and way round', () => {
   const s = 9.81 * Math.sin(26 * Math.PI / 180), k = 9.81 * Math.cos(26 * Math.PI / 180);

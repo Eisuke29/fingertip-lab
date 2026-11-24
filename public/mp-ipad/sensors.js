@@ -10,7 +10,9 @@ export class Contact {
   // the index finger: first along the row of knuckles, among the contacts that are not much nearer to the person (thumb, palm)
   index(list) {
     const m = this.hand === 'right' ? 1 : -1, y = Math.abs(this.yaw) * m, c = Math.cos(y), s = Math.sin(y), q = list.map((k) => ({ k, along: (k.x * c + k.y * s) * m, far: -k.x * s + k.y * c })), top = Math.max(...q.map((o) => o.far));
-    return q.filter((o) => o.far > top - 25).reduce((a, b) => (b.along < a.along ? b : a)).k;
+    const first = q.filter((o) => o.far > top - 25).reduce((a, b) => (b.along < a.along ? b : a)).k, near = list.filter((k) => Math.hypot(k.x - first.x, k.y - first.y) < 12); // one finger may give several contacts: their middle
+    let A = 0, x = 0, y2 = 0; for (const k of near) { const w = Math.max(0.5, (k.rx || 1) * (k.ry || 1)); A += w; x += w * k.x; y2 += w * k.y; }
+    return { ...first, x: x / A, y: y2 / A };
   }
   land(list, t) { const f = this.index(list); this.p = [f.x, f.y]; this.id = f.id; this.size = Math.max(1, (f.rx || 0) + (f.ry || 0)); this.t0 = this.tN = t; this.v = [0, 0]; this.rej = null; this.keep(list, t, new Map()); return this.p; }
   keep(list, t, old) { this.prev = new Map(list.map((k) => [k.id, { x: k.x, y: k.y, r: (k.rx || 0) + (k.ry || 0), t0: old.get(k.id)?.t0 ?? t }])); if (list.length !== this.n) this.tN = t; this.n = list.length; this.tSeen = this.tLast = t; this.down = true; }

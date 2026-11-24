@@ -27,29 +27,35 @@ export function frame(theta, yaw, curl) {
   const dir = (a) => add([u[0] * Math.cos(a), u[1] * Math.cos(a), u[2] * Math.cos(a)], n, Math.sin(a));
   return { up, u, n, m: dir(curl), d: dir(curl * (1 + DIPK)) };
 }
-// lag: where the fingertip is, minus where it would be without friction (mm, in the plane of the glass)
-// PIP: the virtual middle phalanx is the straight continuation of the real proximal one and stays so; only the distal one bends.
-function solvePip({ root, theta, yaw, lag, gain = 1, kind = 'finger', len, tipZ }) {
-  const S = sideOf(yaw), H = toHand(yaw), lx = dot(lag, S) * gain, lz = dot(lag, H) * gain, F = kind === 'finger', lean = (v, a) => norm(add(v, S, Math.tan(a)));
-  const b = frame(theta, yaw, REST_PIP), base = { u: b.u, d: b.m }, b1 = F ? 0 : clamp(lx * 0.022, -0.7, 0.7), b2 = F ? clamp(lx * 0.044, -0.72, 0.72) : b1;
-  const u = lean(b.u, b1), d = F ? lean(frame(theta, yaw, clamp(REST_PIP + lz * 0.03, -0.35, 0.75)).m, b2) : u;
-  const need = tipZ - root[2], k = F ? clamp((need - u[2] * len[1]) / (d[2] * len[2]), 0.7, 1.8) : clamp(need / (u[2] * len[1] + d[2] * len[2]), 0.75, 1.35);
-  const dip = add(root, u, len[1] * (F ? 1 : k)), tip = add(dip, d, len[2] * k);
-  return { base, u, m: u, d, pip: root, dip, tip, k, bendDeg: Math.acos(clamp(dot(d, F ? base.d : base.u), -1, 1)) * 180 / Math.PI };
+// The segments keep their length (a real finger does not stretch): at rest the fingertip presses PRESS mm into the material, and when the
+// finger bends it comes up by as much. What is still missing is at most STRETCH; beyond that the finger bends less.
+export const PRESS = 2.5, STRETCH = 1.06;
+// lag: where the fingertip is, minus where it would be without friction (mm, in the plane of the glass). surf: height of the material
+// tip height allowed: from just touching to pressed in by PRESS + dent
+export function solve(o) {
+  const shape = o.joint === 'pip' ? shapePip : shapeMp, { root, len, surf, dent = 0 } = o, L = o.joint === 'pip' ? len.slice(1) : len;
+  let s = 1, q, k = 1, low = surf + RF - PRESS - dent - root[2], high = surf + RF - 0.3 - root[2];
+  for (let i = 0; i < 24; i++) {
+    q = shape(o, s); const z = q.dirs.reduce((t, d, j) => t + d[2] * L[j], 0); k = z > high ? high / z : z < low ? low / z : 1;
+    if (k <= STRETCH || s < 0.05) break; s *= 0.86;
+  }
+  k = clamp(k, 0.85, STRETCH); const P = [root]; q.dirs.forEach((d, j) => P.push(add(P[j], d, L[j] * k)));
+  const n = P.length, d = q.dirs[n - 2], F = o.kind !== 'stick' && o.kind !== 'cursor';
+  return { base: q.base, u: q.dirs[0], d, pip: o.joint === 'pip' ? root : P[1], dip: P[n - 2], tip: P[n - 1], k, eased: s, bendDeg: Math.acos(clamp(dot(d, F ? q.base.d : q.base.u), -1, 1)) * 180 / Math.PI };
 }
-export function solve(o) { return o.joint === 'pip' ? solvePip(o) : solveMp(o); }
-function solveMp({ root, theta, yaw, lag, gain = 1, bend = 'whole', kind = 'finger', len, tipZ }) {
-  const S = sideOf(yaw), H = toHand(yaw), lx = dot(lag, S) * gain, lz = dot(lag, H) * gain, F = kind === 'finger', whole = bend === 'whole';
-  const base = frame(theta, yaw, REST);
+const lean = (v, S, a) => norm(add(v, S, Math.tan(a)));
+function shapeMp({ theta, yaw, lag, gain = 1, bend = 'whole', kind = 'finger' }, s) {
+  const S = sideOf(yaw), H = toHand(yaw), lx = dot(lag, S) * gain * s, lz = dot(lag, H) * gain * s, F = kind === 'finger', whole = bend === 'whole', base = frame(theta, yaw, REST);
   const b1 = F ? (whole ? clamp(lx * 0.016, -0.6, 0.6) : 0) : clamp(lx * 0.022, -0.7, 0.7), b2 = F ? clamp(lx * 0.044, -1.2, 1.2) : b1; // sideways
   const p1 = whole ? clamp(lz * 0.009, -0.3, 0.3) : 0, flex = clamp(REST + lz * 0.022, -0.35, 1.2);                                  // along the finger
-  const fr = frame(theta + p1, yaw, F ? flex : 0), lean = (v, a) => norm(add(v, S, Math.tan(a)));
-  const u = lean(fr.u, b1), m = F ? lean(fr.m, whole ? (b1 + b2) / 2 : 0) : u, d = F ? lean(fr.d, b2) : u;
-  // tipZ: depth the centre of the fingertip must have so that it lies on the material
-  const k = clamp((tipZ - root[2]) / (u[2] * len[0] + m[2] * len[1] + d[2] * len[2]), 0.75, 1.35);
-  const pip = add(root, u, len[0] * k), dip = add(pip, m, len[1] * k), tip = add(dip, d, len[2] * k);
-  const bendDeg = Math.acos(clamp(dot(d, F ? base.d : base.u), -1, 1)) * 180 / Math.PI;
-  return { base, u, m, d, pip, dip, tip, k, bendDeg };
+  const fr = frame(theta + p1, yaw, F ? flex : 0), u = lean(fr.u, S, b1);
+  return { base, dirs: F ? [u, lean(fr.m, S, whole ? (b1 + b2) / 2 : 0), lean(fr.d, S, b2)] : [u, u, u] };
+}
+// PIP: the virtual middle phalanx is the straight continuation of the real proximal one and stays so; only the distal one bends.
+function shapePip({ theta, yaw, lag, gain = 1, kind = 'finger' }, s) {
+  const S = sideOf(yaw), H = toHand(yaw), lx = dot(lag, S) * gain * s, lz = dot(lag, H) * gain * s, F = kind === 'finger', b = frame(theta, yaw, REST_PIP);
+  const b1 = F ? 0 : clamp(lx * 0.022, -0.7, 0.7), b2 = F ? clamp(lx * 0.044, -0.9, 0.9) : b1, u = lean(b.u, S, b1);
+  return { base: { u: b.u, d: b.m }, dirs: [u, F ? lean(frame(theta, yaw, clamp(REST_PIP + lz * 0.03, -0.45, 0.9)).m, S, b2) : u] };
 }
 export function restTip(root, theta, yaw, len, joint = 'mp') { if (joint === 'pip') { const f = frame(theta, yaw, REST_PIP); return add(add(root, f.u, len[1]), f.m, len[2]); } const f = frame(theta, yaw, REST); return add(add(add(root, f.u, len[0]), f.m, len[1]), f.d, len[2]); }
 
