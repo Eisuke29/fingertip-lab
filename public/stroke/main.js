@@ -316,7 +316,7 @@ const pivotDot = new THREE.Mesh(new THREE.SphereGeometry(0.0022, 20, 12), new TH
 pivotDot.renderOrder = 11; scene.add(pivotDot);
 
 const THP0 = 78, THD = 20 * DEG;   // (used to set the height of the hand)
-const REAL_FIST = 62 * DEG, VTHD = 2 * DEG;   // the real finger stays closed in the fist; the virtual finger is straight, in the same line as before
+const REAL_FIST = 62 * DEG, VTHD = 6 * DEG;   // the real finger stays closed in the fist; the virtual finger is straight, in the same line as before
 
 // ---------- geometry of the finger (shared real / virtual) ----------
 function fingerFrame(thp, thd) {
@@ -684,14 +684,14 @@ function frame(dt) {
   const lx = TIP.lag.dot(SIDE_DIR) * gain, lz = TIP.lag.dot(H) * gain;
   // sideways: leans after the fingertip that stayed behind. Along the finger: the DIP bends (or stretches).
   const whole = bendMode === 'whole', cl = THREE.MathUtils.clamp;
-  const b1 = kind === 'finger' ? (whole ? cl(lx * 16, -0.6, 0.6) : 0) : cl(lx * 22, -0.7, 0.7), b2 = kind === 'finger' ? cl(lx * 44, -1.2, 1.2) : b1;
-  const p1 = whole ? cl(lz * 9, -0.3, 0.3) : 0, flex = cl(VTHD + lz * 30, -0.35, 1.25);
+  const F = kind === 'finger', b1 = F ? 0 : cl(lx * 22, -0.7, 0.7), b2 = F ? cl(lx * 44, -0.72, 0.72) : b1; // the first segment stays in line with the real one; only what is beyond it bends
+  const p1 = 0, flex = cl(VTHD + lz * 30, -0.35, 0.75);
   const fr = fingerFrame(thp + p1, kind === 'finger' ? flex : 0);
   const u = fr.u.clone().addScaledVector(SIDE_DIR, Math.tan(b1)).normalize(), d = kind === 'finger' ? fr.dDir.clone().addScaledVector(SIDE_DIR, Math.tan(b2)).normalize() : u.clone();
   // the fingertip stays on the material (it rides up the grains and sinks in by the dent)
   const bumpH = M.bump ? M.bump * grain(TIP.x, TIP.z) : 0; TIP.bob += (bumpH - TIP.bob) * Math.min(1, dt * 40);
-  const need = surfY + RF - M.dent + TIP.bob * (0.4 + 0.6 * Math.min(2, gain)) - vR.y, k = cl(need / (u.y * hand.Lm + d.y * hand.Ld), 0.75, 1.35);
-  const vDip = vR.clone().addScaledVector(u, hand.Lm * k), vTip = vDip.clone().addScaledVector(d, hand.Ld * k);
+  const need = surfY + RF - M.dent + TIP.bob * (0.4 + 0.6 * Math.min(2, gain)) - vR.y, k = F ? cl((need - u.y * hand.Lm) / (d.y * hand.Ld), 0.7, 1.8) : cl(need / (u.y * hand.Lm + d.y * hand.Ld), 0.75, 1.35);
+  const vDip = vR.clone().addScaledVector(u, hand.Lm * (F ? 1 : k)), vTip = vDip.clone().addScaledVector(d, hand.Ld * k);
   placeCapsule(vMid, vR, vDip); placeCapsule(vDist, vDip, vTip, RF * 0.95);
   { const c = vR.clone().addScaledVector(u, vR.y / Math.max(0.3, -u.y)); vCap.position.set(c.x, -0.00005, c.z); vCap.rotation.set(-Math.PI / 2, 0, Math.atan2(-u.z, u.x)); vCap.scale.set(Math.min(2, 1 / Math.max(0.3, -u.y)), 1, 1); vCap.visible = kind === 'finger'; }
   vMid.visible = vDist.visible = kind === 'finger'; stick.visible = kind === 'stick'; cursorMesh.visible = kind === 'cursor';
@@ -706,7 +706,7 @@ function frame(dt) {
   TIP.bend = d.angleTo(kind === 'finger' ? base.dDir : base.u) / DEG;
   const set = (key, text, w) => { const e = document.querySelector(`#hud [data-k=${key}]`); e.querySelector('b').textContent = text; e.querySelector('i').style.width = `${Math.min(100, w)}%`; };
   set('lag', `${(TIP.lag.length() * 1000).toFixed(0)} mm`, TIP.lag.length() / 0.03 * 100); set('bend', `${(kind === 'cursor' ? 0 : TIP.bend).toFixed(0)}°`, kind === 'cursor' ? 0 : TIP.bend / 80 * 100);
-  TIP.out = { vR, vDip, vTip, k, spheres };
+  TIP.out = { base, u, surfGap: vTip.y - RF - need - vR.y + RF, vR, vDip, vTip, k, spheres };
 }
 
 function renderScreen(rt, eye) { updateScreenCamera(eye); renderer.setRenderTarget(rt); renderer.render(scene, screenCam); }
