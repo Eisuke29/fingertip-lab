@@ -1,15 +1,15 @@
 // Stroking on the iPad itself. The hand is a fist; MP: the back of the index finger's proximal phalanx is on the glass, PIP: the back of its middle phalanx. Only the hand slides.
 // touch -> where the knuckle is, motion sensor -> how the iPad stands, front camera -> where the eyes are. No server, no PC.
-import { Contact, Lead, Tilt, Eye, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=2';
-import { MATS, JOINTS, RF, Tip, solve, restTip, grain, seenAt, add, toHand, sideOf } from './finger.js?v=2';
-import { Scene } from './scene.js?v=2';
+import { Contact, Lead, Ahead, Tilt, Eye, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=3';
+import { MATS, JOINTS, RF, Tip, solve, restTip, grain, seenAt, add, toHand, sideOf } from './finger.js?v=3';
+import { Scene } from './scene.js?v=3';
 
 const $ = (s) => document.querySelector(s), now = () => performance.now(), rad = (d) => d * Math.PI / 180, val = (id) => +$(id).value;
 const MM = 0.1924, LEN = [42, 25, 22], STORE = 'mpIpad.v1'; // mm per CSS px (264 ppi iPads); phalanges
 const O = { mat: 'catchy', kind: 'finger', bend: 'whole', hand: 'right', eye: 'track', cam: 'top', joint: 'mp' };
 const saved = (() => { try { return JSON.parse(localStorage.getItem(STORE) || '{}'); } catch { return {}; } })();
 const S = { started: false, ready: false, raw: [], cancels: 0, root: null, contact: new Contact(), tilt: new Tilt(), eye: new Eye(), eyes: null, zScale: saved.zScale || 1, tip: new Tip(), bob: 0, f: null, fps: 0, rec: null, err: '' };
-const lead = new Lead();
+const lead = new Lead(), ahead = new Ahead();
 const landscape = () => innerWidth > innerHeight;
 
 // ---------- touch ----------
@@ -113,10 +113,10 @@ let scene = null, last = now();
 function finger(dt, t) {
   if (t - (S.tEvent || 0) > 40) sense(); // no news: the hand rests (or has gone)
   const p = S.contact.p, yaw = rad(val('#yaw')), theta = rad(val('#theta')), len = LEN.map((l) => l * val('#len') / 100), M = MATS[O.mat], J = JOINTS[O.joint];
-  if (!p) { S.root = null; S.f = null; S.tip.reset(); lead.reset(); return; }
-  const at = S.contact.down && lead.at(t, val('#lead')) || p, gap = S.at && S.root ? Math.hypot(at[0] - S.at[0], at[1] - S.at[1]) : 0, [x, y] = S.contact.down || !S.root ? at : S.at; S.at = [x, y]; S.step = gap;
+  if (!p) { S.root = null; S.f = null; S.tip.reset(); lead.reset(); ahead.reset(); return; }
+  const at = S.contact.down && lead.at(t, val('#lead')) || p, gap = S.at && S.root ? Math.hypot(at[0] - S.at[0], at[1] - S.at[1]) : 0, [x, y] = S.contact.down || !S.root ? at : S.at; S.at = [x, y]; S.step = gap; const A = ahead.step(S.contact.down ? lead.vel : [0, 0], val('#ahead'), dt);
   // from the middle of the contact to the joint: away from the hand, along the phalanx on the glass
-  const H = toHand(yaw), side = sideOf(yaw); S.root = add(add([x, y, J.h], H, -val('#off')), side, val('#offx'));
+  const H = toHand(yaw), side = sideOf(yaw); S.root = add(add([x + A[0], y + A[1], J.h], H, -val('#off')), side, val('#offx'));
   const rest = restTip(S.root, theta, yaw, len, O.joint); scene.setDepth(restTip([0, 0, J.h], rad(J.theta), yaw, len, O.joint)[2] - RF);
   const lag = S.tip.step(rest, M, dt), h = M.bump ? M.bump * grain(S.tip.p[0], S.tip.p[1]) : 0; S.bob += (h - S.bob) * Math.min(1, dt * 40);
   const g = val('#gain'), tipZ = scene.surfZ + RF - M.dent + S.bob * (0.4 + 0.6 * Math.min(2, g));

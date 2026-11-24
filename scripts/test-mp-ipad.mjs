@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as F from '../public/mp-ipad/finger.js';
-import { Contact, Lead, tiltOf, Tilt, eyeFrom, eyeToWorld, upOf, Eye } from '../public/mp-ipad/sensors.js';
+import { Contact, Lead, Ahead, tiltOf, Tilt, eyeFrom, eyeToWorld, upOf, Eye } from '../public/mp-ipad/sensors.js';
 
 const len = [42, 25, 22], near = (a, b, e = 1e-6) => assert.ok(Math.abs(a - b) <= e, `${a} vs ${b}`);
 test('virtual proximal is the straight continuation of the back of the hand', () => {
@@ -44,6 +44,10 @@ test('contacts split, merged, renumbered, lost: the place follows the hand witho
 test('prediction: the remaining delay is small at stroking speed, still hand does not tremble, stopping does not shoot far', () => {
   const L = new Lead(), at = (t) => [45 * Math.sin(t / 1000 * 3), 0]; let e = 0; for (let t = 0; t < 4000; t += 8) { L.add(at(t), t); if (t > 100) e = Math.max(e, Math.abs(L.at(t + 5, 45)[0] - at(t + 50)[0])); } assert.ok(e < 3, String(e)); // without prediction 6.7 mm
   const S = new Lead(); let seed = 3, lo = 9, hi = -9; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647; for (let t = 0; t < 2000; t += 8) { S.add([(rnd() - 0.5) * 0.3, 0], t); if (t > 100) { const x = S.at(t, 45)[0]; lo = Math.min(lo, x); hi = Math.max(hi, x); } } assert.ok(hi - lo < 0.7, String(hi - lo));
+});
+test('the root goes ahead in the direction of the movement, within the limit, and comes back at rest', () => {
+  const A = new Ahead(); let b; for (let i = 0; i < 30; i++) b = A.step([300, 0], 8, 0.016); near(b[0], 8, 0.05); near(b[1], 0);
+  for (let i = 0; i < 30; i++) b = A.step([0, -60], 8, 0.016); near(b[1], -4, 0.1); for (let i = 0; i < 60; i++) b = A.step([0, 0], 8, 0.016); assert.ok(Math.hypot(...b) < 0.1);
 });
 test('PIP: the middle phalanx keeps its line and length, only the distal one bends, the tip stays on the material', () => {
   const j = F.JOINTS.pip, th = j.theta * Math.PI / 180, root = [0, 0, j.h], z = F.restTip(root, th, 0, len, 'pip')[2], o = { joint: 'pip', root, theta: th, yaw: 0, len, tipZ: z };

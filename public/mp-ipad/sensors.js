@@ -54,16 +54,26 @@ const median = (q, i) => { const a = [...q].sort((x, y) => x.d[i] - y.d[i]), h =
 // The touch panel, the browser and the display together show everything some 50 ms late. Where the hand will be then is
 // predicted from its speed over the last moments. Slow: smoothed and not predicted (no trembling). Fast: predicted and not smoothed.
 export class Lead {
-  constructor() { this.q = []; }
-  reset() { this.q = []; }
+  constructor() { this.q = []; this.vel = [0, 0]; this.speed = 0; }
+  reset() { this.q = []; this.vel = [0, 0]; this.speed = 0; }
   add(p, t) { const l = this.q[this.q.length - 1]; if (l && t - l.t < 1) { l.x = p[0]; l.y = p[1]; return; } this.q.push({ x: p[0], y: p[1], t }); while (this.q.length > 2 && t - this.q[0].t > 55) this.q.shift(); }
   at(now, lead) {
-    const q = this.q, n = q.length; if (!n) return null; const l = q[n - 1]; if (n < 3 || l.t - q[0].t < 12) return [l.x, l.y];
+    const q = this.q, n = q.length; if (!n) return null; const l = q[n - 1]; if (n < 3 || l.t - q[0].t < 12) { this.vel = [0, 0]; return [l.x, l.y]; }
     let mt = 0, mx = 0, my = 0; for (const k of q) { mt += k.t / n; mx += k.x / n; my += k.y / n; }
     let a = 0, bx = 0, by = 0; for (const k of q) { const d = k.t - mt; a += d * d; bx += d * (k.x - mx); by += d * (k.y - my); }
     const vx = bx / a, vy = by / a, sp = Math.hypot(vx, vy) * 1000, g = Math.max(0, Math.min(1, (sp - 8) / 30)), f = g * g * (3 - 2 * g), fx = mx + vx * (l.t - mt), fy = my + vy * (l.t - mt);
-    const T = (Math.max(0, Math.min(40, now - l.t)) + lead) * f; this.speed = sp;
+    const T = (Math.max(0, Math.min(40, now - l.t)) + lead) * f; this.speed = sp; this.vel = [vx * 1000 * f, vy * 1000 * f];
     return [fx + (l.x - fx) * f + vx * T, fy + (l.y - fy) * f + vy * T];
+  }
+}
+
+// The root is drawn a little ahead, in the direction of the movement, so that it stays under the hand. max: mm at 120 mm/s and more.
+export class Ahead {
+  constructor() { this.b = [0, 0]; }
+  reset() { this.b = [0, 0]; }
+  step(vel, max, dt) {
+    const s = Math.hypot(...vel), k = s > 1 ? max * Math.min(1, s / 120) / s : 0, to = [vel[0] * k, vel[1] * k];
+    const f = 1 - Math.exp(-dt / (Math.hypot(...to) > Math.hypot(...this.b) ? 0.04 : 0.1)); this.b = this.b.map((v, i) => v + (to[i] - v) * f); return this.b;
   }
 }
 
