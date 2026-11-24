@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"><meta name="apple-mobile-web-app-capable" content="yes"><title>撮影用の画面</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden;touch-action:none;overscroll-behavior:none;-webkit-user-select:none;user-select:none}canvas{position:fixed;inset:0;width:100%;height:100%}#m{position:fixed;left:50%;bottom:60px;transform:translateX(-50%);color:#cfd6da;font:700 18px system-ui,"Hiragino Sans",sans-serif;white-space:nowrap}@media(orientation:portrait){#m::after{content:"（横向きにしてください）"}}</style></head>
+<body><canvas id="c"></canvas><div id="m">いちど画面を押してから、指を置く</div>
+<script>
+// A still picture for filming the finger from the side. The markers (ArUco original, 5x5) give the camera's place in every frame.
+const MM = 0.1924, SIZE = 26, W5 = ['10000', '10111', '01001', '01110'];                       // mm per CSS px (264 ppi iPad), marker size in mm
+const AT = [[-94, 46], [-94, 0], [-94, -46], [0, 46], [94, 46], [94, 0], [94, -46], [-50, -46]]; // centres (mm), x right, y away from the person
+const cv = document.getElementById('c'), g = cv.getContext('2d');
+function marker(id, x, y, s) { const n = s / 7; g.fillStyle = '#9a9a9a'; g.fillRect(x - s / 2 - n, y - s / 2 - n, s + 2 * n, s + 2 * n); g.fillStyle = '#000'; g.fillRect(x - s / 2, y - s / 2, s, s); g.fillStyle = '#9a9a9a'; for (let r = 0; r < 5; r++) { const w = W5[(id >> (2 * (4 - r))) & 3]; for (let c = 0; c < 5; c++) if (w[c] === '1') g.fillRect(x - s / 2 + n * (c + 1), y - s / 2 + n * (r + 1), n + 0.4, n + 0.4); } }
+function draw() {
+  const d = devicePixelRatio || 1, w = innerWidth, h = innerHeight; cv.width = w * d; cv.height = h * d; g.setTransform(d, 0, 0, d, 0, 0); g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
+  const X = (x) => w / 2 + x / MM, Y = (y) => h / 2 - y / MM; AT.forEach((p, i) => marker(17 + i * 37, X(p[0]), Y(p[1]), SIZE / MM));
+  g.strokeStyle = '#e03a3a'; g.lineWidth = 3; g.beginPath(); g.moveTo(X(-14), Y(0)); g.lineTo(X(14), Y(0)); g.stroke(); // PIP line
+  g.strokeStyle = '#4a6a90'; g.setLineDash([8, 7]); g.beginPath(); for (const s of [-9, 9]) { g.moveTo(X(s), Y(0)); g.lineTo(X(s), Y(-30)); } g.stroke(); g.setLineDash([]);
+}
+draw(); addEventListener('resize', draw);
+for (const n of ['touchstart', 'touchmove', 'contextmenu', 'gesturestart']) addEventListener(n, (e) => e.preventDefault(), { passive: false });
+addEventListener('touchend', async () => { try { await document.documentElement.requestFullscreen?.(); } catch {} try { await navigator.wakeLock?.request('screen'); } catch {} document.getElementById('m').textContent = ''; }, { once: true });
+</script></body></html>
