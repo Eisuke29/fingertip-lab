@@ -7,74 +7,94 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="なでる">
 <meta name="theme-color" content="#0a0c0c">
-<title>なでる（iPad・PIP／MP）</title>
+<title>なでる（iPad）</title>
 <style>
-  :root { --bg:#0a0c0c; --panel:#1b2024; --line:#343b42; --fg:#eef1f3; --mut:#9aa4ad; --accent:#35a57a; --ok:#4fcf9c; --warn:#f5b84b; }
+  :root { --bg:#0b0c0e; --panel:rgba(20,22,26,.94); --btn:#2a2d33; --line:#3b3f47; --fg:#f4f2ef; --mut:#a5a29d; --accent:#ffb56b; --on:#241405; --ok:#7bd6a4; --warn:#ffcf5c; }
   * { box-sizing:border-box; } [hidden] { display:none !important; }
-  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); overflow:hidden; overscroll-behavior:none; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; font:16px/1.6 system-ui,"Hiragino Sans","Yu Gothic UI",sans-serif; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); overflow:hidden; overscroll-behavior:none; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; font:17px/1.5 system-ui,"Hiragino Sans","Yu Gothic UI",sans-serif; }
   #scene { position:fixed; inset:0; width:100%; height:100%; display:block; }
-  .btn { font:inherit; font-weight:700; color:inherit; border:1px solid var(--line); background:var(--panel); padding:10px 16px; border-radius:10px; }
-  .btn.primary { background:var(--accent); border-color:var(--accent); color:#04140d; } .btn[aria-pressed="true"] { background:var(--accent); border-color:var(--accent); color:#04140d; } .btn:disabled { opacity:.4; }
-  #start { position:fixed; inset:0; z-index:5; background:rgba(8,10,11,.94); display:grid; place-items:center; padding:20px; }
-  #start > div { width:min(620px, 100%); display:flex; flex-direction:column; gap:14px; }
-  h1 { font-size:26px; margin:0; } ol { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
-  li { display:grid; grid-template-columns:28px 1fr auto; gap:10px; align-items:baseline; background:var(--panel); border-radius:10px; padding:10px 14px; } li b { font-size:18px; } li .v { font-variant-numeric:tabular-nums; font-weight:700; }
-  li.ok b, li.ok .v { color:var(--ok); } li.ng .v { color:var(--warn); } li small { grid-column:2 / 4; color:var(--mut); font-size:14px; }
-  .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; } .mut { color:var(--mut); font-size:14px; }
-  #set { position:fixed; right:16px; top:14px; opacity:.55; }
-  #mode { position:fixed; left:16px; top:14px; z-index:6; } #mode .btn { padding:10px 18px; }
-  #panel { position:fixed; right:16px; top:66px; width:310px; max-height:calc(100% - 84px); overflow:auto; background:rgba(16,20,22,.94); border-radius:12px; padding:12px 14px; touch-action:pan-y; }
-  #panel h2 { font-size:13px; color:var(--mut); margin:12px 0 5px; } #panel h2:first-child { margin-top:0; } .seg { display:flex; flex-wrap:wrap; gap:6px; } .seg .btn { padding:7px 12px; font-size:15px; }
-  label { display:block; font-weight:700; margin-top:10px; font-size:15px; } label span { float:right; font-variant-numeric:tabular-nums; } input[type=range] { width:100%; height:30px; accent-color:var(--accent); }
-  table { width:100%; border-collapse:collapse; font-size:14px; } td { padding:2px 0; border-bottom:1px solid var(--line); } td:last-child { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
-  #msg { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); background:rgba(16,20,22,.9); border-radius:10px; padding:8px 16px; font-weight:700; pointer-events:none; } #msg:empty { display:none; }
+  .btn { font:inherit; font-weight:600; color:inherit; border:0; background:var(--btn); min-height:48px; padding:0 18px; border-radius:12px; } .btn:active { filter:brightness(1.25); }
+  .btn.primary, .btn[aria-pressed="true"] { background:var(--accent); color:var(--on); } .btn:disabled { opacity:.45; }
+  .seg { display:flex; flex-wrap:wrap; gap:8px; } .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; } .mut { color:var(--mut); font-size:15px; }
+  /* start */
+  #start { position:fixed; inset:0; z-index:5; background:rgba(8,9,11,.9); display:grid; place-items:center; padding:24px; } #start > div { width:min(520px,100%); display:flex; flex-direction:column; gap:22px; text-align:center; align-items:center; }
+  h1 { font-size:40px; margin:0; letter-spacing:.06em; } #how { font-size:20px; margin:0; } #go { min-height:64px; min-width:280px; font-size:22px; border-radius:18px; }
+  ul { list-style:none; margin:0; padding:0; display:flex; gap:26px; justify-content:center; font-size:15px; color:var(--mut); } li::before { content:"○ "; } li.ok { color:var(--ok); } li.ok::before { content:"● "; } li.ng { color:var(--warn); }
+  #sMsg:empty { display:none; }
+  /* while stroking nothing covers the picture: one round button; the tray opens from it */
+  #open { position:fixed; left:14px; bottom:14px; z-index:4; width:56px; height:56px; padding:0; border-radius:50%; background:var(--panel); display:grid; place-items:center; transition:opacity .25s; } body.left #open { left:auto; right:14px; } body.touching #open, body.touching #tray { opacity:.12; pointer-events:none; } body.touching #msg { opacity:0; }
+  #tray { position:fixed; left:14px; bottom:84px; z-index:4; width:380px; max-width:calc(100% - 28px); max-height:calc(100% - 110px); overflow:auto; background:var(--panel); border-radius:18px; padding:16px; transition:opacity .25s; touch-action:pan-y; } body.left #tray { left:auto; right:14px; }
+  h2 { font-size:14px; font-weight:600; color:var(--mut); margin:18px 0 8px; } h2:first-child { margin-top:0; }
+  #place { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; } #place .btn { min-height:84px; padding:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; font-size:15px; } #place svg { width:36px; height:36px; }
+  #mats { display:grid; grid-template-columns:1fr 1fr; gap:8px; } #mats .btn { text-align:left; display:flex; align-items:center; gap:10px; padding:0 12px; font-size:15px; } #mats .btn i { width:22px; height:22px; border-radius:6px; flex:none; }
+  #tabs { position:sticky; top:-16px; background:rgb(20,22,26); padding:16px 0 10px; margin-top:-16px; z-index:1; } #tabs .btn { flex:1; padding:0 8px; font-size:15px; }
+  label { display:block; font-weight:600; margin-top:14px; font-size:16px; } label span { float:right; color:var(--mut); font-variant-numeric:tabular-nums; } input[type=range] { width:100%; height:40px; margin:0; accent-color:var(--accent); }
+  table { width:100%; border-collapse:collapse; font-size:14px; } td { padding:4px 0; border-bottom:1px solid var(--line); } td:last-child { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  #msg { position:fixed; left:50%; bottom:26px; transform:translateX(-50%); background:var(--panel); border-radius:14px; padding:10px 20px; font-weight:600; pointer-events:none; transition:opacity .2s; } #msg:empty { display:none; }
   #rotate { position:fixed; inset:0; z-index:20; background:var(--bg); display:none; place-items:center; font-size:22px; font-weight:700; } @media (orientation:portrait) { #rotate { display:grid; } }
+  /* fitting: one thing at a time, the slider for the free hand */
+  #lx, #ly { position:fixed; left:0; top:0; display:none; background:#ff3b30; pointer-events:none; z-index:2; } #lx { width:2px; height:100%; margin-left:-1px; } #ly { height:2px; width:100%; margin-top:-1px; }
+  #fit { position:fixed; left:14px; bottom:14px; z-index:4; width:min(460px,calc(100% - 28px)); background:var(--panel); border-radius:18px; padding:16px; } body.left #fit { left:auto; right:14px; } #fit b { font-size:20px; } #fit p { margin:2px 0 6px; color:var(--mut); } #fit .row { justify-content:space-between; margin-top:8px; }
 </style>
 <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.module.js" } }</script>
 </head>
 <body>
 <canvas id="scene"></canvas>
+<div id="lx"></div><div id="ly"></div>
 <div id="msg"></div>
-<div class="seg ui" id="mode"></div>
-<button class="btn ui" id="set">調整</button>
-<div id="panel" class="ui" hidden>
-  <h2>素材</h2><div class="seg" id="mats"></div>
-  <h2>画面の中に描くもの</h2><div class="seg" id="kinds"></div>
-  <div id="bendBox"><h2>左右の曲がり方</h2><div class="seg" id="bends"></div></div>
-  <label>しなりの誇張 <span></span><input class="ui" id="gain" type="range" min="0" max="2.5" step="0.1" value="1" data-u=" 倍"></label>
-  <h2>つなぎ目</h2>
-  <label>接触から関節まで <span></span><input class="ui" id="off" type="range" min="-5" max="35" step="0.5" value="12" data-u=" mm"></label>
-  <label>左右 <span></span><input class="ui" id="offx" type="range" min="-12" max="12" step="0.5" value="0" data-u=" mm"></label>
-  <h2>指</h2><div class="seg" id="looks"></div>
-  <label>肌の色 <span></span><input class="ui" id="tone" type="range" min="0" max="100" step="1" value="28" data-u=""></label>
-  <label>基節の長さ <span></span><input class="ui" id="l0" type="range" min="32" max="55" step="0.5" value="43" data-u=" mm"></label>
-  <label>中節の長さ <span></span><input class="ui" id="l1" type="range" min="18" max="34" step="0.5" value="25" data-u=" mm"></label>
-  <label>末節の長さ（指先まで） <span></span><input class="ui" id="l2" type="range" min="18" max="32" step="0.5" value="25" data-u=" mm"></label>
-  <label>遅れの先読み <span></span><input class="ui" id="lead" type="range" min="0" max="120" step="5" value="60" data-u=" ms"></label>
-  <label>動く向きへ付け根を寄せる <span></span><input class="ui" id="ahead" type="range" min="0" max="25" step="1" value="8" data-u=" mm"></label>
-  <h2>手</h2><div class="seg" id="hands"></div>
-  <label><b id="thetaN" style="font-weight:700"></b> <span></span><input class="ui" id="theta" type="range" min="60" max="110" step="1" value="90" data-u="°"></label>
-  <label>手が来る向き（右から） <span></span><input class="ui" id="yaw" type="range" min="-40" max="40" step="1" value="16" data-u="°"></label>
-  <h2>目の位置</h2><div class="seg" id="eyes"></div>
-  <h2>前面カメラの場所（横向きで見て）</h2><div class="seg" id="cams"></div>
-  <div class="row" style="margin-top:8px"><button class="btn ui" id="cal">顔を40cmにして合わせる</button></div>
-  <label>（追従しないとき）左右 <span></span><input class="ui" id="ex" type="range" min="-300" max="300" step="10" value="-200" data-u=" mm"></label>
-  <label>（追従しないとき）机からの高さ <span></span><input class="ui" id="eh" type="range" min="150" max="600" step="10" value="420" data-u=" mm"></label>
-  <label>（追従しないとき）手前の距離 <span></span><input class="ui" id="eb" type="range" min="150" max="600" step="10" value="400" data-u=" mm"></label>
-  <h2>いまの値</h2><table id="vals"></table>
-  <div class="row" style="margin-top:10px"><button class="btn ui" id="rec">20秒記録して送る</button><button class="btn ui" id="again">最初から</button></div>
+<button class="btn ui" id="open" aria-label="メニュー"><svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 8h18M4 18h18"/><circle cx="9" cy="8" r="3" fill="#14161a"/><circle cx="17" cy="18" r="3" fill="#14161a"/></svg></button>
+<div id="tray" class="ui" hidden>
+  <div id="quick">
+    <h2>場所</h2><div id="place"></div>
+    <h2>素材</h2><div id="mats"></div>
+    <h2>感触の強さ</h2><div class="seg" id="power"></div>
+    <div class="row" style="margin-top:18px"><button class="btn ui" id="fitGo" style="flex:1">自分の手に合わせる</button><button class="btn ui" id="more">細かい調整</button></div>
+  </div>
+  <div id="panel" hidden>
+    <div class="seg" id="tabs"><button class="btn ui" data-t="hand">指</button><button class="btn ui" data-t="sync">遅れ</button><button class="btn ui" data-t="eye">目</button><button class="btn ui" data-t="data">記録</button><button class="btn ui" id="back">戻る</button></div>
+    <section data-t="hand">
+      <h2>画面に付ける所</h2><div class="seg" id="mode"></div>
+      <h2>手</h2><div class="seg" id="hands"></div>
+      <label>手が来る向き（右から） <span></span><input class="ui" id="yaw" type="range" min="-80" max="80" step="1" value="45" data-u="°"></label>
+      <label><b id="thetaN" style="font-weight:600"></b> <span></span><input class="ui" id="theta" type="range" min="60" max="110" step="1" value="90" data-u="°"></label>
+      <div id="extBox"><label>指先の反り <span></span><input class="ui" id="ext" type="range" min="0" max="35" step="1" value="26" data-u="°"></label></div>
+      <label>しなりの誇張 <span></span><input class="ui" id="gain" type="range" min="0" max="2.5" step="0.1" value="1" data-u=" 倍"></label>
+      <div id="bendBox"><h2>左右の曲がり方</h2><div class="seg" id="bends"></div></div>
+      <h2>肌の色</h2><div class="seg" id="skins"></div>
+      <label>明るさ <span></span><input class="ui" id="bright" type="range" min="-60" max="60" step="1" value="0" data-u=""></label>
+      <label>色（手で選ぶとき） <span></span><input class="ui" id="tone" type="range" min="0" max="100" step="1" value="28" data-u=""></label>
+      <h2>指の見た目</h2><div class="seg" id="looks"></div>
+      <h2>画面の中に描くもの（比べる用）</h2><div class="seg" id="kinds"></div>
+      <h2>長さ</h2>
+      <label>基節 <span></span><input class="ui" id="l0" type="range" min="32" max="55" step="0.5" value="43" data-u=" mm"></label><label>中節 <span></span><input class="ui" id="l1" type="range" min="18" max="34" step="0.5" value="25" data-u=" mm"></label><label>末節（指先まで） <span></span><input class="ui" id="l2" type="range" min="18" max="32" step="0.5" value="25" data-u=" mm"></label>
+    </section>
+    <section data-t="sync" hidden>
+      <label>遅れの先読み <span></span><input class="ui" id="lead" type="range" min="0" max="140" step="2" value="60" data-u=" ms"></label>
+      <label>接触から関節まで <span></span><input class="ui" id="off" type="range" min="-5" max="35" step="0.5" value="0" data-u=" mm"></label><label>左右 <span></span><input class="ui" id="offx" type="range" min="-12" max="12" step="0.5" value="0" data-u=" mm"></label>
+      <label>動く向きへ付け根を寄せる <span></span><input class="ui" id="ahead" type="range" min="0" max="25" step="1" value="0" data-u=" mm"></label>
+    </section>
+    <section data-t="eye" hidden>
+      <h2>目の位置</h2><div class="seg" id="eyes"></div>
+      <h2>前面カメラの場所（横向きで見て）</h2><div class="seg" id="cams"></div>
+      <div class="row" style="margin-top:12px"><button class="btn ui" id="cal">顔を40cmにして合わせる</button></div>
+      <label>追従しないとき：左右 <span></span><input class="ui" id="ex" type="range" min="-300" max="300" step="10" value="-120" data-u=" mm"></label><label>机からの高さ <span></span><input class="ui" id="eh" type="range" min="150" max="600" step="10" value="420" data-u=" mm"></label><label>手前の距離 <span></span><input class="ui" id="eb" type="range" min="150" max="600" step="10" value="400" data-u=" mm"></label>
+    </section>
+    <section data-t="data" hidden>
+      <div class="row"><button class="btn ui" id="rec">20秒記録する</button><button class="btn ui" id="again">最初から</button><button class="btn ui" id="reset">設定を初めに戻す</button></div>
+      <h2>いまの値</h2><table id="vals"></table>
+    </section>
+  </div>
 </div>
+<div id="fit" class="ui" hidden><b id="fitT"></b><p id="fitP"></p><input class="ui" id="fitR" type="range"><div class="row"><button class="btn ui" id="fitX">やめる</button><button class="btn primary ui" id="fitN">つぎへ</button></div></div>
 <div id="start" class="ui"><div>
   <h1>なでる</h1>
-  <ol>
-    <li id="cTilt"><b>1</b><span>iPadの傾き</span><span class="v">—</span><small>机に置いて、動かさない</small></li>
-    <li id="cEye"><b>2</b><span>目の位置（前面カメラ）</span><span class="v">—</span><small>いつもの姿勢で画面を見る。センターフレームはオフにする</small></li>
-    <li id="cHand"><b>3</b><span>握った手</span><span class="v">—</span><small id="handHint"></small><small>iPadの［設定］→［マルチタスクとジェスチャ］で「4本指と5本指のジェスチャ」をオフにする</small></li>
-  </ol>
-  <div class="row"><button class="btn primary" id="go">測りはじめる</button><button class="btn" id="noeye" hidden>視線追従なしで進む</button></div>
-  <div class="mut" id="sMsg">傾きセンサーと前面カメラの許可を聞かれたら［許可］を押してください。カメラの映像はこのiPadの中だけで使います。</div>
+  <p id="how"></p>
+  <button class="btn primary" id="go">はじめる</button>
+  <ul><li id="cTilt"><span>傾き</span><span class="v" hidden></span></li><li id="cEye"><span>目の位置</span><span class="v" hidden></span></li><li id="cPlace"><span>置き場所</span><span class="v" hidden></span></li></ul>
+  <div class="mut" id="sMsg">傾きセンサーとカメラの許可を聞かれたら［許可］。映像は外に送りません。</div>
+  <button class="btn" id="noeye" hidden>カメラなしで始める</button>
 </div></div>
 <div id="rotate">iPadを横向きにしてください</div>
-<script type="module" src="./main.js?v=5"></script>
+<script type="module" src="./main.js?v=6"></script>
 </body>
 </html>

@@ -52,21 +52,54 @@ export class Contact {
 const mean = (q) => { const w = q.reduce((s, k) => s + k.w, 0); return [0, 1].map((i) => q.reduce((s, k) => s + k.d[i] * k.w, 0) / w); };
 const median = (q, i) => { const a = [...q].sort((x, y) => x.d[i] - y.d[i]), h = a.reduce((s, k) => s + k.w, 0) / 2; let c = 0; for (const k of a) { c += k.w; if (c >= h) return k.d[i]; } return a[a.length - 1].d[i]; };
 
+// ---------- one knuckle ----------
+// Only the PIP knuckle touches. The contact itself is followed (no expectation in between, so nothing is late). When its area changes, its
+// middle wanders although the hand does not: that part is kept out, and let in again slowly while the hand moves.
+export class Point {
+  constructor(hand = 'right', yaw = 0.28) { this.pick = new Contact(hand, yaw); this.jumps = 0; this.reset(); }
+  reset() { this.p = null; this.id = null; this.off = [0, 0]; this.v = [0, 0]; this.down = false; this.tSeen = -1e9; }
+  update(list, t, hold = 250) {
+    if (!list.length) { this.down = false; if (this.p && t - this.tSeen > hold) this.reset(); return this.p; }
+    let c = list.find((k) => k.id === this.id);
+    if (!c || !this.p || !this.down) {
+      const D = (k) => Math.hypot(k.x - this.p[0], k.y - this.p[1]), near = this.p && t - this.tSeen < 120 ? list.reduce((q, k) => (D(k) < D(q) ? k : q)) : null;
+      if (near && D(near) < 25) { const g = Math.min(0.05, (t - this.tSeen) / 1000); c = near; this.off = [this.p[0] + this.v[0] * g - c.x, this.p[1] + this.v[1] * g - c.y]; this.jumps++; } // the same knuckle, renumbered
+      else { const q = this.pick.index(list); c = list.find((k) => k.id === q.id) || list[0]; this.reset(); }
+      this.id = c.id; this.last = c; this.t = this.tSeen = t; this.down = true; this.p = [c.x + this.off[0], c.y + this.off[1]]; return this.p;
+    }
+    const dt = Math.max(0.001, Math.min(0.1, (t - this.t) / 1000)), size = (k) => (k.rx || 0) + (k.ry || 0), dr = Math.abs(size(c) - size(this.last)), d = [c.x - this.last.x, c.y - this.last.y], e = [d[0] - this.v[0] * dt, d[1] - this.v[1] * dt], E = Math.hypot(...e);
+    if (dr > 0.15 && E > 0.2) { const keep = Math.min(E, dr * 0.8) / E; this.off = [this.off[0] - e[0] * keep, this.off[1] - e[1] * keep]; } // unexpected, and the area changed: at most as much as the area can explain
+    const L = Math.hypot(...this.off), back = dr > 0.15 ? 0 : Math.min(1, dt * 0.8 + (L > 0.01 ? 0.12 * Math.hypot(...d) / L : 0)); this.off = this.off.map((v) => v * (1 - back) * (L > 6 ? 6 / L : 1));
+    const p = [c.x + this.off[0], c.y + this.off[1]], f = 1 - Math.exp(-dt / 0.02); this.v = this.v.map((v, i) => v + ((p[i] - this.p[i]) / dt - v) * f);
+    this.p = p; this.last = c; this.t = this.tSeen = t; return p;
+  }
+}
+
 // ---------- against the delay ----------
-// The touch panel, the browser and the display together show everything some 50 ms late. Where the hand will be then is
-// predicted from its speed over the last moments. Slow: smoothed and not predicted (no trembling). Fast: predicted and not smoothed.
+// The touch panel, the browser and the display together show everything some 50 ms late. Where the hand will be then is predicted:
+// place, speed and acceleration are estimated (Kalman filter; the acceleration dies out) and carried on. Slow: smoothed and not predicted (no trembling).
+// The straight-line prediction before this was 12 mm wrong when rubbing at 2 Hz, this one about 5 mm (see the test). What is left is hidden by the shape of the root (miss).
+const SJ = 1500, RN = 0.15, TA = 0.16;
 export class Lead {
-  constructor() { this.q = []; this.vel = [0, 0]; this.speed = 0; }
-  reset() { this.q = []; this.vel = [0, 0]; this.speed = 0; this.sv = null; }
-  add(p, t) { const l = this.q[this.q.length - 1]; if (l && t - l.t < 1) { l.x = p[0]; l.y = p[1]; return; } this.q.push({ x: p[0], y: p[1], t }); while (this.q.length > 2 && t - this.q[0].t > 55) this.q.shift(); }
+  constructor() { this.reset(); }
+  reset() { this.s = null; this.vel = [0, 0]; this.speed = 0; this.miss = 0; this.past = []; }
+  add(p, t) {
+    if (this.s && t - this.t > 150) this.reset();
+    if (!this.s) { this.s = [0, 1].map((k) => ({ x: [p[k], 0, 0], P: [[0.02, 0, 0], [0, 4e4, 0], [0, 0, 4e6]] })); this.t = this.t0 = t; return; }
+    const h = (t - this.t) / 1000; if (h < 0.001) return; this.t = t;
+    const e = Math.exp(-h / TA), a2 = TA * (1 - e), a1 = TA * (h - a2), q = SJ * SJ * (1 - e * e), F = [[1, h, a1], [0, 1, a2], [0, 0, e]], Q = [[h ** 4 / 20 * q, h ** 3 / 8 * q, h * h / 6 * q], [h ** 3 / 8 * q, h * h / 3 * q, h / 2 * q], [h * h / 6 * q, h / 2 * q, q]]; // must stay positive definite, otherwise it runs away when the hand rests
+    for (const k of [0, 1]) {
+      const s = this.s[k], x = F.map((r) => r[0] * s.x[0] + r[1] * s.x[1] + r[2] * s.x[2]), G = F.map((r) => [0, 1, 2].map((j) => r[0] * s.P[0][j] + r[1] * s.P[1][j] + r[2] * s.P[2][j])), P = G.map((r, i) => [0, 1, 2].map((j) => r[0] * F[j][0] + r[1] * F[j][1] + r[2] * F[j][2] + Q[i][j])), c = P[0][0] + RN * RN, K = [P[0][0] / c, P[1][0] / c, P[2][0] / c], d = p[k] - x[0];
+      s.x = x.map((v, i) => v + K[i] * d); s.x[1] = Math.max(-1500, Math.min(1500, s.x[1])); s.x[2] = Math.max(-9000, Math.min(9000, s.x[2]));
+      const U = P.map((r, i) => r.map((v, j) => v - K[i] * P[0][j])); s.P = U.map((r, i) => r.map((v, j) => (v + U[j][i]) / 2));
+    }
+    // how wrong the predictions made for this moment were
+    const w = this.past.find((o) => Math.abs(o.t - t) < 9); if (w) { const m = Math.min(12, Math.hypot(w.x - p[0], w.y - p[1])); this.miss += (m - this.miss) * (m > this.miss ? 0.3 : 0.06); }
+  }
   at(now, lead) {
-    const q = this.q, n = q.length; if (!n) return null; const l = q[n - 1]; if (n < 3 || l.t - q[0].t < 12) { this.vel = [0, 0]; return [l.x, l.y]; }
-    let mt = 0, mx = 0, my = 0; for (const k of q) { mt += k.t / n; mx += k.x / n; my += k.y / n; }
-    let a = 0, bx = 0, by = 0; for (const k of q) { const d = k.t - mt; a += d * d; bx += d * (k.x - mx); by += d * (k.y - my); }
-    const k0 = this.sv && now - this.svT < 120 ? Math.exp(-(now - this.svT) / 30) : 0; this.sv = [bx / a + ((this.sv?.[0] || 0) - bx / a) * k0, by / a + ((this.sv?.[1] || 0) - by / a) * k0]; this.svT = now; // the speed is smoothed a little: no jerks
-    const [vx, vy] = this.sv, sp = Math.hypot(vx, vy) * 1000, g = Math.max(0, Math.min(1, (sp - 8) / 30)), f = g * g * (3 - 2 * g), fx = mx + vx * (l.t - mt), fy = my + vy * (l.t - mt);
-    const T = (Math.max(0, Math.min(40, now - l.t)) + lead) * f; this.speed = sp; this.vel = [vx * 1000 * f, vy * 1000 * f];
-    return [fx + (l.x - fx) * f + vx * T, fy + (l.y - fy) * f + vy * T];
+    if (!this.s) return null; const h = (Math.max(0, Math.min(40, now - this.t)) + lead) / 1000, e = Math.exp(-h / TA), a2 = TA * (1 - e), a1 = TA * (h - a2), S = this.s, v = [S[0].x[1], S[1].x[1]], sp = Math.hypot(...v), g = Math.max(0, Math.min(1, (sp - 14) / 40)) * Math.min(1, (this.t - this.t0) / 50), f = g * g * (3 - 2 * g);
+    this.speed = sp; this.vel = [v[0] * f, v[1] * f]; const M = Math.max(4, sp * h * 1.35), A = Math.min(1, sp / 160), d = [0, 1].map((k) => (v[k] * h + S[k].x[2] * a1 * A) * f), L = Math.hypot(...d), c = L > M ? M / L : 1, r = [S[0].x[0] + d[0] * c, S[1].x[0] + d[1] * c];
+    this.past.push({ t: now + lead, x: r[0], y: r[1] }); if (this.past.length > 24) this.past.shift(); return r;
   }
 }
 
@@ -126,13 +159,13 @@ export async function makeEyes() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { ...(id === 'user' ? { facingMode: 'user' } : { deviceId: id }), width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
       this.video = document.createElement('video'); this.video.muted = true; this.video.playsInline = true; this.video.srcObject = stream; await this.video.play();
       if (!this.worker) {
-        this.status = '顔の認識モデルを読み込み中…'; const w = new Worker(new URL('./eye-worker.js?v=5', import.meta.url));
+        this.status = '顔の認識モデルを読み込み中…'; const w = new Worker(new URL('./eye-worker.js?v=6', import.meta.url));
         await new Promise((res, rej) => { const to = setTimeout(() => rej(new Error('顔の認識の準備が時間切れ')), 25000); w.onmessage = (e) => { if (e.data.type === 'ready') { clearTimeout(to); res(); } else if (e.data.type === 'error') { clearTimeout(to); rej(new Error(e.data.msg)); } }; w.onerror = (e) => { clearTimeout(to); rej(new Error(e.message || 'worker')); }; w.postMessage({ type: 'init' }); });
         this.worker = w; this.mode = 'worker';
       }
       this.running = true; this.status = '顔を探しています'; this.f.forEach((f) => f.reset()); let waiting = false, last = -1e9, sent = 0;
       this.worker.onmessage = (e) => {
-        waiting = false; const m = e.data; if (!this.running || !this.video) return;
+        waiting = false; const m = e.data; if (!this.running || !this.video) return; if (m.skin) this.skin = m.skin;
         if (m.type !== 'eyes') { this.status = `顔を認識できません（${m.msg}）`; return; }
         this.cost = this.cost == null ? m.ms : this.cost + (m.ms - this.cost) * 0.1;
         if (!m.pts) { this.status = '顔が見えません（画面の正面に座ってください）'; return; }

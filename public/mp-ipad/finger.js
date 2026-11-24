@@ -6,7 +6,8 @@ export const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 export const norm = (a) => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
 export const DIPK = 0.67, REST = 2 * Math.PI / 180, REST_PIP = 6 * Math.PI / 180, RF = 8; // DIP follows PIP; the resting finger is (almost) straight; finger radius
 // h: height of the joint above the glass (mm), theta: usual angle of the segment above the joint, off: from the middle of the contact to the joint
-export const JOINTS = { mp: { h: 11, theta: 90, off: 12 }, pip: { h: 8.2, theta: 78, off: 12.5 } };
+export const JOINTS = { mp: { h: 11, theta: 90, off: 12 }, pip: { h: 8.2, theta: 78, off: 12.5 },
+  point: { h: 8.2, theta: 75, off: 0 } }; // point: only the PIP knuckle touches, so the joint is exactly at the middle of the contact
 
 // k: how fast the fingertip follows (1/s), hold: how far it sticks before slipping (mm), bump: grain height, drag: pull on the surface, dent: how deep it gives way
 export const MATS = {
@@ -33,6 +34,7 @@ export const PRESS = 2.5, STRETCH = 1.06;
 // lag: where the fingertip is, minus where it would be without friction (mm, in the plane of the glass). surf: height of the material
 // tip height allowed: from just touching to pressed in by PRESS + dent
 export function solve(o) {
+  if (o.joint === 'point') return solvePoint(o);
   const shape = o.joint === 'pip' ? shapePip : shapeMp, { root, len, surf, dent = 0 } = o, L = o.joint === 'pip' ? len.slice(1) : len;
   let s = 1, q, k = 1, low = surf + RF - PRESS - dent - root[2], high = surf + RF - 0.3 - root[2];
   for (let i = 0; i < 24; i++) {
@@ -57,7 +59,28 @@ function shapePip({ theta, yaw, lag, gain = 1, kind = 'finger' }, s) {
   const b1 = F ? 0 : clamp(lx * 0.022, -0.7, 0.7), b2 = F ? clamp(lx * 0.044, -0.9, 0.9) : b1, u = lean(b.u, S, b1);
   return { base: { u: b.u, d: b.m }, dirs: [u, F ? lean(frame(theta, yaw, clamp(REST_PIP + lz * 0.03, -0.45, 0.9)).m, S, b2) : u] };
 }
-export function restTip(root, theta, yaw, len, joint = 'mp') { if (joint === 'pip') { const f = frame(theta, yaw, REST_PIP); return add(add(root, f.u, len[1]), f.m, len[2]); } const f = frame(theta, yaw, REST); return add(add(add(root, f.u, len[0]), f.m, len[1]), f.d, len[2]); }
+// Point: the virtual middle phalanx is the straight continuation of the real proximal one and stays so (it never lags). The distal one
+// carries the lag: its end goes where the fingertip is (lag), as far as it can while still touching. Pressed against something the
+// fingertip is bent back a little (ext) as a real one is, so that the nail is seen from above.
+// floor: lowest height of the fingertip's centre (instead of surf); then the finger may also hang in the air
+export const EXT = 0.35;
+function solvePoint({ root, theta, yaw, lag, gain = 1, ext = EXT, kind = 'finger', len, surf, dent = 0, floor }) {
+  const A = toHand(yaw), b = frame(theta, yaw, 0), d0 = frame(theta, yaw, -ext).m, L = len[2], dip = add(root, b.u, len[1]), air = floor != null, lo = air ? floor : surf + RF - PRESS - dent;
+  if (kind !== 'finger') { const q = add(add(dip, d0, L), lag, gain), tip = [q[0], q[1], Math.max(lo, q[2])], d = norm(add(tip, root, -1)); return { base: { u: b.u, d: d0 }, u: d, d, pip: root, dip, tip, k: 1, eased: 1, bendDeg: 0 }; }
+  let x = d0[0] * L + lag[0] * gain, y = d0[1] * L + lag[1] * gain; const want = Math.hypot(x, y), hi = surf + RF - 0.3;
+  const most = air ? 0.95 * L : Math.min(0.95 * L, Math.sqrt(Math.max(0, (L * STRETCH) ** 2 - (dip[2] - hi) ** 2))); // how far sideways it reaches and still touches
+  if (want > most) { x *= most / want; y *= most / want; }
+  let m = Math.hypot(x, y); const room = dip[2] - lo, need = Math.sqrt(Math.max(0, L * L - Math.max(0, room) ** 2)); // need: how flat it must lie to stay above lo
+  if (air && m < need) { // bent outward by what is under it, the way a fingertip gives
+    const w = (need - m) / L, vx = x - A[0] * w * L * 1.4, vy = y - A[1] * w * L * 1.4, n = Math.hypot(vx, vy) || 1; x = vx / n * need; y = vy / n * need; m = need;
+  }
+  let drop = Math.min(room, Math.sqrt(Math.max(0, L * L - m * m))); if (!air) drop = Math.max(drop, dip[2] - hi);
+  const tip = [dip[0] + x, dip[1] + y, dip[2] - drop], d = norm(add(tip, dip, -1));
+  return { base: { u: b.u, d: d0 }, u: b.u, d, pip: root, dip, tip, k: Math.hypot(x, y, drop) / L, eased: want > most ? most / want : 1, bendDeg: Math.acos(clamp(dot(d, d0), -1, 1)) * 180 / Math.PI };
+}
+export function restTip(root, theta, yaw, len, joint = 'mp', ext = EXT) {
+  if (joint === 'point') return add(add(root, frame(theta, yaw, 0).u, len[1]), frame(theta, yaw, -ext).m, len[2]);
+  if (joint === 'pip') { const f = frame(theta, yaw, REST_PIP); return add(add(root, f.u, len[1]), f.m, len[2]); } const f = frame(theta, yaw, REST); return add(add(add(root, f.u, len[0]), f.m, len[1]), f.d, len[2]); }
 
 // The fingertip follows its resting place, sticks to the material and slips.
 export class Tip {
@@ -78,3 +101,12 @@ export class Tip {
 }
 // where on the glass a point inside the screen is seen from the eye
 export const seenAt = (p, e) => { const q = e[2] / (e[2] - p[2]); return [e[0] + (p[0] - e[0]) * q, e[1] + (p[1] - e[1]) * q]; };
+
+// How much of the virtual finger is not hidden by the real one (0..1), when only the knuckle touches at c. Looking along the own finger one cannot
+// see its continuation: from straight in front nothing is left, with the iPad to the side of the body more than half.
+export function visible(theta, yaw, ext, len, eye, c = [0, 0]) {
+  const root = [c[0], c[1], JOINTS.point.h], f = frame(theta, yaw, 0), H = toHand(yaw), dip = add(root, f.u, len[1]), end = add(dip, frame(theta, yaw, -ext).m, len[2] + RF), r = [c[0], c[1], 9.6], mcp = add(r, f.up, len[0]), back = add(add(r, H, len[1]), [0, 0, 1], 5);
+  const mid = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t), gap = (p, q, a, b) => { let m = 1e9; for (let i = 0; i <= 16; i++) for (let j = 0; j <= 10; j++) { const x = mid(p, q, i / 16), y = mid(a, b, j / 10); m = Math.min(m, Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2])); } return m; };
+  let n = 0, N = 0; for (const [a, b] of [[root, dip], [dip, end]]) for (let i = 0; i < 10; i++) { const p = mid(a, b, (i + 0.5) / 10); if (p[2] > 0) continue; N++; const g = mid(p, eye, -p[2] / (eye[2] - p[2])), far = mid(g, eye, 0.25); if (gap(g, far, r, mcp) > 9.6 && gap(g, far, r, back) > 8.6) n++; }
+  return n / N;
+}

@@ -1,0 +1,42 @@
+// Surfaces made here (no downloaded pictures): glazed ceramic, sandstone, knitted wool, honey jelly; planks and tiles for the room. Colour + normal map, tileable.
+import * as THREE from 'three';
+
+function noise(seed, n) { // tileable value noise with period n
+  let x = seed; const g = new Float32Array(n * n); for (let i = 0; i < n * n; i++) g[i] = (x = (x * 16807) % 2147483647) / 2147483647;
+  return (u, v) => { const i = Math.floor(u), j = Math.floor(v), a = u - i, b = v - j, p = a * a * (3 - 2 * a), q = b * b * (3 - 2 * b), w = (k) => ((k % n) + n) % n, i0 = w(i), i1 = w(i + 1), j0 = w(j) * n, j1 = w(j + 1) * n; return (g[j0 + i0] * (1 - p) + g[j0 + i1] * p) * (1 - q) + (g[j1 + i0] * (1 - p) + g[j1 + i1] * p) * q; };
+}
+const clamp01 = (x) => Math.max(0, Math.min(1, x)), mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t), smooth = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
+const N4 = noise(3, 4), N8 = noise(5, 8), N16 = noise(7, 16), N32 = noise(11, 32), N64 = noise(13, 64), N128 = noise(17, 128);
+const fbm = (u, v) => N8(u * 8, v * 8) * 0.5 + N16(u * 16, v * 16) * 0.25 + N32(u * 32, v * 32) * 0.15 + N64(u * 64, v * 64) * 0.1;
+// each: (u, v in 0..1) -> [height (any unit), [r, g, b] 0..255]
+const DRAW = {
+  smooth: (u, v) => { const l = N4(u * 4, v * 4) * 0.6 + N8(u * 8, v * 8) * 0.4, sp = smooth(0.86, 0.95, N64(u * 64, v * 64)); return [l * 1.2 - sp * 0.15, mix(mix([84, 150, 182], [132, 186, 204], l), [58, 104, 138], sp * 0.75)]; },
+  rough: (u, v) => { const f = fbm(u, v), g = N128(u * 128, v * 128), h = N64(u * 64 + 9, v * 64 + 4), pit = smooth(0.78, 0.9, N32(u * 32 + 5, v * 32 + 2)); return [f * 1.6 + g * 0.9 + h * 0.8 - pit * 1.4, mix(mix([186, 160, 120], [222, 202, 164], f), [124, 98, 70], clamp01(pit * 0.8 + smooth(0.75, 0.95, g) * 0.4 + (0.5 - h) * 0.25))]; },
+  catchy: (u, v) => { // stitches: each a V of two fat strands
+    const C = 8, R = 9, x = u * C - Math.floor(u * C), s = Math.abs(x - 0.5) * 2, y = v * R + (1 - s) * 0.62, f = y - Math.floor(y), a = 1 - Math.abs(f - 0.5) * 2, strand = Math.sqrt(clamp01(a)) * Math.sqrt(clamp01(1 - Math.abs(s - 0.5) * 1.9)), fib = N128(u * 128, v * 128 + s * 20) * 0.5 + N64(u * 64, v * 64) * 0.5; return [strand * 5 + fib * 0.7, mix([20, 66, 52], mix([62, 150, 112], [112, 190, 146], fib), smooth(0.05, 0.85, strand))]; },
+  sticky: (u, v) => { const l = N4(u * 4 + 1, v * 4), m = N16(u * 16, v * 16); let h = l * 1.5 + m * 0.5 + N32(u * 32, v * 32) * 0.12, b = 0; for (const [x, y, r] of [[0.2, 0.3, 0.05], [0.65, 0.2, 0.035], [0.8, 0.7, 0.06], [0.35, 0.75, 0.03], [0.5, 0.5, 0.045], [0.1, 0.85, 0.035], [0.9, 0.4, 0.028]]) { const d = Math.hypot(u - x, v - y) / r; if (d < 1) { h += Math.sqrt(1 - d * d) * 1.6; b = Math.max(b, smooth(1, 0.7, d) * smooth(0.5, 0.85, d)); } } return [h, mix(mix([176, 92, 12], [222, 146, 34], clamp01(l * 0.8 + m * 0.2)), [255, 228, 150], b * 0.7)]; },
+  wood: (u, v) => { const P = 4, p = Math.floor(v * P), e = Math.min(v * P - p, 1 - (v * P - p)), gap = smooth(0.045, 0.0, e), g = N8(u * 2 + p * 3.3, v * 8 * 4) * 0.5 + N32(u * 4 + p * 7, v * 32 * 2) * 0.5, ring = 0.5 + 0.5 * Math.sin((g * 3 + N4(u * 4, p) * 2) * 9), t = (p * 0.37) % 1; return [-gap * 4 + g * 0.4, mix(mix(mix([122, 84, 56], [168, 122, 84], ring * 0.5 + g * 0.4), [96, 64, 44], t * 0.35), [26, 16, 10], gap)]; },
+  wall: (u, v) => { const R = 4, r = Math.floor(v * R), x = u * 2 + (r % 2) * 0.5, c = Math.floor(x), ex = Math.min(x - c, 1 - (x - c)) / 2, ey = Math.min(v * R - r, 1 - (v * R - r)) / R, e = Math.min(ex, ey), joint = smooth(0.016, 0.006, e), f = fbm(u, v), t = N8(((c % 2) + 2) % 2 * 3.1 + r * 1.7, r * 2.3); return [(1 - joint) * 3 + f * 0.8, mix(mix(mix([142, 92, 74], [178, 124, 98], t), [116, 78, 66], f * 0.5), [186, 178, 166], joint)]; },
+};
+const STRENGTH = { smooth: 0.5, rough: 1.5, catchy: 1.3, sticky: 0.25, wood: 0.9, wall: 1.2 }, SURF = { smooth: 0.3, rough: 0.95, catchy: 0.9, sticky: 0.22, wood: 0.55, wall: 0.9 }, made = {};
+export const TILE = { smooth: 34, rough: 26, catchy: 24, sticky: 34, wood: 70, wall: 46 }; // mm per repeat
+export function surface(key) {
+  if (made[key]) return made[key];
+  const S = 256, h = new Float32Array(S * S), col = new Uint8ClampedArray(S * S * 4), nor = new Uint8ClampedArray(S * S * 4), f = DRAW[key], k = STRENGTH[key];
+  for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) { const [z, c] = f((i + 0.5) / S, (j + 0.5) / S), q = j * S + i; h[q] = z; col.set([c[0], c[1], c[2], 255], q * 4); }
+  for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) { const dx = (h[j * S + (i + 1) % S] - h[j * S + (i + S - 1) % S]) * k, dy = (h[((j + 1) % S) * S + i] - h[((j + S - 1) % S) * S + i]) * k, l = Math.hypot(dx, dy, 1); nor.set([(-dx / l * 0.5 + 0.5) * 255, (-dy / l * 0.5 + 0.5) * 255, (1 / l * 0.5 + 0.5) * 255, 255], (j * S + i) * 4); }
+  const tx = (data, srgb) => { const c = document.createElement('canvas'); c.width = c.height = S; c.getContext('2d').putImageData(new ImageData(data, S, S), 0, 0); const t = new THREE.CanvasTexture(c); t.flipY = false; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; if (srgb) t.colorSpace = THREE.SRGBColorSpace; return t; };
+  const m = new THREE.MeshStandardMaterial({ map: tx(col, true), normalMap: tx(nor, false), roughness: SURF[key] }); if (key === 'sticky') { m.emissive = new THREE.Color(0x5a2a00); m.emissiveIntensity = 0.35; } return (made[key] = m);
+}
+// a box with rounded edges, standing on z = 0, texture in mm
+export function roundBox(a, h, r, tile) {
+  const n = 5, g = new THREE.BoxGeometry(2 * a, 2 * a, h, 2 * n, 2 * n, 2 * n), p = g.attributes.position, q = g.attributes.normal, u = g.attributes.uv, V = new THREE.Vector3(), C = new THREE.Vector3(), L = [a - r, a - r, h / 2 - r];
+  const snap = (v, half, lim) => { const s = Math.abs(v) / half, e = s * n; return Math.sign(v) * (e <= 1 ? lim * e * 1 : lim + (half - lim) * (e - 1) / (n - 1)); }; // most of the vertices at the edge
+  for (let i = 0; i < p.count; i++) {
+    const nx = q.getX(i), ny = q.getY(i), nz = q.getZ(i);
+    V.set(snap(p.getX(i), a, L[0]), snap(p.getY(i), a, L[1]), snap(p.getZ(i), h / 2, L[2])); C.set(...[V.x, V.y, V.z].map((v, k) => Math.max(-L[k], Math.min(L[k], v)))); const d = V.clone().sub(C);
+    if (d.lengthSq() > 1e-9) { d.normalize(); V.copy(C).addScaledVector(d, r); q.setXYZ(i, d.x, d.y, d.z); }
+    p.setXYZ(i, V.x, V.y, V.z + h / 2); const k = Math.abs(nz) > 0.5 ? [V.x, V.y] : Math.abs(nx) > 0.5 ? [V.y, V.z] : [V.x, V.z]; u.setXY(i, k[0] / tile, k[1] / tile);
+  }
+  return g;
+}
