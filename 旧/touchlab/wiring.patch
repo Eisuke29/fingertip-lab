@@ -1,0 +1,115 @@
+diff --git a/public/sync/ipad.js b/public/sync/ipad.js
+index 3ed9411..c25198d 100644
+--- a/public/sync/ipad.js
++++ b/public/sync/ipad.js
+@@ -122,4 +122,17 @@ addEventListener('pointerdown', (e) => sendTouch(e, true));
+ addEventListener('pointermove', (e) => { if (e.buttons || e.pointerType === 'touch') sendTouch(e, true); });
+ addEventListener('pointerup', (e) => sendTouch(e, false));
+ addEventListener('pointercancel', (e) => sendTouch(e, false));
++// ---------------- every contact with its size, for the touch experiment (touchlab.html on the PC) ----------------
++// sent at 30 Hz while a finger is down (a still finger makes no events), only when that page is open
++const TC = { list: [], cancels: 0, sentOn: false, at: 0 };
++function touchList(e) {
++  TC.list = [...e.touches].slice(0, 10).map((t) => ({ x: (t.clientX - innerWidth / 2) * st.mmPerPx, y: (innerHeight / 2 - t.clientY) * st.mmPerPx, rx: (t.radiusX || 0) * st.mmPerPx, ry: (t.radiusY || 0) * st.mmPerPx, a: t.rotationAngle || 0, f: t.force || 0 }));
++}
++for (const n of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) addEventListener(n, (e) => { if (n === 'touchcancel') TC.cancels++; touchList(e); }, { passive: true });
++setInterval(() => {
++  if (!link.presence.labs) return;
++  const on = TC.list.length > 0, now = performance.now();
++  if (!on && !TC.sentOn && now - TC.at < 300) return; // nothing down: a slow heartbeat only
++  TC.sentOn = on; TC.at = now; link.send({ type: 'touches', to: 'lab', t: now, list: TC.list, cancels: TC.cancels });
++}, 33);
+ window.ipad = { P, st, display };
+diff --git a/public/sync/monitor.js b/public/sync/monitor.js
+index 0fb95d0..5ca76a1 100644
+--- a/public/sync/monitor.js
++++ b/public/sync/monitor.js
+@@ -257,7 +257,7 @@ function renderTools() {
+   const rul = Object.entries(C.ruler), rulOk = rul.filter(([t, r]) => Math.abs(r - t) <= 2).length;
+   $('#tools').innerHTML = `
+     <div class="lbl">実機の記録（recordings フォルダに保存。直したときの確かめに使う）</div>
+-    <div style="margin-top:4px"><button class="btn" id="tRec">${C.rec ? '記録を止める' : '記録を始める'}</button> <button class="btn" id="tRecF" ${C.rec ? '' : 'disabled'}>指を10秒記録</button> <a class="note" href="./replay.html" target="_blank">記録を再生して確かめる</a></div>
++    <div style="margin-top:4px"><button class="btn" id="tRec">${C.rec ? '記録を止める' : '記録を始める'}</button> <button class="btn" id="tRecF" ${C.rec ? '' : 'disabled'}>指を10秒記録</button> <a class="note" href="./replay.html" target="_blank">記録を再生して確かめる</a>　<a class="note" href="./touchlab.html" target="_blank">タッチで曲がりを読む実験</a></div>
+     <div class="note">${C.rec ? `記録中：${C.rec}（②③の画像も保存されます）` : ''}</div>
+     <div class="lbl">本当の角度と比べる（三角定規かカードを ○ に立て、曲がる面に沿わせる）</div>
+     <div style="margin-top:4px">${[30, 45, 60, 90].map((t) => `<button class="btn tRul" data-t="${t}">${t}°</button>`).join(' ')}</div>
+diff --git a/public/sync/replay.js b/public/sync/replay.js
+index 08af3eb..07c1607 100644
+--- a/public/sync/replay.js
++++ b/public/sync/replay.js
+@@ -3,7 +3,7 @@ import * as G from './geom.js';
+ import * as T from './tracker.js';
+ const $ = (s) => document.querySelector(s);
+ const out = (h) => { $('#out').insertAdjacentHTML('beforeend', h); };
+-const recs = await (await fetch('/api/recs', { cache: 'no-store' })).json();
++const recs = (await (await fetch('/api/recs', { cache: 'no-store' })).json()).filter((r) => !r.id.startsWith('touch-')); // touch experiment: no pictures
+ $('#sel').innerHTML = recs.map((r) => `<option value="${r.id}">${r.id}（${r.files.length} 枚）</option>`).join('') || '<option>記録がありません</option>';
+ const img = (id, name) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error(`${name} がありません`)); i.src = `/rec/${id}/${name}`; });
+ function pixels(i, W, H) { const c = document.createElement('canvas'); c.width = W || i.width; c.height = H || i.height; const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(i, 0, 0, c.width, c.height); return x.getImageData(0, 0, c.width, c.height); }
+diff --git a/sync-server.mjs b/sync-server.mjs
+index 8b0e683..aa15e23 100644
+--- a/sync-server.mjs
++++ b/sync-server.mjs
+@@ -34,7 +34,7 @@ function log(line, show = true) {
+   if (show) console.log(`  ${t} ${line}`);
+   try { fs.appendFileSync(logFile, `${t} ${line}\n`); } catch {}
+ }
+-const NAME = { ipad: 'iPad', phone: 'iPhone', monitor: 'PC' };
++const NAME = { ipad: 'iPad', phone: 'iPhone', monitor: 'PC', lab: 'PC（タッチ実験）' };
+ function logMessage(role, m) {
+   if (m.type === 'cmd' && !['step', 'countdown', 'caminfo', 'preview'].includes(m.name)) log(`${NAME[role]} → 命令 ${m.name}${m.jobId ? `（${m.jobId}）` : ''}`);
+   else if (m.type === 'ack') log(`${NAME[role]} → 結果 ${m.what}：${m.ok ? '成功' : `失敗（${m.msg}）`}`);
+@@ -73,23 +73,24 @@ function ensureCerts(ips) {
+ }
+ 
+ // ---------- relay ----------
+-const peers = { ipad: null, phone: null, monitors: new Set(), controller: null };
+-const presence = () => JSON.stringify({ type: 'presence', ipad: !!peers.ipad, phone: !!peers.phone, monitors: peers.monitors.size });
+-const all = () => [peers.ipad, peers.phone, ...peers.monitors].filter(Boolean);
++const peers = { ipad: null, phone: null, monitors: new Set(), labs: new Set(), controller: null }; // labs: pages that only listen
++const presence = () => JSON.stringify({ type: 'presence', ipad: !!peers.ipad, phone: !!peers.phone, monitors: peers.monitors.size, labs: peers.labs.size });
++const all = () => [peers.ipad, peers.phone, ...peers.monitors, ...peers.labs].filter(Boolean);
+ const sendTo = (ws, data, binary = false) => { if (ws && ws.readyState === 1 && (!binary || ws.bufferedAmount < 1.5e6)) ws.send(data, { binary }); };
+ function attach(wss) {
+   wss.on('connection', (ws, req) => {
+     const q = new URL(req.url, 'http://x').searchParams, role = q.get('role');
+-    if (!['ipad', 'phone', 'monitor'].includes(role)) { ws.close(1008, 'role'); return; }
++    if (!['ipad', 'phone', 'monitor', 'lab'].includes(role)) { ws.close(1008, 'role'); return; }
+     // pages from before versioning keep reconnecting with old code: refuse them so they cannot take the slot
+     if (q.get('v') !== VERSION) { console.log(`  古い版のページを断りました（${role}・版 ${q.get('v') || 'なし'}・今の版 ${VERSION}）`); ws.close(4001, 'old version'); return; }
+     if (role === 'monitor') {
+       peers.monitors.add(ws);
+       if (!peers.controller) peers.controller = ws; else sendTo(ws, '{"type":"secondary"}'); // only one PC page controls
+     }
++    else if (role === 'lab') peers.labs.add(ws);
+     else { const old = peers[role]; if (old && old !== ws) { sendTo(old, '{"type":"replaced"}'); setTimeout(() => old.terminate(), 200); } peers[role] = ws; }
+     ws.role = role; ws.alive = true;
+-    console.log(`  つながりました: ${role === 'ipad' ? 'iPad' : role === 'phone' ? 'iPhone' : 'PC確認画面'}（${req.socket.remoteAddress}）`);
++    console.log(`  つながりました: ${NAME[role]}（${req.socket.remoteAddress}）`);
+     for (const c of all()) sendTo(c, presence());
+     ws.on('pong', () => { ws.alive = true; });
+     log(`つながりました：${NAME[role]}（${req.socket.remoteAddress}）`, false);
+@@ -97,19 +98,22 @@ function attach(wss) {
+       ws.alive = true;
+       if (isBinary) { if (role === 'phone') for (const m of peers.monitors) sendTo(m, data, true); return; }
+       let m; try { m = JSON.parse(data.toString()); } catch { return; }
++      if (role === 'lab') return; // never sends commands
+       if (role === 'monitor' && ws !== peers.controller) return; // a second PC page only watches
+       logMessage(role, m);
+       m.from = role; const s = JSON.stringify(m);
+       const to = [].concat(m.to || ['ipad', 'phone', 'monitor']).filter((r) => r !== role);
+       if (to.includes('ipad')) sendTo(peers.ipad, s);
+       if (to.includes('phone')) sendTo(peers.phone, s);
++      if (to.includes('lab') || m.type === 'pose') for (const x of peers.labs) sendTo(x, s);
+       if (to.includes('monitor')) for (const x of peers.monitors) sendTo(x, s);
+     });
+     ws.on('close', () => {
+       if (role === 'monitor') {
+         peers.monitors.delete(ws);
+         if (peers.controller === ws) { peers.controller = [...peers.monitors][0] || null; if (peers.controller) sendTo(peers.controller, '{"type":"primary"}'); }
+-      } else if (peers[role] === ws) peers[role] = null;
++      } else if (role === 'lab') peers.labs.delete(ws);
++      else if (peers[role] === ws) peers[role] = null;
+       log(`切れました：${NAME[role]}`);
+       for (const c of all()) sendTo(c, presence());
+     });
