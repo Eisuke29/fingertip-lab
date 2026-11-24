@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="MPなでる">
+<meta name="apple-mobile-web-app-title" content="なでる">
 <meta name="theme-color" content="#0a0c0c">
-<title>MPでなでる（iPad）</title>
+<title>なでる（iPad・PIP／MP）</title>
 <style>
   :root { --bg:#0a0c0c; --panel:#1b2024; --line:#343b42; --fg:#eef1f3; --mut:#9aa4ad; --accent:#35a57a; --ok:#4fcf9c; --warn:#f5b84b; }
   * { box-sizing:border-box; } [hidden] { display:none !important; }
@@ -22,6 +22,7 @@
   li.ok b, li.ok .v { color:var(--ok); } li.ng .v { color:var(--warn); } li small { grid-column:2 / 4; color:var(--mut); font-size:14px; }
   .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; } .mut { color:var(--mut); font-size:14px; }
   #set { position:fixed; right:16px; top:14px; opacity:.55; }
+  #mode { position:fixed; left:16px; top:14px; z-index:6; } #mode .btn { padding:10px 18px; }
   #panel { position:fixed; right:16px; top:66px; width:310px; max-height:calc(100% - 84px); overflow:auto; background:rgba(16,20,22,.94); border-radius:12px; padding:12px 14px; touch-action:pan-y; }
   #panel h2 { font-size:13px; color:var(--mut); margin:12px 0 5px; } #panel h2:first-child { margin-top:0; } .seg { display:flex; flex-wrap:wrap; gap:6px; } .seg .btn { padding:7px 12px; font-size:15px; }
   label { display:block; font-weight:700; margin-top:10px; font-size:15px; } label span { float:right; font-variant-numeric:tabular-nums; } input[type=range] { width:100%; height:30px; accent-color:var(--accent); }
@@ -34,18 +35,20 @@
 <body>
 <canvas id="scene"></canvas>
 <div id="msg"></div>
+<div class="seg ui" id="mode"></div>
 <button class="btn ui" id="set">調整</button>
 <div id="panel" class="ui" hidden>
   <h2>素材</h2><div class="seg" id="mats"></div>
   <h2>画面の中に描くもの</h2><div class="seg" id="kinds"></div>
-  <h2>左右の曲がり方</h2><div class="seg" id="bends"></div>
+  <div id="bendBox"><h2>左右の曲がり方</h2><div class="seg" id="bends"></div></div>
   <label>しなりの誇張 <span></span><input class="ui" id="gain" type="range" min="0" max="2.5" step="0.1" value="1" data-u=" 倍"></label>
   <h2>つなぎ目</h2>
   <label>接触から関節まで <span></span><input class="ui" id="off" type="range" min="-5" max="35" step="0.5" value="12" data-u=" mm"></label>
   <label>左右 <span></span><input class="ui" id="offx" type="range" min="-12" max="12" step="0.5" value="0" data-u=" mm"></label>
   <label>指の長さ <span></span><input class="ui" id="len" type="range" min="80" max="120" step="1" value="100" data-u=" %"></label>
+  <label>遅れの先読み <span></span><input class="ui" id="lead" type="range" min="0" max="100" step="5" value="45" data-u=" ms"></label>
   <h2>手</h2><div class="seg" id="hands"></div>
-  <label>手の甲の傾き（画面から） <span></span><input class="ui" id="theta" type="range" min="75" max="110" step="1" value="90" data-u="°"></label>
+  <label><b id="thetaN" style="font-weight:700"></b> <span></span><input class="ui" id="theta" type="range" min="60" max="110" step="1" value="90" data-u="°"></label>
   <label>手が来る向き（右から） <span></span><input class="ui" id="yaw" type="range" min="-40" max="40" step="1" value="16" data-u="°"></label>
   <h2>目の位置</h2><div class="seg" id="eyes"></div>
   <h2>前面カメラの場所（横向きで見て）</h2><div class="seg" id="cams"></div>
@@ -57,16 +60,16 @@
   <div class="row" style="margin-top:10px"><button class="btn ui" id="rec">20秒記録して送る</button><button class="btn ui" id="again">最初から</button></div>
 </div>
 <div id="start" class="ui"><div>
-  <h1>MPでなでる</h1>
+  <h1>なでる</h1>
   <ol>
     <li id="cTilt"><b>1</b><span>iPadの傾き</span><span class="v">—</span><small>机に置いて、動かさない</small></li>
     <li id="cEye"><b>2</b><span>目の位置（前面カメラ）</span><span class="v">—</span><small>いつもの姿勢で画面を見る。センターフレームはオフにする</small></li>
-    <li id="cHand"><b>3</b><span>握った手</span><span class="v">—</span><small>下の［はじめる］のあと、人差し指の付け根から先（基節の背）を画面に付ける</small></li>
+    <li id="cHand"><b>3</b><span>握った手</span><span class="v">—</span><small id="handHint"></small><small>iPadの［設定］→［マルチタスクとジェスチャ］で「4本指と5本指のジェスチャ」をオフにする</small></li>
   </ol>
   <div class="row"><button class="btn primary" id="go">測りはじめる</button><button class="btn" id="noeye" hidden>視線追従なしで進む</button></div>
   <div class="mut" id="sMsg">傾きセンサーと前面カメラの許可を聞かれたら［許可］を押してください。カメラの映像はこのiPadの中だけで使います。</div>
 </div></div>
 <div id="rotate">iPadを横向きにしてください</div>
-<script type="module" src="./main.js?v=1"></script>
+<script type="module" src="./main.js?v=2"></script>
 </body>
 </html>

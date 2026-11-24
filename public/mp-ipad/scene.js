@@ -14,7 +14,7 @@ function gridTexture(line, alpha) {
 }
 export class Scene {
   constructor(canvas) {
-    this.r = new THREE.WebGLRenderer({ canvas, antialias: true }); this.r.setPixelRatio(Math.min(2, devicePixelRatio)); this.r.localClippingEnabled = true;
+    this.r = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' }); this.r.setPixelRatio(Math.min(2, devicePixelRatio)); this.r.localClippingEnabled = true;
     this.r.shadowMap.enabled = true; this.r.shadowMap.type = THREE.PCFSoftShadowMap; this.r.setClearColor(0x0a0c0c);
     this.scene = new THREE.Scene(); this.cam = new THREE.PerspectiveCamera();
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x6a7070, 1.5));
@@ -45,6 +45,8 @@ export class Scene {
   // the light comes from above in the real world (measured tilt), a little from the right so that the shadow falls sideways
   light(up) { const t = [0, 0, -DEPTH]; this.sun.target.position.set(...t); this.sun.position.set(up[0] * 300 + 190, up[1] * 300 + 20, Math.max(120, up[2] * 300)); }
   setMaterial(key) { if (this.mat === key) return; this.mat = key; this.surfMat.color.set(MATS[key].color); this.surfMat.roughness = MATS[key].rough; this.dirty = true; }
+  // drawing cannot keep up: fewer pixels (less delay)
+  lighter() { const p = this.r.getPixelRatio(); if (p <= 1.25) return; this.r.setPixelRatio(p - 0.25); this.r.setSize(innerWidth, innerHeight, false); }
   setDepth(z) { if (Math.abs(z - this.surfZ) < 0.01) return; this.surfZ = z; this.dirty = true; }
   // the finger never goes into the material: the material gives way. spheres: [[x, y, z], r]
   deform(spheres, pull) {
@@ -68,13 +70,14 @@ export class Scene {
     if (Math.abs((m.userData.L || 0) - L) > 0.1) { m.geometry.dispose(); m.geometry = new THREE.CapsuleGeometry(r, L, 8, 24); m.userData.L = L; }
   }
   // f: the solved finger (or null), kind: finger / stick / cursor
-  finger(f, kind, root, alpha, lag) {
-    const on = !!f; for (const m of this.seg) m.visible = on && kind === 'finger'; this.cap.visible = on && kind !== 'cursor' && kind === 'finger'; this.stick.visible = on && kind === 'stick'; this.cursor.visible = on && kind === 'cursor';
+  finger(f, kind, root, alpha, lag, joint = 'mp') {
+    const on = !!f; this.seg.forEach((m, i) => { m.visible = on && kind === 'finger' && (i > 0 || joint === 'mp'); }); this.cap.visible = on && kind !== 'cursor' && kind === 'finger'; this.stick.visible = on && kind === 'stick'; this.cursor.visible = on && kind === 'cursor';
     if (!on) { this.spheres = []; this.deform([], [0, 0]); return; }
     for (const m of this.seg) m.material.opacity = alpha; this.cap.material.opacity = alpha;
     let sp;
     if (kind === 'finger') {
-      this.capsule(this.seg[0], root, f.pip, RF); this.capsule(this.seg[1], f.pip, f.dip, RF * 0.975); this.capsule(this.seg[2], f.dip, f.tip, RF * 0.95); // a little thinner each: the joints do not flicker
+      if (joint === 'mp') this.capsule(this.seg[0], root, f.pip, RF); this.cap.material.color.setHex(joint === 'mp' ? COL.prox : COL.mid);
+      this.capsule(this.seg[1], f.pip, f.dip, RF * 0.975); this.capsule(this.seg[2], f.dip, f.tip, RF * 0.95); // a little thinner each: the joints do not flicker
       const s = Math.max(0.3, -f.u[2]), cx = root[0] + f.u[0] * root[2] / s, cy = root[1] + f.u[1] * root[2] / s; this.cap.position.set(cx, cy, -0.05); this.cap.rotation.z = Math.atan2(f.u[1], f.u[0]); this.cap.scale.set(Math.min(2, 1 / s), 1, 1);
       sp = [[f.tip, RF]]; for (let i = 1; i <= 5; i++) sp.push([[0, 1, 2].map((j) => f.tip[j] + (f.dip[j] - f.tip[j]) * i / 5), RF]);
     } else if (kind === 'stick') {

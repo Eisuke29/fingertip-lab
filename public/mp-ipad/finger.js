@@ -1,10 +1,12 @@
-// The virtual finger for "stroking with the MP joint" (same rules as the 3D page public/mp-stroke). Pure functions, no DOM, no three.js.
+// The virtual finger for stroking with the MP joint (same rules as the 3D page public/mp-stroke) or with the PIP joint (public/stroke). Pure functions, no DOM, no three.js.
 // Screen frame (mm): x right, y away from the person along the glass, z out of the screen. Vectors are [x, y, z].
 export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 export const add = (a, b, k = 1) => [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k];
 export const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 export const norm = (a) => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
-export const DIPK = 0.67, REST = 2 * Math.PI / 180, RF = 8; // DIP follows PIP; the resting finger is (almost) straight; finger radius
+export const DIPK = 0.67, REST = 2 * Math.PI / 180, REST_PIP = 6 * Math.PI / 180, RF = 8; // DIP follows PIP; the resting finger is (almost) straight; finger radius
+// h: height of the joint above the glass (mm), theta: usual angle of the segment above the joint, off: from the middle of the contact to the joint
+export const JOINTS = { mp: { h: 11, theta: 90, off: 12 }, pip: { h: 8.2, theta: 78, off: 12.5 } };
 
 // k: how fast the fingertip follows (1/s), hold: how far it sticks before slipping (mm), bump: grain height, drag: pull on the surface, dent: how deep it gives way
 export const MATS = {
@@ -26,7 +28,17 @@ export function frame(theta, yaw, curl) {
   return { up, u, n, m: dir(curl), d: dir(curl * (1 + DIPK)) };
 }
 // lag: where the fingertip is, minus where it would be without friction (mm, in the plane of the glass)
-export function solve({ root, theta, yaw, lag, gain = 1, bend = 'whole', kind = 'finger', len, tipZ }) {
+// PIP: the virtual middle phalanx is the straight continuation of the real proximal one and stays so; only the distal one bends.
+function solvePip({ root, theta, yaw, lag, gain = 1, kind = 'finger', len, tipZ }) {
+  const S = sideOf(yaw), H = toHand(yaw), lx = dot(lag, S) * gain, lz = dot(lag, H) * gain, F = kind === 'finger', lean = (v, a) => norm(add(v, S, Math.tan(a)));
+  const b = frame(theta, yaw, REST_PIP), base = { u: b.u, d: b.m }, b1 = F ? 0 : clamp(lx * 0.022, -0.7, 0.7), b2 = F ? clamp(lx * 0.044, -0.72, 0.72) : b1;
+  const u = lean(b.u, b1), d = F ? lean(frame(theta, yaw, clamp(REST_PIP + lz * 0.03, -0.35, 0.75)).m, b2) : u;
+  const need = tipZ - root[2], k = F ? clamp((need - u[2] * len[1]) / (d[2] * len[2]), 0.7, 1.8) : clamp(need / (u[2] * len[1] + d[2] * len[2]), 0.75, 1.35);
+  const dip = add(root, u, len[1] * (F ? 1 : k)), tip = add(dip, d, len[2] * k);
+  return { base, u, m: u, d, pip: root, dip, tip, k, bendDeg: Math.acos(clamp(dot(d, F ? base.d : base.u), -1, 1)) * 180 / Math.PI };
+}
+export function solve(o) { return o.joint === 'pip' ? solvePip(o) : solveMp(o); }
+function solveMp({ root, theta, yaw, lag, gain = 1, bend = 'whole', kind = 'finger', len, tipZ }) {
   const S = sideOf(yaw), H = toHand(yaw), lx = dot(lag, S) * gain, lz = dot(lag, H) * gain, F = kind === 'finger', whole = bend === 'whole';
   const base = frame(theta, yaw, REST);
   const b1 = F ? (whole ? clamp(lx * 0.016, -0.6, 0.6) : 0) : clamp(lx * 0.022, -0.7, 0.7), b2 = F ? clamp(lx * 0.044, -1.2, 1.2) : b1; // sideways
@@ -39,7 +51,7 @@ export function solve({ root, theta, yaw, lag, gain = 1, bend = 'whole', kind = 
   const bendDeg = Math.acos(clamp(dot(d, F ? base.d : base.u), -1, 1)) * 180 / Math.PI;
   return { base, u, m, d, pip, dip, tip, k, bendDeg };
 }
-export function restTip(root, theta, yaw, len) { const f = frame(theta, yaw, REST); return add(add(add(root, f.u, len[0]), f.m, len[1]), f.d, len[2]); }
+export function restTip(root, theta, yaw, len, joint = 'mp') { if (joint === 'pip') { const f = frame(theta, yaw, REST_PIP); return add(add(root, f.u, len[1]), f.m, len[2]); } const f = frame(theta, yaw, REST); return add(add(add(root, f.u, len[0]), f.m, len[1]), f.d, len[2]); }
 
 // The fingertip follows its resting place, sticks to the material and slips.
 export class Tip {
