@@ -18,7 +18,7 @@ if (params.has('clean')) document.body.classList.add('clean');
 // ---------- dimensions (meters) ----------
 const PAD = { w: 0.1785, l: 0.2476, t: 0.0061, bezel: 0.0090 };
 const SCREEN = { w: PAD.w - 2 * PAD.bezel, l: PAD.l - 2 * PAD.bezel };
-const ROOT0 = V(0.022, 0, 0.004), ROOT = ROOT0.clone(); // ROOT moves with the hand
+const ROOT0 = V(0.016, 0, -0.012), ROOT = ROOT0.clone(); // ROOT moves with the hand
 //                // PIP contact projected on the glass (right half: the right hand comes from the visitor's right)
 const H = V(0.28, 0, 1).normalize();             // horizontal direction from PIP toward DIP / the hand: the hand enters from the visitor side (+z)
 const DIPK = 0.67;                               // DIP follows PIP (natural coupling)
@@ -169,11 +169,11 @@ function panelRect() {
   const W = innerWidth, Hh = innerHeight, mobile = W < 640;
   const barH = CAPTURE ? 0 : (mobile ? 150 : 130);               // keep the enlarged panel above the control bar
   let h = panelBig ? Math.round(Hh - barH - 70) : Math.round(Hh * (mobile ? 0.26 : 0.42));
-  if (!panelBig && !mobile) h = Math.min(h, Hh - 214 - 160);
+  if (!panelBig && !mobile && !CAPTURE) h = Math.min(h, Hh - 16 - 424 - 56);      // keep clear of the control card (bottom right)
   h = Math.max(120, h);
   const w = Math.round(h * SCREEN.w / SCREEN.l);
-  const x = panelBig ? Math.round((W - w) / 2) : (mobile ? W - w - 14 : 26); // under the numbers, so that the hand stays visible
-  const y = panelBig ? 50 : (mobile ? 96 : 214);
+  const x = panelBig ? Math.round((W - w) / 2) : W - w - (mobile ? 14 : 30);
+  const y = panelBig ? 50 : (mobile ? 96 : 40);
   return { x, y, w, h };
 }
 function layoutPanel() {
@@ -286,7 +286,7 @@ const grain = (x, z) => Math.max(0, Math.sin(x * 1450) * Math.sin(z * 1450));
 let matKey = 'smooth';
 function setMat(k) { if (k === matKey && surfMat.userData.set) return; matKey = k; surfMat.userData.set = true; surfMat.color.set(MATS[k].color); surfMat.roughness = MATS[k].rough; document.querySelectorAll('#mats button').forEach((x) => x.classList.toggle('on', x.dataset.mat === k)); }
 function layoutSurface() { // the relaxed fingertip just reaches it
-  const fr = fingerFrame(...(vmode === 'extend' ? vPose() : [THP0 * DEG, THD]));
+  const fr = fingerFrame(THP0 * DEG, VTHD);
   surfY = vDipOf(vRoot(), fr).addScaledVector(fr.dDir, hand.Ld).y - RF;
 }
 function deformSurface(spheres, pullX, pullZ) { // spheres: [Vector3, radius]. The finger never goes into the material: the material gives way
@@ -317,13 +317,9 @@ guide.renderOrder = 10; guide.frustumCulled = false; scene.add(guide);
 const pivotDot = new THREE.Mesh(new THREE.SphereGeometry(0.0022, 20, 12), new THREE.MeshBasicMaterial({ color: 0xe0503a, depthTest: false }));
 pivotDot.renderOrder = 11; scene.add(pivotDot);
 
-const THP0 = 90, THD = 38 * DEG;   // the real finger keeps this shape: only the hand moves
+const THP0 = 90, THD = 38 * DEG;   // (used to set the height of the hand)
+const REAL_FIST = 92 * DEG, VTHD = 2 * DEG;   // the real finger stays closed in the fist; the virtual finger is straight, in the same line as before
 
-// 'extend': the real finger is closed in the fist and the virtual finger is stretched forward, whatever the real one does.
-// 'match' : the virtual finger continues the real one (the earlier version).
-const REAL_FIST = 92 * DEG, VTHD = 6 * DEG;
-let vmode = 'extend';
-const vPose = () => (vmode === 'extend' ? [+document.getElementById('vp').value * DEG, VTHD] : [+document.getElementById('tp').value * DEG, THD]);
 // ---------- geometry of the finger (shared real / virtual) ----------
 function fingerFrame(thm, curl) { // thm: the back of the hand rises from the glass by thm; curl: PIP flexion, DIP follows it (DIPK)
   const proxUp = H.clone().multiplyScalar(Math.cos(thm)).addScaledVector(UP, Math.sin(thm)).applyAxisAngle(H, -ROLL); // MP -> wrist
@@ -521,10 +517,10 @@ function orbitPos(target, az, el, d) {
   const dirEnv = V(Math.cos(el * DEG) * Math.sin(az * DEG), Math.sin(el * DEG), Math.cos(el * DEG) * Math.cos(az * DEG));
   return target.clone().addScaledVector(envToDev(dirEnv), d);
 }
-const FOCUS = () => ROOT0.clone().add(V(-0.008, -0.016, -0.030));
+const FOCUS = () => ROOT0.clone().add(V(0, -0.022, 0.002));
 const CAMS = {
   pov: { pos: EYE.clone(), target: ROOT0.clone().add(V(-0.012, -0.02, -0.012)), fov: 30 },
-  side: { pos: orbitPos(ROOT0.clone().add(V(0, -0.02, -0.03)), -90, 8, 0.44), target: ROOT0.clone().add(V(0, -0.02, -0.03)), fov: 32 },
+  side: { pos: orbitPos(ROOT0.clone().add(V(0, -0.02, 0)), -90, 8, 0.32), target: ROOT0.clone().add(V(0, -0.02, 0)), fov: 32 },
   orbit: { pos: orbitPos(ROOT0, 35, 25, 0.36), target: ROOT0.clone().add(V(0, -0.012, 0)), fov: 35 },
 };
 let camAnim = null, camMode = 'auto';
@@ -607,7 +603,7 @@ addEventListener('keydown', (e) => { if (e.code === 'Space' && !(e.target instan
 // [material, t0, t1]; in each part: left-right first, then front-back
 const PARTS = [['smooth', 0, 4], ['rough', 4, 11], ['catchy', 11, 18], ['catchy', 18, 25], ['sticky', 25, 33]];
 const DURATION = 33;
-const RANGE = { x0: -0.034, x1: 0.050, z0: -0.034, z1: 0.030 };
+const RANGE = { x0: -0.034, x1: 0.050, z0: -0.058, z1: 0.012 };
 function pathAt(t) {
   const p = PARTS.find((q) => t < q[2]) || PARTS[PARTS.length - 1], u = t - p[1], len = p[2] - p[1], env = THREE.MathUtils.smoothstep(u, 0, 0.6) * (1 - THREE.MathUtils.smoothstep(u, len - 0.5, len));
   const cross = len > 5 ? THREE.MathUtils.smoothstep(u, len * 0.58, len * 0.58 + 0.8) : 0;   // left-right -> front-back
@@ -644,12 +640,6 @@ for (const b of document.querySelectorAll('#mats button')) b.onclick = () => { i
 pick('kinds', 'kind', (v) => { kind = v; }); pick('bends', 'bend', (v) => { bendMode = v; });
 $('gain').oninput = () => { gain = +$('gain').value; $('gv').textContent = `${gain.toFixed(1)} 倍`; }; $('gain').oninput();
 $('tp').oninput = () => { $('tpv').textContent = `${$('tp').value}°`; }; $('tp').oninput();
-$('vp').oninput = () => { $('vpv').textContent = `${$('vp').value}°`; if (ready) layoutSurface(); }; $('vp').oninput();
-function setVmode(v) {
-  vmode = v; $('vpRow').hidden = v !== 'extend'; document.querySelectorAll('#vmodes button').forEach((x) => x.classList.toggle('on', x.dataset.vmode === v));
-  skinMat.vertexColors = v === 'match'; skinMat.color.set(v === 'match' ? 0xffffff : 0xb9b9b7); skinMat.needsUpdate = true; if (ready) layoutSurface();
-}
-pick('vmodes', 'vmode', setVmode); setVmode('extend');
 // drag on the tablet screen: the hand slides there (the rest of the picture still turns the camera)
 const aim = { x: ROOT0.x, z: ROOT0.z }, ray = new THREE.Raycaster(), glassPlane = new THREE.Plane(UP, 0);
 function onGlass(e, ox = 0, oz = 0) {
@@ -671,7 +661,7 @@ function seekTo(t) {
   for (let s = Math.max(0, t - 2); s < t; s += 1 / 60) { time = s; frame(1 / 60); }
   time = t;
 }
-const tipRest = (p) => { const fr = fingerFrame(...vPose()); return hand ? vDipOf(V(p.x, 0, p.z), fr).addScaledVector(fr.dDir, hand.Ld) : V(p.x, 0, p.z); };
+const tipRest = (p) => { const fr = fingerFrame(+$('tp').value * DEG, VTHD); return hand ? vDipOf(V(p.x, 0, p.z), fr).addScaledVector(fr.dDir, hand.Ld) : V(p.x, 0, p.z); };
 
 // ---------- frame ----------
 let last = performance.now();
@@ -681,26 +671,22 @@ function frame(dt) {
   const thp = +$('tp').value * DEG;
   if (manual) { const f = 1 - Math.exp(-16 * dt); ROOT.x += (aim.x - ROOT.x) * f; ROOT.z += (aim.z - ROOT.z) * f; }
   else { const p = pathAt(time); ROOT.x = p.x; ROOT.z = p.z; const part = PARTS.find((q) => time < q[2]) || PARTS[0]; setMat(part[0]); }
-  const ext = vmode === 'extend', [vth, vt] = vPose();
-  poseHand(thp, ext ? REAL_FIST : THD, 0);
+  poseHand(thp, REAL_FIST, 0);
   ring.position.set(ROOT.x, ring.position.y, ROOT.z); ring.material.opacity += (0.55 - ring.material.opacity) * Math.min(1, dt * 6);
   const M = MATS[matKey], rest = tipRest(ROOT);
   stepTip(rest.x, rest.z, dt);
-  // the base (no bending)
-  const base = fingerFrame(vth, vt), vR = vRoot();
+  // the base (no bending): virtual middle = straight extension of the real proximal phalanx
+  const base = fingerFrame(thp, VTHD), vR = vRoot();
   const lx = TIP.lag.dot(SIDE_DIR) * gain, lz = TIP.lag.dot(H) * gain;
   // sideways: leans after the fingertip that stayed behind. Along the finger: the DIP bends (or stretches).
   const whole = bendMode === 'whole', cl = THREE.MathUtils.clamp;
   const b1 = kind === 'finger' ? (whole ? cl(lx * 16, -0.6, 0.6) : 0) : cl(lx * 22, -0.7, 0.7), b2 = kind === 'finger' ? cl(lx * 44, -1.2, 1.2) : b1;
-  const p1 = whole && !ext ? cl(lz * 9, -0.3, 0.3) : 0, flex = cl(vt + lz * 22, ext ? -0.35 : 0, 1.2), F = kind === 'finger';
-  const lean = (v, a) => v.clone().addScaledVector(SIDE_DIR, Math.tan(a)).normalize();
-  const build = (a) => { const fr = fingerFrame(a, F ? flex : 0), u = lean(fr.u, b1), d = F ? lean(fr.dDir, b2) : u.clone(), m = F ? lean(fr.mDir, whole ? (b1 + b2) / 2 : 0) : u.clone(); return { u, d, m, y: u.y * hand.Lp + m.y * hand.Lm + d.y * hand.Ld }; };
+  const p1 = whole ? cl(lz * 9, -0.3, 0.3) : 0, flex = cl(VTHD + lz * 22, -0.35, 1.2);
+  const fr = fingerFrame(thp + p1, kind === 'finger' ? flex : 0), m = kind === 'finger' ? fr.mDir.clone().addScaledVector(SIDE_DIR, Math.tan(bendMode === 'whole' ? (b1 + b2) / 2 : 0)).normalize() : null;
+  const u = fr.u.clone().addScaledVector(SIDE_DIR, Math.tan(b1)).normalize(), d = kind === 'finger' ? fr.dDir.clone().addScaledVector(SIDE_DIR, Math.tan(b2)).normalize() : u.clone();
   // the fingertip stays on the material (it rides up the grains and sinks in by the dent)
   const bumpH = M.bump ? M.bump * grain(TIP.x, TIP.z) : 0; TIP.bob += (bumpH - TIP.bob) * Math.min(1, dt * 40);
-  const need = surfY + RF - M.dent + TIP.bob * (0.4 + 0.6 * Math.min(2, gain)) - vR.y;
-  let at = vth + p1;
-  if (ext) { let lo = vth - 0.6, hi = vth + 0.7; for (let i = 0; i < 16; i++) { at = (lo + hi) / 2; if (build(at).y > need) lo = at; else hi = at; } } // stretched finger: turns at its root instead of getting longer
-  const fb = build(at), u = fb.u, d = fb.d, mm = fb.m, k = cl(need / fb.y, 0.75, 1.35);
+  const need = surfY + RF - M.dent + TIP.bob * (0.4 + 0.6 * Math.min(2, gain)) - vR.y, mm = m || u, k = cl(need / (u.y * hand.Lp + mm.y * hand.Lm + d.y * hand.Ld), 0.75, 1.35);
   const vPip = vR.clone().addScaledVector(u, hand.Lp * k), vDip = vPip.clone().addScaledVector(mm, hand.Lm * k), vTip = vDip.clone().addScaledVector(d, hand.Ld * k);
   placeCapsule(vProx, vR, vPip); placeCapsule(vMid, vPip, vDip, RF * 0.975); placeCapsule(vDist, vDip, vTip, RF * 0.95);
   { const c = vR.clone().addScaledVector(u, vR.y / Math.max(0.3, -u.y)); vCap.position.set(c.x, -0.00005, c.z); vCap.rotation.set(-Math.PI / 2, 0, Math.atan2(-u.z, u.x)); vCap.scale.set(Math.min(2, 1 / Math.max(0.3, -u.y)), 1, 1); vCap.visible = kind === 'finger'; }
@@ -710,7 +696,7 @@ function frame(dt) {
   else if (kind === 'cursor') { cursorMesh.position.set(rest.x + TIP.lag.x * gain, vTip.y - RF + 0.0055, rest.z + TIP.lag.z * gain); spheres = [[cursorMesh.position.clone(), 0.0055]]; }
   else { spheres = [[vTip, RF]]; for (let i = 1; i <= 5; i++) spheres.push([vTip.clone().lerp(vDip, i / 5), RF]); }
   deformSurface(spheres, -TIP.lag.x, -TIP.lag.z);
-  { const mcpW = vR.clone().addScaledVector(base.proxUp, ext ? 0 : 0.06), e = vPipOf(vR, base), g = guide.geometry.attributes.position;
+  { const mcpW = vR.clone().addScaledVector(base.proxUp, 0.06), e = vPipOf(vR, base), g = guide.geometry.attributes.position;
     g.setXYZ(0, mcpW.x, mcpW.y, mcpW.z); g.setXYZ(1, vR.x, vR.y, vR.z); g.setXYZ(2, e.x, e.y, e.z); g.needsUpdate = true; guide.computeLineDistances();
     guide.visible = pivotDot.visible = ghostK > 0.5; pivotDot.position.copy(vR); }
   TIP.bend = d.angleTo(kind === 'finger' ? base.dDir : base.u) / DEG;
@@ -773,6 +759,6 @@ vProxMat.side = vMidMat.side = vDistMat.side = THREE.DoubleSide; // the cut at t
 window.stage = {
   get ready() { return ready; }, setView: (v) => setView(v, false, true), setCam: (n) => setCam(n, true), DURATION, MATS,
   seek(t) { setManual(false); playing = false; seekTo(t); frame(1 / 60); if (camMode === 'auto') applyAutoCam(t, 0, true); },
-  drive(x, z) { setManual(true); playing = false; aim.x = x; aim.z = z; }, setMat, set(o) { if (o.kind) kind = o.kind; if (o.bend) bendMode = o.bend; if (o.gain != null) gain = o.gain; if (o.vmode) setVmode(o.vmode); },
+  drive(x, z) { setManual(true); playing = false; aim.x = x; aim.z = z; }, setMat, set(o) { if (o.kind) kind = o.kind; if (o.bend) bendMode = o.bend; if (o.gain != null) gain = o.gain; },
   solve: (t) => solveHand(t * DEG, THD, 0), dbg: () => ({ ROOT, TIP, surfY, RF, hand, groupMinY, VGROUPS, surfGeo, matKey, manual, camera, controls }),
 };

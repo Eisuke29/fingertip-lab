@@ -88,7 +88,7 @@
   <div data-k="bend"><span>しなり</span><em><i></i></em><b>–</b></div>
   <ul class="legend">
     <li><s style="background:#b9b9b7"></s>実際の手（握ったまま）</li>
-    <li><s style="background:#4f8fe6"></s>仮想の中節</li>
+    <li><s style="background:#4f8fe6"></s>基節 → 仮想の中節</li>
     <li><s style="background:#f09a3e"></s>仮想の末節（しなる）</li>
     <li><s style="background:#e0503a;border-radius:50%"></s>支点（PIP）</li>
   </ul>
@@ -135,15 +135,12 @@
 <div id="manual" class="card">
   <div class="mhead"><span id="mtitle">ドラッグで手が動く</span><button id="autoBtn" hidden>自動へ</button></div>
   <div class="sec"><label>素材</label><div class="seg wrap" id="mats"></div></div>
-  <div class="sec"><label>仮想指の形</label><div class="seg" id="vmodes"><button data-vmode="extend" class="on">伸ばす</button><button data-vmode="match">手に合わせる</button></div></div>
   <div class="sec"><label>画面の中に描くもの</label><div class="seg" id="kinds"><button data-kind="finger" class="on">指</button><button data-kind="stick">棒</button><button data-kind="cursor">カーソル</button></div></div>
   <div class="sec"><label>左右の曲がり方</label><div class="seg" id="bends"><button data-bend="whole" class="on">全体がしなる</button><button data-bend="distal">末節だけ</button></div></div>
   <div class="sec">
     <label>しなりの誇張 <span id="gv"></span></label>
     <input id="gain" type="range" min="0" max="2.5" step="0.1" value="1">
-    <div id="vpRow"><label>仮想指の向き（奥へ） <span id="vpv"></span></label>
-    <input id="vp" type="range" min="20" max="65" step="1" value="38"></div>
-    <label>手の角度 <span id="tpv"></span></label>
+    <label>手の角度（仮想指の向き） <span id="tpv"></span></label>
     <input id="tp" type="range" min="60" max="100" step="1" value="78">
   </div>
 </div>
@@ -154,6 +151,6 @@
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="./main.js?v=20261124d"></script>
+<script type="module" src="./main.js?v=20261124e"></script>
 </body>
 </html>
