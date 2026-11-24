@@ -4,9 +4,10 @@
 //  2. when it is, the virtual finger is drawn at once; its root follows where the finger really is, then stays
 //  3. optional: the DIP bend is learned from the touch (ml.js). Touch cannot tell PIP: set by hand.
 import * as ML from './ml.js?v=3';
+import { Tilt, Eye, makeEyes, eyeFrom } from '../mp-ipad/sensors.js?v=5';
 
 const $ = (s) => document.querySelector(s), now = () => performance.now(), FAST = new URLSearchParams(location.search).has('fast') ? 3 : 1; // fast: tests only
-const MM = 0.1924, DIA = 15, LM = 25, LD = 22; // mm per CSS px (iPad A16); size of the drawn finger
+const MM = 0.1924, DIA = 15, LM = 25, LD = 17.5; // mm per CSS px (iPad A16); size of the drawn finger
 const LANE = 14, SIDE = 4, BAND = 7, STILL = 1.2; // mm: what belongs to the finger / allowed sideways / allowed up-down / allowed movement
 const ROUNDS = 3, SEG = 8.4, SKIP = 0.6, RELAX = 12, CURL = 60; // RELAX, CURL: only how far the drawing bends between relaxed and curled
 const S = { touches: [], cancels: 0, sizes: new Set(), place: null, lost: 0, hist: [], fh: [], run: null, samples: [], raw: [], plan: {}, model: null, est: null, display: null, judge: null };
@@ -105,6 +106,30 @@ $('#share').onclick = async () => {
   const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 };
 
+// ---------- eyes: the picture is drawn for where the person really looks from (same as the stroking page) ----------
+const SHARED = (() => { try { return JSON.parse(localStorage.getItem('mpIpad.v1') || '{}'); } catch { return {}; } })(); // camera place and 40 cm setting found on the stroking page
+const E = { on: false, eyes: null, tilt: new Tilt(), eye: new Eye(), err: '', tiltErr: '', motion: false };
+function cameraPlace() {
+  const gap = innerWidth > innerHeight ? Math.max(0, Math.min(120, Math.min(screen.width, screen.height) - innerHeight)) : 0, s = { left: -1, right: 1 }[SHARED.cam];
+  E.eyes?.configure({ hfov: 70, camPos: s ? { x: s * (innerWidth * MM / 2 + 9), y: gap * MM / 2, z: 0 } : { x: 0, y: innerHeight * MM / 2 + gap * MM + 9, z: 0 } });
+}
+$('#eye').onclick = async () => {
+  E.on = !E.on; $('#eye').setAttribute('aria-pressed', E.on); if (!E.on) { E.eyes?.stop(); return; }
+  E.err = ''; try {
+    if (typeof DeviceMotionEvent !== 'undefined') { // must be asked inside the tap
+      if (DeviceMotionEvent.requestPermission && await DeviceMotionEvent.requestPermission() !== 'granted') E.tiltErr = '傾きセンサーが許可されていません（26°として描きます）';
+      if (!E.motion) { E.motion = true; addEventListener('devicemotion', (e) => { const g = e.accelerationIncludingGravity; if (g && g.z != null) E.tilt.add(g, innerWidth > innerHeight, now()); }); }
+    }
+  } catch (e) { E.tiltErr = e.message; }
+  try { E.eyes ||= await makeEyes(); cameraPlace(); await E.eyes.start('user'); if (!E.on) E.eyes.stop(); } catch (e) { E.err = e.message || String(e); E.on = false; $('#eye').setAttribute('aria-pressed', 'false'); say(`前面カメラを使えません（${E.err}）`, true); }
+};
+addEventListener('resize', cameraPlace);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && E.on) E.eyes?.start('user').catch(() => {}); });
+function eyeNow() {
+  const e = E.eyes, m = E.on && e?.fresh ? [e.eye.x, e.eye.y, e.eye.z * (SHARED.zScale || 1)] : null, q = E.eye.update(m, E.on ? eyeFrom(E.tilt.deg ?? 26, 400, 420) : [0, -100, 460], now());
+  return { x: q[0], y: q[1], z: q[2] };
+}
+
 // ---------- drawing ----------
 const pad = $('#pad'), px = pad.getContext('2d'), fx = $('#fig').getContext('2d');
 // side view, the person on the left: proximal up from PIP, middle flat on the glass toward the person, distal lifted by DIP
@@ -152,20 +177,20 @@ function draw() {
   if (open) {
     const f = ML.features(mine());
     $('#offV').textContent = `${offset()} mm`; $('#pipV').textContent = `${$('#pip').value}°`; $('#dipV').textContent = `${$('#dip').value}°`;
-    $('#vals').innerHTML = [['接触の数', f ? f[0] : '—'], ['接触の大きさ（面積の平方根）', f ? `${f[1].toFixed(2)} mm` : '—'], ['接触の中心（線から下へ）', f ? `${(-f[6]).toFixed(1)} mm` : '—']].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('');
+    $('#vals').innerHTML = [['目', !E.on ? '追従していない' : { measured: '測っている', held: '見失った（保持）', default: E.eyes?.status || '準備中' }[E.eye.src]], ['iPadの傾き', E.tilt.deg == null ? '—' : `${E.tilt.deg.toFixed(1)}°`], ['接触の数', f ? f[0] : '—'], ['接触の大きさ（面積の平方根）', f ? `${f[1].toFixed(2)} mm` : '—'], ['接触の中心（線から下へ）', f ? `${(-f[6]).toFixed(1)} mm` : '—']].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('');
   }
   if (S.display) {
     const d = S.display; d.setFingerVisible(!!S.place && !R);
     if (S.place) d.pip.set(S.place.x, S.place.y + offset()); // the root goes where the finger is, then stays
     if (dip != null) d.setPose(+$('#pip').value, dip, !!S.place && !S.lost);
-    d.render({ x: 0, y: -100, z: 460 });
+    d.place?.(); d.render(eyeNow());
   }
   requestAnimationFrame(draw);
 }
 if (!('ontouchstart' in window || navigator.maxTouchPoints)) msg = 'iPadで開いてください（タッチ画面が必要です）';
 try { navigator.wakeLock?.request('screen').catch(() => {}); } catch {}
 draw();
-window.touchlab = { S, traj };
+window.touchlab = { S, traj, E };
 try {
   const THREE = await import('three'), { Display } = await import('../sync/display.js');
   class Finger extends Display {
@@ -175,6 +200,9 @@ try {
       G.dd = new THREE.Vector3(0, Math.cos(e), -Math.sin(e)); G.tip = G.vdip.clone().addScaledVector(G.dd, this.cfg.Ld); return G;
     }
   }
-  const d = new Finger($('#scene')), layout = () => d.layout({ mmPerPx: MM, pipFrac: { x: 0.5, y: 0.5 }, Lm: LM, Ld: LD, dia: DIA, fullBox: true, sideLight: true });
+  const d = new Finger($('#scene'));
+  d.cut = new THREE.Mesh(new THREE.CircleGeometry(DIA / 2, 40), new THREE.MeshStandardMaterial({ color: 0x4a86e8, roughness: 0.5 })); d.cut.visible = false; d.scene.add(d.cut); // closes the finger where the glass cuts it
+  d.place = () => { d.cut.visible = d.mid.visible; if (!d.cut.visible) return; const G = d.geometry(d.pose.thp, d.pose.thd), u = G.vdip.clone().sub(G.P).normalize(), k = Math.max(0.3, -u.z), s = G.P.z / k; d.cut.position.set(G.P.x + u.x * s, G.P.y + u.y * s, -0.05); d.cut.rotation.z = Math.atan2(u.y, u.x); d.cut.scale.set(Math.min(2, 1 / k), 1, 1); };
+  const layout = () => d.layout({ mmPerPx: MM, pipFrac: { x: 0.5, y: 0.5 }, Lm: LM, Ld: LD, dia: DIA, fullBox: true, sideLight: true });
   layout(); addEventListener('resize', layout); S.display = d;
 } catch (e) { msg = `仮想指を描画できません（${e.message}）。再読み込みしてください`; }

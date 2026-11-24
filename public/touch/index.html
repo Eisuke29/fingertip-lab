@@ -17,6 +17,7 @@
   #now { font-size:22px; font-weight:800; line-height:1.35; margin-right:auto; } #now:empty { visibility:hidden; }
   .bar { position:fixed; left:0; top:0; height:5px; width:0; background:var(--accent); z-index:3; }
   .btn { font:inherit; font-weight:700; color:inherit; border:1px solid var(--line); background:var(--panel); padding:11px 16px; border-radius:10px; pointer-events:auto; white-space:nowrap; }
+  .btn[aria-pressed="true"] { background:var(--ok); border-color:var(--ok); color:#04203f; }
   .btn.primary { background:var(--accent); border-color:var(--accent); color:#04203f; }
   #left { position:fixed; left:20px; top:92px; width:328px; pointer-events:none; }
   #left canvas { width:300px; height:230px; display:block; } #cap { font-weight:700; }
@@ -34,7 +35,7 @@
 <canvas id="scene"></canvas>
 <canvas id="pad"></canvas>
 <div class="bar" id="prog"></div>
-<div id="top"><div id="now" class="card"></div><button class="btn" id="set">調整</button><button class="btn primary" id="go">DIPを学習（約40秒）</button></div>
+<div id="top"><div id="now" class="card"></div><button class="btn" id="eye" aria-pressed="false">視線追従</button><button class="btn" id="set">調整</button><button class="btn primary" id="go">DIPを学習（約40秒）</button></div>
 <div id="left" class="card"><div id="cap">横から見た置き方</div><canvas id="fig" width="600" height="460"></canvas><ul id="checks"></ul></div>
 <div id="panel" class="card ui" hidden>
   <label>仮想指のつなぎ目 <span id="offV"></span><input class="ui" id="off" type="range" min="0" max="25" step="0.5" value="12.5"></label>
@@ -44,6 +45,6 @@
   <button class="btn" id="share" hidden style="margin-top:10px">記録を送る</button>
 </div>
 <div id="rotate">iPadを横向きにしてください</div>
-<script type="module" src="./touch.js?v=3"></script>
+<script type="module" src="./touch.js?v=4"></script>
 </body>
 </html>
