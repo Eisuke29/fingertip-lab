@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 
 export const NODES = { mp: [0, 42, 67, 89], pip: [42, 67, 89] };
-const END = 97, ROUND = 85.5, RINGS = 96, SEG = 44, TAU = Math.PI * 2;
+const END = 97, ROUND = 85.5, RINGS = 68, SEG = 32, TAU = Math.PI * 2;
 //                s    half width, back, palm side (mm)
 const PROFILE = [[-20, 10.6, 10.0, 10.2], [0, 9.8, 9.3, 9.8], [10, 9.1, 8.2, 9.5], [21, 8.6, 7.5, 9.1], [32, 8.6, 7.5, 8.4], [42, 9.1, 8.3, 7.7], [49, 8.4, 7.2, 8.4], [55, 8.0, 6.7, 8.6], [62, 7.9, 6.6, 8.0], [67, 8.1, 6.9, 7.2], [73, 7.8, 6.3, 7.9], [80, 7.7, 5.9, 8.3], [85.5, 7.3, 5.7, 8.0], [97, 7.0, 5.6, 7.7]];
 function profile(s) { // smooth (Catmull-Rom) through the table
@@ -20,20 +20,20 @@ function section(s, a) {
 // ---------- skin (pictures made by scripts/bake-skin.mjs) ----------
 const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const bell = (x, w) => Math.exp(-(x * x) / (w * w));
-function pic(name, srgb) {
-  const t = new THREE.TextureLoader().load(new URL(`./${name}?v=4`, import.meta.url).href); t.flipY = false; t.wrapS = THREE.RepeatWrapping; t.anisotropy = 8; if (srgb) t.colorSpace = THREE.SRGBColorSpace; return t;
+function pic(name, srgb, ready) {
+  const t = new THREE.TextureLoader().load(new URL(`./${name}?v=4`, import.meta.url).href, ready); t.flipY = false; t.wrapS = THREE.RepeatWrapping; t.anisotropy = 4; if (srgb) t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 // skin tones, light to dark (a choice of the person, nothing is measured)
 const TONES = [[0xf6, 0xd9, 0xc6], [0xee, 0xc4, 0xa6], [0xdd, 0xa8, 0x82], [0xb9, 0x80, 0x5a], [0x8a, 0x58, 0x3c], [0x56, 0x36, 0x27]];
 export function tone(x) { const p = Math.max(0, Math.min(1, x)) * (TONES.length - 1), i = Math.min(TONES.length - 2, p | 0), f = p - i; return new THREE.Color().setRGB(...[0, 1, 2].map((k) => (TONES[i][k] + (TONES[i + 1][k] - TONES[i][k]) * f) / 255), THREE.SRGBColorSpace); }
 
 export class SkinFinger {
-  constructor(scene, clip) {
-    const map = pic('skin.jpg', true), normalMap = pic('skin-normal.jpg', false);
+  constructor(scene, clip, ready) {
+    const map = pic('skin.jpg', true, ready), normalMap = pic('skin-normal.jpg', false, ready);
     const soft = (m) => { m.onBeforeCompile = (s) => { s.fragmentShader = s.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n float rim = 1.0 - abs(dot(normalize(normal), normalize(vViewPosition)));\n totalEmissiveRadiance += diffuseColor.rgb * vec3(0.22, 0.08, 0.05) * (0.25 + rim * rim);'); }; return m; }; // light that comes back out of the skin
-    this.mat = soft(new THREE.MeshPhysicalMaterial({ map, normalMap, normalScale: new THREE.Vector2(0.9, 0.9), roughness: 0.52, clearcoat: 0.06, clearcoatRoughness: 0.5, sheen: 0.25, sheenRoughness: 0.6, sheenColor: 0xff9a7a, clippingPlanes: clip, transparent: true, side: THREE.DoubleSide }));
+    this.mat = soft(new THREE.MeshStandardMaterial({ map, normalMap, normalScale: new THREE.Vector2(0.9, 0.9), roughness: 0.5, clippingPlanes: clip, transparent: true, side: THREE.DoubleSide }));
     this.geo = grid(RINGS, SEG, true); this.mesh = new THREE.Mesh(this.geo, this.mat);
-    this.nailMat = new THREE.MeshPhysicalMaterial({ map: pic('nail.jpg', true), roughness: 0.3, clearcoat: 0.7, clearcoatRoughness: 0.2, clippingPlanes: clip, transparent: true, side: THREE.DoubleSide });
+    this.nailMat = new THREE.MeshStandardMaterial({ map: pic('nail.jpg', true, ready), roughness: 0.22, clippingPlanes: clip, transparent: true, side: THREE.DoubleSide });
     this.nailGeo = grid(20, 16, false); this.nail = new THREE.Mesh(this.nailGeo, this.nailMat);
     // the cut at the glass looks like skin pressed against it: pale in the middle, redder toward the rim
     const CR = this.CR = 7, g = this.capGeo = new THREE.BufferGeometry(), cn = CR * (SEG + 1), idx = [], cc = new Float32Array(cn * 3), cu = new Float32Array(cn * 2), up = new Float32Array(cn * 3);

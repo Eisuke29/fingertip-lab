@@ -1,8 +1,8 @@
 // Stroking on the iPad itself. The hand is a fist; MP: the back of the index finger's proximal phalanx is on the glass, PIP: the back of its middle phalanx. Only the hand slides.
 // touch -> where the knuckle is, motion sensor -> how the iPad stands, front camera -> where the eyes are. No server, no PC.
-import { Contact, Lead, Ahead, Tilt, Eye, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=4';
-import { MATS, JOINTS, RF, PRESS, Tip, solve, restTip, grain, seenAt, add } from './finger.js?v=4';
-import { Scene } from './scene.js?v=4';
+import { Contact, Lead, Ahead, Tilt, Eye, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=5';
+import { MATS, JOINTS, RF, PRESS, Tip, solve, restTip, grain, seenAt, add } from './finger.js?v=5';
+import { Scene } from './scene.js?v=5';
 
 const $ = (s) => document.querySelector(s), now = () => performance.now(), rad = (d) => d * Math.PI / 180, val = (id) => +$(id).value;
 const MM = 0.1924, STORE = 'mpIpad.v1'; // mm per CSS px (264 ppi iPads); phalanges
@@ -126,7 +126,7 @@ function finger(dt, t) {
   S.f = solve({ joint: O.joint, root: S.root, theta, yaw, lag, gain: g, bend: O.bend, kind: O.kind, len, surf, dent: M.dent }); S.f.cursor = add(rest, lag, g); S.f.rest = rest;
 }
 function loop(t0) {
-  const t = now(), dt = Math.min(0.05, (t - last) / 1000); last = t; S.fps += ((1 / Math.max(dt, 1e-3)) - S.fps) * 0.05;
+  const began = now(), t = began, dt = Math.min(0.05, (t - last) / 1000); last = t; S.fps += ((1 / Math.max(dt, 1e-3)) - S.fps) * 0.05;
   const m = measured(), eye = S.eye.update(m, fallback(), t);
   if (!S.started) startScreen();
   scene.light(upOf(tiltDeg())); scene.setMaterial(O.mat);
@@ -138,6 +138,7 @@ function loop(t0) {
   if ($('#msg').textContent !== msg) $('#msg').textContent = msg;
   if (S.rec) { const f = S.f; S.rec.rows.push({ t: +(t - S.rec.t0).toFixed(1), c: S.raw.map((c) => [c.id, +c.x.toFixed(2), +c.y.toFixed(2), +c.rx.toFixed(2), +c.ry.toFixed(2)]), p: S.contact.p?.map((v) => +v.toFixed(2)), root: S.root?.map((v) => +v.toFixed(2)), lag: S.tip.lag.map((v) => +v.toFixed(2)), bend: f && +f.bendDeg.toFixed(1), tilt: S.tilt.deg && +S.tilt.deg.toFixed(2), eye: eye.map((v) => +v.toFixed(1)), src: S.eye.src, fps: +S.fps.toFixed(0) }); if (t - S.rec.t0 > 20000) sendRec(); }
   if (!$('#panel').hidden && (S.tickV = (S.tickV || 0) + 1) % 6 === 0) values(m, eye);
+  S.ms = (S.ms || 0) + (now() - began - (S.ms || 0)) * 0.05;
   requestAnimationFrame(loop);
 }
 function values(m, eye) {
@@ -146,8 +147,8 @@ function values(m, eye) {
   $('#vals').innerHTML = row('iPadの傾き', S.tilt.deg == null ? '測れない（26°）' : `${S.tilt.deg.toFixed(1)}°`) + row(O.joint === 'mp' ? '手の甲の傾き（水平から）' : '基節の傾き（水平から）', `${(val('#theta') - tiltDeg()).toFixed(0)}°`)
     + row('目', { measured: '測っている', held: '見失った（保持）', default: '既定の位置' }[S.eye.src]) + row('目までの距離', cm(Math.hypot(...eye))) + row('目の左右／手前／高さ', `${cm(w.side)}／${cm(w.back)}／${cm(w.height)}`)
     + row('仮想の指先が見える所', s ? `${Math.abs(dx).toFixed(0)} mm ${dx < 0 ? '左' : '右'}・${Math.abs(dy).toFixed(0)} mm ${dy < 0 ? '手前' : '奥'}` : '—') + row('遅れ／しなり', S.f ? `${Math.hypot(...S.tip.lag).toFixed(0)} mm／${S.f.bendDeg.toFixed(0)}°` : '—')
-    + row('接触の数／つなぎ直し', `${S.raw.length}／${S.contact.jumps}`) + row('打ち切られた接触', S.cancels) + row('顔の認識', S.eyes?.cost ? `${S.eyes.cost.toFixed(0)} ms` : '—') + row('速さ', `${S.fps.toFixed(0)} fps`);
+    + row('接触の数／つなぎ直し', `${S.raw.length}／${S.contact.jumps}`) + row('打ち切られた接触', S.cancels) + row('顔の認識', S.eyes?.cost ? `${S.eyes.cost.toFixed(0)} ms（${S.eyes.mode === 'worker' ? '別スレッド' : '同じスレッド'}）` : '—') + row('速さ／1コマの計算', `${S.fps.toFixed(0)} fps／${(S.ms || 0).toFixed(1)} ms`);
 }
-try { scene = new Scene($('#scene')); const lay = () => { scene.layout(MM); cameraPlace(); }; lay(); addEventListener('resize', lay); requestAnimationFrame(loop); } catch (e) { $('#sMsg').textContent = `描画できません（${e.message}）。再読み込みしてください`; }
+try { scene = new Scene($('#scene')); const lay = () => { scene.layout(MM); cameraPlace(); }; lay(); addEventListener('resize', lay); scene.setMaterial(O.mat); scene.warm(); requestAnimationFrame(loop); } catch (e) { $('#sMsg').textContent = `描画できません（${e.message}）。再読み込みしてください`; }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { try { navigator.wakeLock?.request('screen').catch(() => {}); } catch {} if (S.asked && O.eye === 'track') startEyes(); } });
 window.mpIpad = { S, O, get scene() { return scene; } };

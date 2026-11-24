@@ -57,13 +57,14 @@ const median = (q, i) => { const a = [...q].sort((x, y) => x.d[i] - y.d[i]), h =
 // predicted from its speed over the last moments. Slow: smoothed and not predicted (no trembling). Fast: predicted and not smoothed.
 export class Lead {
   constructor() { this.q = []; this.vel = [0, 0]; this.speed = 0; }
-  reset() { this.q = []; this.vel = [0, 0]; this.speed = 0; }
+  reset() { this.q = []; this.vel = [0, 0]; this.speed = 0; this.sv = null; }
   add(p, t) { const l = this.q[this.q.length - 1]; if (l && t - l.t < 1) { l.x = p[0]; l.y = p[1]; return; } this.q.push({ x: p[0], y: p[1], t }); while (this.q.length > 2 && t - this.q[0].t > 55) this.q.shift(); }
   at(now, lead) {
     const q = this.q, n = q.length; if (!n) return null; const l = q[n - 1]; if (n < 3 || l.t - q[0].t < 12) { this.vel = [0, 0]; return [l.x, l.y]; }
     let mt = 0, mx = 0, my = 0; for (const k of q) { mt += k.t / n; mx += k.x / n; my += k.y / n; }
     let a = 0, bx = 0, by = 0; for (const k of q) { const d = k.t - mt; a += d * d; bx += d * (k.x - mx); by += d * (k.y - my); }
-    const vx = bx / a, vy = by / a, sp = Math.hypot(vx, vy) * 1000, g = Math.max(0, Math.min(1, (sp - 8) / 30)), f = g * g * (3 - 2 * g), fx = mx + vx * (l.t - mt), fy = my + vy * (l.t - mt);
+    const k0 = this.sv && now - this.svT < 120 ? Math.exp(-(now - this.svT) / 30) : 0; this.sv = [bx / a + ((this.sv?.[0] || 0) - bx / a) * k0, by / a + ((this.sv?.[1] || 0) - by / a) * k0]; this.svT = now; // the speed is smoothed a little: no jerks
+    const [vx, vy] = this.sv, sp = Math.hypot(vx, vy) * 1000, g = Math.max(0, Math.min(1, (sp - 8) / 30)), f = g * g * (3 - 2 * g), fx = mx + vx * (l.t - mt), fy = my + vy * (l.t - mt);
     const T = (Math.max(0, Math.min(40, now - l.t)) + lead) * f; this.speed = sp; this.vel = [vx * 1000 * f, vy * 1000 * f];
     return [fx + (l.x - fx) * f + vx * T, fy + (l.y - fy) * f + vy * T];
   }
@@ -109,16 +110,43 @@ export function eyeToWorld(deg, e) { const p = deg * Math.PI / 180; return { bac
 
 // ---------- eyes (front camera) ----------
 // sideways and up-down do not depend on the camera's field of view, the distance does: `zScale` is found once per iPad (40 cm button)
+// The face is found in a worker. If that does not work, here in the page, and then not while the hand moves (it would hold up drawing).
 export async function makeEyes() {
   const { EyeTracker } = await import('../sync/eye.js');
   return new (class extends EyeTracker {
-    // finding the face holds up drawing: while the hand moves it is done less often (about 10 times a second)
     async start(id) {
+      if (this.mode !== 'page') {
+        try { await this.startWorker(id); return; } catch (e) { if (/Permission|NotAllowed|NotFound|NotReadable/i.test(e.name + e.message)) throw e; this.mode = 'page'; this.worker?.terminate(); this.worker = null; this.workerErr = e.message; }
+      }
       await super.start(id); if (this.lm.slow) return; const lm = this.lm, run = lm.detectForVideo.bind(lm); lm.slow = true; let last = -1e9, res = null;
-      lm.detectForVideo = (v, now) => { this.skip = this.busy && res && now - last < Math.max(100, (this.cost || 0) * 6); if (this.skip) return res; last = now; res = run(v, now); const c = performance.now() - now; this.cost = this.cost == null ? c : this.cost + (c - this.cost) * 0.1; return res; };
+      lm.detectForVideo = (v, now) => { this.skip = res && (this.busy || now - last < 100); if (this.skip) return res; last = now; res = run(v, now); const c = performance.now() - now; this.cost = this.cost == null ? c : this.cost + (c - this.cost) * 0.1; return res; };
     }
-    solve(L, now) { if (this.skip) return; super.solve(L, now); this.at = performance.now(); this.n = (this.n || 0) + 1; }
-    get fresh() { return !!this.eye && performance.now() - this.at < 500; }
+    async startWorker(id) {
+      this.stop(); this.status = '前面カメラを起動中…';
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { ...(id === 'user' ? { facingMode: 'user' } : { deviceId: id }), width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+      this.video = document.createElement('video'); this.video.muted = true; this.video.playsInline = true; this.video.srcObject = stream; await this.video.play();
+      if (!this.worker) {
+        this.status = '顔の認識モデルを読み込み中…'; const w = new Worker(new URL('./eye-worker.js?v=5', import.meta.url));
+        await new Promise((res, rej) => { const to = setTimeout(() => rej(new Error('顔の認識の準備が時間切れ')), 25000); w.onmessage = (e) => { if (e.data.type === 'ready') { clearTimeout(to); res(); } else if (e.data.type === 'error') { clearTimeout(to); rej(new Error(e.data.msg)); } }; w.onerror = (e) => { clearTimeout(to); rej(new Error(e.message || 'worker')); }; w.postMessage({ type: 'init' }); });
+        this.worker = w; this.mode = 'worker';
+      }
+      this.running = true; this.status = '顔を探しています'; this.f.forEach((f) => f.reset()); let waiting = false, last = -1e9, sent = 0;
+      this.worker.onmessage = (e) => {
+        waiting = false; const m = e.data; if (!this.running || !this.video) return;
+        if (m.type !== 'eyes') { this.status = `顔を認識できません（${m.msg}）`; return; }
+        this.cost = this.cost == null ? m.ms : this.cost + (m.ms - this.cost) * 0.1;
+        if (!m.pts) { this.status = '顔が見えません（画面の正面に座ってください）'; return; }
+        const L = []; L[468] = m.pts[0]; L[473] = m.pts[1]; super.solve(L, m.t); this.at = performance.now();
+      };
+      const loop = async () => {
+        if (!this.running || !this.video) return; const now = performance.now();
+        if ((!waiting || now - sent > 2000) && now - last > 45) { waiting = true; last = sent = now; try { const bitmap = await createImageBitmap(this.video); this.worker.postMessage({ type: 'frame', bitmap, t: now }, [bitmap]); } catch { waiting = false; } }
+        this.video?.requestVideoFrameCallback(loop);
+      };
+      this.video.requestVideoFrameCallback(loop);
+    }
+    solve(L, now) { if (this.skip) return; super.solve(L, now); this.at = performance.now(); }
+    get fresh() { return !!this.eye && performance.now() - this.at < 700; }
   })();
 }
 // The eye used for drawing: the measured one, held for a moment when the face is lost, then the default. Never jumps.

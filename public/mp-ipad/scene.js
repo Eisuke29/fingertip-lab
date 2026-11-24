@@ -1,7 +1,7 @@
 // The picture: a box behind the glass, the material, the virtual finger. Drawn for one eye position (off-axis projection).
 import * as THREE from 'three';
-import { MATS, RF, grain, toHand } from './finger.js?v=4';
-import { SkinFinger } from './skin.js?v=4';
+import { MATS, RF, grain, toHand } from './finger.js?v=5';
+import { SkinFinger } from './skin.js?v=5';
 
 const V = (a) => new THREE.Vector3(a[0], a[1], a[2]), UP = new THREE.Vector3(0, 1, 0);
 const COL = { prox: 0x35a57a, mid: 0x4f8fe6, dist: 0xf09a3e };
@@ -15,7 +15,7 @@ function gridTexture(line, alpha) {
 }
 export class Scene {
   constructor(canvas) {
-    this.r = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' }); this.r.setPixelRatio(Math.min(2, devicePixelRatio)); this.r.localClippingEnabled = true;
+    this.r = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' }); this.r.setPixelRatio(Math.min(1.5, devicePixelRatio)); this.r.localClippingEnabled = true;
     this.r.shadowMap.enabled = true; this.r.shadowMap.type = THREE.PCFSoftShadowMap; this.r.setClearColor(0x0a0c0c);
     this.scene = new THREE.Scene(); this.cam = new THREE.PerspectiveCamera();
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x6a7070, 1.5));
@@ -25,7 +25,7 @@ export class Scene {
     const add = (g, m) => { const x = new THREE.Mesh(g, m); x.castShadow = true; x.visible = false; x.frustumCulled = false; this.scene.add(x); return x; };
     this.seg = [COL.prox, COL.mid, COL.dist].map((c) => add(new THREE.BufferGeometry(), mat(c)));
     this.cap = add(new THREE.CircleGeometry(RF, 40), new THREE.MeshStandardMaterial({ color: COL.prox, roughness: 0.55, transparent: true })); this.cap.castShadow = false; // closes the finger where the glass cuts it
-    this.skin = new SkinFinger(this.scene, clip);
+    this.skin = new SkinFinger(this.scene, clip, (t) => this.r.initTexture(t)); // to the graphics chip as soon as it is here, not when the finger first appears
     this.stick = add(new THREE.CylinderGeometry(2.6, 2.6, 1, 20), mat(0xe6e9ec)); this.cursor = add(new THREE.SphereGeometry(5, 28, 18), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 }));
     this.surfMat = new THREE.MeshStandardMaterial({ roughness: 0.7, map: gridTexture() });
     this.box = new THREE.Group(); this.scene.add(this.box); this.surfZ = -78; this.mat = null;
@@ -41,31 +41,44 @@ export class Scene {
     const nx = 120, ny = Math.round(120 * H / W); this.n = [nx, ny]; this.size = [W, H];
     if (this.surf) { this.scene.remove(this.surf); this.surf.geometry.dispose(); }
     this.surf = new THREE.Mesh(new THREE.PlaneGeometry(W, H, nx, ny), this.surfMat); this.surf.receiveShadow = true; this.surf.frustumCulled = false; this.scene.add(this.surf);
-    this.surfMat.map.repeat.set(W / 12, H / 12); this.rest = this.surf.geometry.attributes.position.array.slice(); this.dirty = true;
+    this.surfMat.map.repeat.set(W / 12, H / 12); this.rest = this.surf.geometry.attributes.position.array.slice(); this.dirty = true; this.box0 = null;
     const e = Math.hypot(W, H) / 2 + 60, c = this.sun.shadow.camera; Object.assign(c, { left: -e, right: e, top: e, bottom: -e, near: 10, far: 900 }); c.updateProjectionMatrix();
   }
+  // everything is prepared before the first touch (otherwise the first picture of the finger takes half a second)
+  warm() { this.skin.update([[0, 0, 11], [0, 0, -32], [0, 0, -57], [0, 0, -74]], 'mp', [0, -1, 0], 1); const on = [...this.seg, this.cap, this.stick, this.cursor, this.skin.mesh, this.skin.nail, this.skin.cap], was = on.map((m) => m.visible); for (const m of on) m.visible = true; this.r.compile(this.scene, this.cam); this.render([0, -175, 553]); on.forEach((m, i) => { m.visible = was[i]; }); }
   // the light comes from above in the real world (measured tilt), a little from the right so that the shadow falls sideways
   light(up) { const t = [0, 0, -DEPTH]; this.sun.target.position.set(...t); this.sun.position.set(up[0] * 300 + 190, up[1] * 300 + 20, Math.max(120, up[2] * 300)); }
   setMaterial(key) { if (this.mat === key) return; this.mat = key; this.surfMat.color.set(MATS[key].color); this.surfMat.roughness = MATS[key].rough; this.dirty = true; }
   // drawing cannot keep up: fewer pixels (less delay)
-  lighter() { const p = this.r.getPixelRatio(); if (p <= 1.25) return; this.r.setPixelRatio(p - 0.25); this.r.setSize(innerWidth, innerHeight, false); }
+  lighter() { const p = this.r.getPixelRatio(); if (p <= 1) return; this.r.setPixelRatio(p - 0.25); this.r.setSize(innerWidth, innerHeight, false); }
   setDepth(z) { if (Math.abs(z - this.surfZ) < 0.01) return; this.surfZ = z; this.dirty = true; }
-  // the finger never goes into the material: the material gives way. spheres: [[x, y, z], r]
+  // the finger never goes into the material: the material gives way. spheres: [[x, y, z], r]. Only the part around the finger is computed.
   deform(spheres, pull) {
     if (!spheres.length && !this.dirty && !this.was) return;
-    const p = this.surf.geometry.attributes.position.array, r0 = this.rest, M = MATS[this.mat], c = spheres[0]?.[0], deep = c ? Math.max(0, this.surfZ - (c[2] - spheres[0][1])) : 0;
-    for (let i = 0; i < p.length; i += 3) {
-      let x = r0[i], y = r0[i + 1], z = this.surfZ + (M.bump ? M.bump * grain(x, y) : 0);
-      if (c) {
-        const dx = x - c[0], dy = y - c[1], d2 = dx * dx + dy * dy;
-        if (d2 < 2500) {
-          const q = Math.exp(-d2 / 242); x += pull[0] * M.drag * q; y += pull[1] * M.drag * q; z -= Math.min(M.dent, deep) * q;
-          for (const [s, r] of spheres) { const ex = x - s[0], ey = y - s[1], e2 = ex * ex + ey * ey; if (e2 < r * r) z = Math.min(z, s[2] - Math.sqrt(r * r - e2) - 0.1); }
-        }
+    const g = this.surf.geometry, p = g.attributes.position.array, q = g.attributes.normal.array, r0 = this.rest, M = MATS[this.mat], c = spheres[0]?.[0], [nx, ny] = this.n, [W, H] = this.size, sx = W / nx, sy = H / ny, w = nx + 1, REACH = 46;
+    const flat = (i) => { p[i] = r0[i]; p[i + 1] = r0[i + 1]; p[i + 2] = this.surfZ + (M.bump ? M.bump * grain(r0[i], r0[i + 1]) : 0); };
+    if (this.dirty) { for (let i = 0; i < p.length; i += 3) flat(i); this.normals(0, nx, 0, ny); }
+    const box = c ? [Math.max(0, Math.floor((c[0] - REACH + W / 2) / sx)), Math.min(nx, Math.ceil((c[0] + REACH + W / 2) / sx)), Math.max(0, Math.floor((H / 2 - c[1] - REACH) / sy)), Math.min(ny, Math.ceil((H / 2 - c[1] + REACH) / sy))] : null, o = this.box0;
+    if (o) for (let j = o[2]; j <= o[3]; j++) for (let i = o[0]; i <= o[1]; i++) flat((j * w + i) * 3);
+    if (box) {
+      const deep = Math.min(M.dent, Math.max(0, this.surfZ - (c[2] - spheres[0][1])));
+      for (let j = box[2]; j <= box[3]; j++) for (let i = box[0]; i <= box[1]; i++) {
+        const k = (j * w + i) * 3, x0 = r0[k], y0 = r0[k + 1], dx = x0 - c[0], dy = y0 - c[1], d2 = dx * dx + dy * dy; if (d2 > REACH * REACH) continue;
+        const e = Math.exp(-d2 / 242); let x = x0 + pull[0] * M.drag * e, y = y0 + pull[1] * M.drag * e, z = p[k + 2] - deep * e;
+        if (d2 < 1600) for (const [s, r] of spheres) { const ex = x - s[0], ey = y - s[1], e2 = ex * ex + ey * ey; if (e2 < r * r) z = Math.min(z, s[2] - Math.sqrt(r * r - e2) - 0.1); }
+        p[k] = x; p[k + 1] = y; p[k + 2] = z;
       }
-      p[i] = x; p[i + 1] = y; p[i + 2] = z;
     }
-    this.surf.geometry.attributes.position.needsUpdate = true; this.surf.geometry.computeVertexNormals(); this.dirty = false; this.was = spheres.length > 0;
+    for (const b of [o, box]) if (b) this.normals(Math.max(0, b[0] - 1), Math.min(nx, b[1] + 1), Math.max(0, b[2] - 1), Math.min(ny, b[3] + 1));
+    this.box0 = box; g.attributes.position.needsUpdate = g.attributes.normal.needsUpdate = true; this.dirty = false; this.was = spheres.length > 0;
+  }
+  normals(i0, i1, j0, j1) {
+    const p = this.surf.geometry.attributes.position.array, q = this.surf.geometry.attributes.normal.array, [nx, ny] = this.n, w = nx + 1;
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const k = (j * w + i) * 3, a = (j * w + Math.max(0, i - 1)) * 3, b = (j * w + Math.min(nx, i + 1)) * 3, c = (Math.min(ny, j + 1) * w + i) * 3, d = (Math.max(0, j - 1) * w + i) * 3;
+      const ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2], vx = p[d] - p[c], vy = p[d + 1] - p[c + 1], vz = p[d + 2] - p[c + 2], x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx, l = Math.sqrt(x * x + y * y + z * z) || 1;
+      q[k] = x / l; q[k + 1] = y / l; q[k + 2] = z / l;
+    }
   }
   capsule(m, a, b, r) {
     const A = V(a), d = V(b).sub(A), L = d.length(); m.position.copy(A).addScaledVector(d, 0.5); m.quaternion.setFromUnitVectors(UP, d.normalize());
