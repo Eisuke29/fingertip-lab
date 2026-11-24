@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="タッチ推定">
+<meta name="apple-mobile-web-app-title" content="仮想指">
 <meta name="theme-color" content="#15171c">
 <title>タッチで動く仮想指</title>
 <style>
@@ -13,18 +13,18 @@
   html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); overflow:hidden; overscroll-behavior:none; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; font:15px/1.5 system-ui,"Hiragino Sans","Yu Gothic UI",sans-serif; }
   #scene, #pad { position:fixed; inset:0; width:100%; height:100%; display:block; }
   .card { background:rgba(21,23,28,.9); border-radius:12px; padding:10px 14px; }
-  #top { position:fixed; left:0; right:0; top:0; padding:14px 20px; display:flex; gap:12px; align-items:flex-start; pointer-events:none; }
-  #now { font-size:24px; font-weight:800; line-height:1.3; margin-right:auto; }
-  #now:empty { display:none; } #chip { font-size:18px; font-weight:800; font-variant-numeric:tabular-nums; margin-right:auto; }
+  #top { position:fixed; left:0; right:0; top:0; padding:14px 20px; display:flex; gap:12px; align-items:flex-start; pointer-events:none; z-index:2; }
+  #now { font-size:22px; font-weight:800; line-height:1.35; margin-right:auto; } #now:empty { visibility:hidden; }
   .bar { position:fixed; left:0; top:0; height:5px; width:0; background:var(--accent); z-index:3; }
   .btn { font:inherit; font-weight:700; color:inherit; border:1px solid var(--line); background:var(--panel); padding:11px 16px; border-radius:10px; pointer-events:auto; white-space:nowrap; }
   .btn.primary { background:var(--accent); border-color:var(--accent); color:#04203f; }
-  label.card { pointer-events:auto; font-weight:700; display:flex; align-items:center; gap:10px; white-space:nowrap; } input[type=range] { width:130px; height:24px; }
-  #left { position:fixed; left:20px; top:96px; width:328px; pointer-events:none; }
-  #left canvas { width:300px; height:270px; display:block; }
-  #right { position:fixed; right:20px; top:96px; width:310px; pointer-events:none; }
+  #left { position:fixed; left:20px; top:92px; width:328px; pointer-events:none; }
+  #left canvas { width:300px; height:230px; display:block; } #cap { font-weight:700; }
+  #checks { list-style:none; margin:6px 0 0; padding:0; font-weight:700; } #checks li { display:flex; gap:8px; } #checks .ok { color:var(--ok); } #checks .ng { color:var(--warn); } #checks .v { margin-left:auto; }
+  #panel { position:fixed; right:20px; top:92px; width:310px; }
+  #panel label { display:block; font-weight:700; margin-bottom:8px; } #panel label span { float:right; font-variant-numeric:tabular-nums; } #panel input { width:100%; height:28px; }
   table { width:100%; border-collapse:collapse; font-size:14px; } td { padding:2px 0; border-bottom:1px solid var(--line); } td:last-child { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
-  .mut { color:var(--mut); font-size:13px; } .big { font-size:17px; font-weight:800; margin-top:10px; } .yes { color:var(--ok); } .some { color:var(--warn); } .no { color:var(--ng); }
+  .mut { color:var(--mut); font-size:13px; } .big { font-size:17px; font-weight:800; margin-top:8px; } .yes { color:var(--ok); } .some { color:var(--warn); } .no { color:var(--ng); }
   #rotate { position:fixed; inset:0; z-index:20; background:var(--bg); display:none; place-items:center; font-size:22px; font-weight:700; }
   @media (orientation:portrait) { #rotate { display:grid; } }
 </style>
@@ -34,14 +34,16 @@
 <canvas id="scene"></canvas>
 <canvas id="pad"></canvas>
 <div class="bar" id="prog"></div>
-<div id="top">
-  <div id="now" class="card"></div><div id="chip" class="card" hidden></div>
-  <label class="card ui" id="pipBox" hidden>第二関節 <output id="pipV">70°</output><input id="pip" class="ui" type="range" min="30" max="110" value="70"></label>
-  <button class="btn" id="info" hidden>数字を見る</button><button class="btn" id="share" hidden>記録を送る</button><button class="btn primary" id="go">キャリブレート（約2分）</button>
+<div id="top"><div id="now" class="card"></div><button class="btn" id="set">調整</button><button class="btn primary" id="go">DIPを学習（約40秒）</button></div>
+<div id="left" class="card"><div id="cap">横から見た置き方</div><canvas id="fig" width="600" height="460"></canvas><ul id="checks"></ul></div>
+<div id="panel" class="card ui" hidden>
+  <label>仮想指のつなぎ目 <span id="offV"></span><input class="ui" id="off" type="range" min="0" max="25" step="0.5" value="12.5"></label>
+  <label>第二関節（手動） <span id="pipV"></span><input class="ui" id="pip" type="range" min="60" max="120" value="95"></label>
+  <label id="dipL">先の関節（手動） <span id="dipV"></span><input class="ui" id="dip" type="range" min="0" max="90" value="15"></label>
+  <table id="vals"></table><div id="res"></div>
+  <button class="btn" id="share" hidden style="margin-top:10px">記録を送る</button>
 </div>
-<div id="left" class="card" hidden><div class="mut">この動きに合わせる（横から見た指）</div><canvas id="fig" width="600" height="540"></canvas></div>
-<div id="right" class="card"><table id="vals"></table><div id="res"></div></div>
 <div id="rotate">iPadを横向きにしてください</div>
-<script type="module" src="./touch.js"></script>
+<script type="module" src="./touch.js?v=3"></script>
 </body>
 </html>

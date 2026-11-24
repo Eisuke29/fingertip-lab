@@ -1,6 +1,6 @@
-// Learning DIP and PIP from the touch contacts, in the browser, from one person's calibration. Pure functions, no DOM.
+// Learning the DIP bend (0 = relaxed, 1 = curled) from the touch contacts, in the browser, from one person's calibration. Pure functions, no DOM.
 // A browser gives no capacitance image: only, per contact, a position, radii, an angle and a force.
-export const OUT = ['dip', 'pip'], NAMES = ['n', 'size', 'len', 'rx', 'ry', 'cx', 'cy', 'force', 'dsize', 'dlen', 'dcx', 'dcy'];
+export const OUT = ['dip'], NAMES = ['n', 'size', 'len', 'rx', 'ry', 'cx', 'cy', 'force', 'dsize', 'dlen', 'dcx', 'dcy'];
 const FLOOR = [0.3, 0.2, 0.2, 0.2, 0.2, 0.5, 0.5, 0.05, 0.2, 0.2, 0.2, 0.2]; // changes smaller than this are not blown up (mm)
 
 // list: contacts {x, y, rx, ry, a, f} in mm
@@ -26,7 +26,7 @@ function scaler(rows) {
 }
 const targets = (rows) => OUT.map((k) => {
   const m = rows.reduce((s, r) => s + r[k], 0) / rows.length;
-  return { k, m, s: Math.max(1, Math.sqrt(rows.reduce((s, r) => s + (r[k] - m) ** 2, 0) / rows.length)) };
+  return { k, m, s: Math.max(0.05, Math.sqrt(rows.reduce((s, r) => s + (r[k] - m) ** 2, 0) / rows.length)) };
 });
 
 function solve(A, b) {
@@ -46,7 +46,7 @@ export function fitLinear(rows) {
   return (x) => { const z = Z(x); return T.map((t, o) => t.m + t.s * z.reduce((s, v, i) => s + v * W[o][i], 0)); };
 }
 export function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-// small neural network (12 -> 16 -> 8 -> 2), Adam, a little noise on the inputs against overfitting
+// small neural network (12 -> 16 -> 8 -> 1), Adam, a little noise on the inputs against overfitting
 export async function fitNet(rows, { epochs = 60, tick = null, seed = 1 } = {}) {
   const rnd = mulberry(seed), gauss = () => Math.sqrt(-2 * Math.log(rnd() + 1e-12)) * Math.cos(2 * Math.PI * rnd());
   const Z = scaler(rows), T = targets(rows), X = rows.map((r) => Z(r.x)), Y = rows.map((r) => T.map((t) => (r[t.k] - t.m) / t.s));
@@ -110,7 +110,7 @@ async function heldOut(rows, fit) {
 const rel = (h) => h.s.reduce((a, s) => a + s.err / s.base, 0);
 // Is there anything to read? An input that is worse than, or as good as, the mean says no.
 export const verdictOf = (s) => (s.r > 0.8 && s.err < 0.55 * s.base ? 'yes' : s.r > 0.5 && s.err < 0.85 * s.base ? 'some' : 'no');
-// samples: [{round, seg, t (s in the segment), x}]   traj(round, seg, t) -> {dip, pip}
+// samples: [{round, seg, t (s in the segment), x}]   traj(round, seg, t) -> {dip}
 export async function train(samples, traj, { tick = null, epochs = 60 } = {}) {
   const rounds = [...new Set(samples.map((s) => s.round))].filter((R) => samples.filter((s) => s.round === R).length >= 100);
   const use = samples.filter((s) => rounds.includes(s.round));
@@ -121,11 +121,8 @@ export async function train(samples, traj, { tick = null, epochs = 60 } = {}) {
   // the better model for each joint, judged on rounds it has not seen
   const fl = fitLinear(rows), fn = await fitNet(rows, { epochs, tick });
   const kind = OUT.map((_, k) => (net.s[k].err < best.h.s[k].err ? 'net' : 'linear')), s = OUT.map((_, k) => (kind[k] === 'net' ? net : best.h).s[k]);
-  const src = (k) => (kind[k] === 'net' ? net : best.h).pairs;
-  const wrong = (seg, k) => { const v = src(k).filter((q) => q.seg === seg); return v.length ? v.reduce((a, q) => a + Math.abs(q.p[k] - q.y[k]), 0) / v.length : null; };
   return {
     lag: best.lag, kind, rows: rows.length, rounds: rounds.length, score: s.map((v) => ({ ...v, verdict: verdictOf(v) })),
-    cross: { dipWhenPip: wrong('pip', 0), pipWhenDip: wrong('dip', 1) },
     predict: (x) => { const a = fl(x), b = fn(x); return kind.map((q, k) => (q === 'net' ? b[k] : a[k])); },
   };
 }
