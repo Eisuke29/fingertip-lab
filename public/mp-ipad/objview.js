@@ -1,8 +1,8 @@
 // How the things of objects.js look. view(thing, scene) puts the meshes into a group and returns { group, update(spheres, dt) }.
 import * as THREE from 'three';
-import { RF } from './finger.js?v=9';
-import { fieldZ } from './world.js?v=9';
-import { surface, copyOf, roundBox, TILE } from './tex.js?v=9';
+import { RF } from './finger.js?v=10';
+import { fieldZ } from './world.js?v=10';
+import { surface, copyOf, roundBox, TILE } from './tex.js?v=10';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v)), tinted = (key, c) => { const m = copyOf(key); m.color = new THREE.Color(c); return m; };
 // steps that get wider downward: every step an edge, its top light, its side dark toward the foot

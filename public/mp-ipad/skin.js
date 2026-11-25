@@ -1,9 +1,9 @@
 // The virtual finger: one shape, drawn in several ways (the ways earlier studies on virtual hands drew them). The skin was made by Sol and
 // wrapped around by scripts/bake-finger.py. Rest coordinate s (mm): MP 0, PIP 42, DIP 67, fingertip centre 89, end 97.
 import * as THREE from 'three';
-import { surface } from './tex.js?v=9';
+import { surface } from './tex.js?v=10';
 
-export const NODES = { mp: [0, 42, 67, 89], pip: [42, 67, 89], point: [42, 67, 89] };
+export const NODES = { mp: [0, 42, 67, 89], pip: [42, 67, 89], point: [42, 67, 89], fist: [42, 67, 89] };
 // id, name
 export const LOOKS = [['real', '本物'], ['photo', '自分の写真'], ['glove', '手袋'], ['toon', 'アニメ'], ['plaster', '石こう'], ['robot', 'ロボット'], ['bone', '骨'], ['glass', '半透明'], ['shadow', '影だけ']];
 const MEAN = 0.72; // the linear value of finger-color.jpg that stands for the skin colour itself
@@ -36,8 +36,8 @@ export function tone(x) { const p = Math.max(0, Math.min(1, x)) * (TONES.length 
 export class SkinFinger {
   constructor(scene, clip, ready) {
     this.clip = clip[0]; this.look = 'real'; this.cut = { taper: 0.7, over: 9, depth: 0, shade: 0.15, fade: 0, blob: 0.5 };
-    const pic = (name, srgb) => { const t = new THREE.TextureLoader().load(new URL(`./${name}?v=9`, import.meta.url).href, ready); t.flipY = false; t.wrapS = THREE.RepeatWrapping; t.anisotropy = 8; if (srgb) t.colorSpace = THREE.SRGBColorSpace; return t; };
-    const color = pic('finger-color.jpg', true), normalMap = pic('finger-normal.jpg'), roughnessMap = pic('finger-rough.jpg'), NS = (k) => new THREE.Vector2(k, k), base = { clippingPlanes: clip, transparent: true };
+    const pic = (name, srgb) => { const t = new THREE.TextureLoader().load(new URL(`./${name}?v=10`, import.meta.url).href, ready); t.flipY = false; t.wrapS = THREE.RepeatWrapping; t.anisotropy = 8; if (srgb) t.colorSpace = THREE.SRGBColorSpace; return t; };
+    const color = pic('finger-color.jpg', true), normalMap = pic('finger-normal.jpg'), roughnessMap = pic('finger-rough.jpg'), NS = (k) => new THREE.Vector2(k, k), base = { clippingPlanes: clip, clipShadows: true, transparent: true };
     this.u = { uTop: { value: 0 }, uShade: { value: 0.15 }, uFade: { value: 0 } };
     // near the cut: a little darker (the shadow of the knuckle), or dissolving. Skin also gives back some light from inside
     const near = (m, sss = 0) => { m.onBeforeCompile = (s) => { Object.assign(s.uniforms, this.u); s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying float vDeep;').replace('#include <begin_vertex>', '#include <begin_vertex>\n vDeep = -position.z;'); s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vDeep; uniform float uTop, uShade, uFade;').replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n { float t = smoothstep(0.0, 8.0, vDeep - uTop); diffuseColor.rgb *= mix(vec3(1.0) - uShade * vec3(0.85, 1.0, 1.0), vec3(1.0), t); if (uFade > 0.05) diffuseColor.a *= smoothstep(0.0, uFade, vDeep - uTop); }\n totalEmissiveRadiance += diffuseColor.rgb * 0.2;
@@ -57,7 +57,7 @@ export class SkinFinger {
     };
     this.geo = grid(RINGS, SEG); this.mesh = new THREE.Mesh(this.geo, this.mats.real);
     // the outline of the cartoon finger
-    this.line = new THREE.Mesh(this.geo, new THREE.MeshBasicMaterial({ color: 0x2a1a14, side: THREE.BackSide, clippingPlanes: clip })); this.line.material.onBeforeCompile = (s) => { s.vertexShader = s.vertexShader.replace('#include <begin_vertex>', 'vec3 transformed = position + normal * 0.5;'); };
+    this.line = new THREE.Mesh(this.geo, new THREE.MeshBasicMaterial({ color: 0x2a1a14, side: THREE.BackSide, clippingPlanes: clip })); this.line.material.onBeforeCompile = (s) => { s.vertexShader = s.vertexShader.replace('#include <begin_vertex>', 'vec3 transformed = position + normal * 0.5 * smoothstep(1.0, 5.0, -position.z);'); };
     // the cut, closed with skin; and a soft shadow on the glass that can hide it
     const CR = this.CR = 7, g = this.capGeo = new THREE.BufferGeometry(), cn = CR * (SEG + 1), idx = [], cu = new Float32Array(cn * 2), up = new Float32Array(cn * 3);
     for (let r = 0; r < CR; r++) for (let j = 0; j <= SEG; j++) { const k = r * (SEG + 1) + j, f = r / (CR - 1), a = j / SEG * TAU; cu.set([0.75 + 0.1 * f * Math.cos(a), 0.45 + 0.04 * f * Math.sin(a)], k * 2); up.set([0.9 * f * Math.cos(a), 0.9 * f * Math.sin(a), 0.75], k * 3); if (r < CR - 1 && j < SEG) idx.push(k, k + SEG + 1, k + 1, k + 1, k + SEG + 1, k + SEG + 2); }
@@ -74,10 +74,12 @@ export class SkinFinger {
     this.mats.toon.color.copy(k).multiplyScalar(1.1); this.mats.photo.color.setScalar(this.photoGain || 1); this.capColor();
   }
   setPhoto(tex, mean) { this.mats.photo.map = tex; this.mats.photo.needsUpdate = true; this.photoMean = mean; this.hasPhoto = true; this.capColor(); }
-  capColor() { const m = this.mats[this.look === 'photo' && !this.hasPhoto ? 'real' : this.look] || this.mats.real, s = 0.62 - this.cut.shade * 0.5; this.capMat.map = this.look === 'real' || this.look === 'glass' ? this.mats.real.map : null; this.capMat.metalness = this.look === 'robot' ? 0.5 : 0; this.capMat.color.copy(this.look === 'photo' && this.photoMean ? this.photoMean : this.look === 'robot' ? new THREE.Color(0x3c4148) : m.color || new THREE.Color(1, 1, 1)).multiplyScalar(s); this.capMat.needsUpdate = true; }
+  capColor() { const m = this.mats[this.look === 'photo' && !this.hasPhoto ? 'real' : this.look] || this.mats.real, s = (this.cut.taper > 0.9 ? 0.85 : 0.62) - this.cut.shade * 0.5; this.capMat.map = this.look === 'real' || this.look === 'glass' ? this.mats.real.map : null; this.capMat.metalness = this.look === 'robot' ? 0.5 : 0; this.capMat.color.copy(this.look === 'photo' && this.photoMean ? this.photoMean : this.look === 'robot' ? new THREE.Color(0x3c4148) : m.color || new THREE.Color(1, 1, 1)).multiplyScalar(s); this.capMat.needsUpdate = true; }
+  // thicker toward the root (it shows around the real knuckle); the fingertip keeps its size
+  setThick(k) { if (this.thick === k) return; this.thick = k; this.mode = null; }
   setLook(l) { if (this.look === l) return; this.look = l; this.mesh.material = this.mats[l === 'photo' && !this.hasPhoto ? 'real' : l] || this.mats.real; this.mode = null; this.capColor(); this.visible = this.vis; }
   setCut(c) { const o = this.cut; if (Object.keys(c).every((k) => o[k] === c[k])) return; Object.assign(o, c); this.clip.constant = -o.depth; this.u.uTop.value = o.depth; this.u.uShade.value = o.shade; this.u.uFade.value = o.fade; this.capColor(); }
-  set visible(v) { this.vis = v; const b = this.look === 'bone', s = this.look === 'shadow'; this.mesh.visible = v && !b; this.line.visible = v && this.look === 'toon'; this.cap.visible = v && !b && !s && this.cut.taper < 0.97 && this.cut.fade < 0.1 && this.look !== 'glass'; this.blob.visible = v && this.cut.blob > 0.02; for (const m of this.bones) m.visible = v && b; }
+  set visible(v) { this.vis = v; const b = this.look === 'bone', s = this.look === 'shadow'; this.mesh.visible = v && !b; this.line.visible = v && this.look === 'toon'; this.cap.visible = v && !b && !s && this.cut.fade < 0.1 && this.look !== 'glass'; this.blob.visible = v && this.cut.blob > 0.02; for (const m of this.bones) m.visible = v && b; }
   get visible() { return this.vis; }
   // smear: [x, y] the root is made longer in the direction of the movement by this much to both sides, only near the glass: what the prediction misses stays under the knuckle
   // pts: the joints [root, (pip), dip, tip]; palm: palm-side direction at the root
@@ -86,7 +88,7 @@ export class SkinFinger {
     if (this.mode !== key) { // which part of the skin
       this.mode = key; const uv = this.geo.attributes.uv.array; this.S = [];
       for (let i = 0; i < RINGS; i++) { const t = i / (RINGS - 1), s = t < 0.62 ? s0 + (76 - s0) * t / 0.62 : t < 0.8 ? 76 + (ROUND + 4 - 76) * (t - 0.62) / 0.18 : ROUND + 4 + (END - ROUND - 4) * Math.sin((t - 0.8) / 0.2 * Math.PI / 2); this.S.push(s); for (let j = 0; j <= SEG; j++) { uv[(i * (SEG + 1) + j) * 2] = j / SEG; uv[(i * (SEG + 1) + j) * 2 + 1] = (s - S0) / (END - S0); } }
-      this.geo.attributes.uv.needsUpdate = true; this.sec = this.S.map((s) => Array.from({ length: SEG + 1 }, (_, j) => section(s, j / SEG * TAU, plate)));
+      this.geo.attributes.uv.needsUpdate = true; this.sec = this.S.map((s) => { const k = 1 + ((this.thick || 1) - 1) * smooth(80, 58, s); return Array.from({ length: SEG + 1 }, (_, j) => section(s, j / SEG * TAU, plate).map((v) => v * k)); });
     }
     // the bone line, rounded at the joints
     const P = pts.map((p) => new THREE.Vector3(...p)), n = P.length, D = [], L = []; for (let i = 0; i < n - 1; i++) { const d = P[i + 1].clone().sub(P[i]); L.push(d.length()); D.push(d.normalize()); }
@@ -103,9 +105,9 @@ export class SkinFinger {
     });
     const C = this.cut, bend = n > 2 ? Math.acos(Math.max(-1, Math.min(1, D[n - 3].dot(D[n - 2])))) : 0;
     // narrower toward the cut, so that the cut stays under the real knuckle
-    const thin = (z) => { const t = Math.max(0, Math.min(1, (-z - C.depth) / Math.max(1, C.over))); return 1 - C.taper * (1 - Math.sqrt(1 - (1 - t) ** 2)); };
+    const thin = (z) => { const t = Math.max(0, Math.min(1, (-z - C.depth - 0.7) / Math.max(1, C.over))); return 1 - C.taper * (1 - Math.sqrt(1 - (1 - t) ** 2)); };
     const pos = this.geo.attributes.position.array; let k = 0;
-    for (let i = 0; i < RINGS; i++) { const q = R[i], f = C.taper > 0.01 ? thin(q.c.z) : 1, bulge = 1 + 0.06 * Math.min(1, bend) * bell(q.s - 60, 6); for (let j = 0; j <= SEG; j++) { const [x0, y0] = this.sec[i][j], x = x0 * f * (y0 > 0 ? bulge : 1), y = y0 * f * (y0 > 0 ? bulge : 1); pos[k++] = q.c.x + q.r.x * x + q.n.x * y; pos[k++] = q.c.y + q.r.y * x + q.n.y * y; pos[k++] = q.c.z + q.r.z * x + q.n.z * y; } }
+    for (let i = 0; i < RINGS; i++) { const q = R[i], lim = C.taper > 0.01 ? Math.max(0, (-q.c.z - C.depth - 0.3) / (10.5 * (this.thick || 1) * Math.sqrt(Math.max(0, 1 - q.t.z * q.t.z)) + 0.01)) : 1, f = C.taper > 0.01 ? Math.min(thin(q.c.z), 1 + (Math.min(1, lim) - 1) * C.taper) : 1, bulge = 1 + 0.06 * Math.min(1, bend) * bell(q.s - 60, 6); for (let j = 0; j <= SEG; j++) { const [x0, y0] = this.sec[i][j], x = x0 * f * (y0 > 0 ? bulge : 1), y = y0 * f * (y0 > 0 ? bulge : 1); pos[k++] = q.c.x + q.r.x * x + q.n.x * y; pos[k++] = q.c.y + q.r.y * x + q.n.y * y; pos[k++] = q.c.z + q.r.z * x + q.n.z * y; } }
     const sm = smear ? Math.hypot(...smear) : 0; if (sm > 0.2) { const ux = smear[0] / sm, uy = smear[1] / sm; for (let i = 0; i < RINGS; i++) { const c = R[i].c; if (c.z < -20) break; for (let j = 0; j <= SEG; j++) { const m = (i * (SEG + 1) + j) * 3, w = smooth(-15, -1, pos[m + 2]), o = ((pos[m] - c.x) * ux + (pos[m + 1] - c.y) * uy) / 9 * sm * w; pos[m] += ux * o; pos[m + 1] += uy * o; } } }
     normals(this.geo, RINGS, SEG);
     // the cut, exactly along the skin
@@ -133,7 +135,7 @@ function normals(g, n, m) {
   for (let i = 0; i < n; i++) for (let j = 0; j <= m; j++) {
     const k = (i * W + j) * 3, jl = j === 0 ? m - 1 : j - 1, jr = j === m ? 1 : j + 1, a = (i * W + jl) * 3, b = (i * W + jr) * 3, c = (Math.max(0, i - 1) * W + j) * 3, d = (Math.min(n - 1, i + 1) * W + j) * 3;
     const ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2], vx = p[d] - p[c], vy = p[d + 1] - p[c + 1], vz = p[d + 2] - p[c + 2]; let x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx, l = Math.hypot(x, y, z);
-    if (l < 1e-9) { x = vx; y = vy; z = vz; l = Math.hypot(x, y, z) || 1; } q[k] = x / l; q[k + 1] = y / l; q[k + 2] = z / l;
+    if (l < 1e-9) { x = vx; y = vy; z = vz; l = Math.hypot(x, y, z) || 1; } q[k] = -x / l; q[k + 1] = -y / l; q[k + 2] = -z / l; // outward
   }
   g.attributes.position.needsUpdate = g.attributes.normal.needsUpdate = true;
 }

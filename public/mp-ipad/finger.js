@@ -7,7 +7,7 @@ export const norm = (a) => { const l = Math.hypot(...a) || 1; return [a[0] / l, 
 export const DIPK = 0.67, REST = 2 * Math.PI / 180, REST_PIP = 6 * Math.PI / 180, RF = 8; // DIP follows PIP; the resting finger is (almost) straight; finger radius
 // h: height of the joint above the glass (mm), theta: usual angle of the segment above the joint, off: from the middle of the contact to the joint
 export const JOINTS = { mp: { h: 11, theta: 90, off: 12 }, pip: { h: 8.2, theta: 78, off: 6 },
-  point: { h: 8.2, theta: 75, off: 0 } }; // point: only the PIP knuckle touches, so the joint is exactly at the middle of the contact
+  point: { h: 8.2, theta: 75, off: 0 }, fist: { h: 8.2, theta: 75, off: 0 } }; // point: only the PIP knuckle touches, so the joint is exactly at the middle of the contact
 
 // Surfaces to stroke. k: how fast the fingertip follows (1/s), hold: how far it sticks before slipping (mm), bump: grain height (f: how fine), drag: pull on the surface, dent: how deep it gives way. from: the study that used it
 export const MATS = {
