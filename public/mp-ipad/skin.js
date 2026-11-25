@@ -1,11 +1,13 @@
 // The virtual finger: one shape, drawn in several ways (the ways earlier studies on virtual hands drew them). The skin was made by Sol and
 // wrapped around by scripts/bake-finger.py. Rest coordinate s (mm): MP 0, PIP 42, DIP 67, fingertip centre 89, end 97.
 import * as THREE from 'three';
-import { surface } from './tex.js?v=12';
+import { surface } from './tex.js?v=13';
 
 export const NODES = { tip: [0, 42, 67, 89], joint: [42, 67, 89] };
 // id, name
 export const LOOKS = [['real', '本物'], ['photo', '自分の写真'], ['glove', '手袋'], ['toon', 'アニメ'], ['plaster', '石こう'], ['robot', 'ロボット'], ['bone', '骨'], ['glass', '半透明'], ['shadow', '影だけ']];
+// slime: how fast it swallows light (per mm) and what it gives back
+export const GEL = { sigma: 'vec3(0.034, 0.0085, 0.044)', glow: 'vec3(0.10, 0.30, 0.04)' };
 const MEAN = 0.72; // the linear value of finger-color.jpg that stands for the skin colour itself
 const S0 = -20, END = 97, ROUND = 84.5, RINGS = 112, SEG = 48, TAU = Math.PI * 2;
 //                s    half width, back, palm side (mm)
@@ -37,11 +39,11 @@ export class SkinFinger {
   constructor(scene, clip, ready, share = null) {
     this.scene = scene; this.width = 1; this.slice = null;
     this.clip = clip[0]; this.look = 'real'; this.cut = { taper: 0.7, over: 9, depth: 0, shade: 0.15, fade: 0, blob: 0.5 };
-    const pic = (name, srgb) => { const t = new THREE.TextureLoader().load(new URL(`./${name}?v=12`, import.meta.url).href, ready); t.flipY = false; t.wrapS = THREE.RepeatWrapping; t.anisotropy = 8; if (srgb) t.colorSpace = THREE.SRGBColorSpace; return t; };
+    const pic = (name, srgb) => { const t = new THREE.TextureLoader().load(new URL(`./${name}?v=13`, import.meta.url).href, ready); t.flipY = false; t.wrapS = THREE.RepeatWrapping; t.anisotropy = 8; if (srgb) t.colorSpace = THREE.SRGBColorSpace; return t; };
     const [color, normalMap, roughnessMap] = this.pics = share?.pics || [pic('finger-color.jpg', true), pic('finger-normal.jpg'), pic('finger-rough.jpg')], NS = (k) => new THREE.Vector2(k, k), base = { clippingPlanes: clip, clipShadows: true, transparent: true };
-    this.u = { uTop: { value: 0 }, uShade: { value: 0.15 }, uFade: { value: 0 } };
+    this.u = { uTop: { value: 0 }, uShade: { value: 0.15 }, uFade: { value: 0 }, uGel: { value: 1e4 }, uBlood: { value: 1e4 } };
     // near the cut: a little darker (the shadow of the knuckle), or dissolving. Skin also gives back some light from inside
-    const near = (m, sss = 0) => { m.onBeforeCompile = (s) => { Object.assign(s.uniforms, this.u); s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying float vDeep;').replace('#include <begin_vertex>', '#include <begin_vertex>\n vDeep = -position.z;'); s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vDeep; uniform float uTop, uShade, uFade;').replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n { float t = smoothstep(0.0, 8.0, vDeep - uTop); diffuseColor.rgb *= mix(vec3(1.0) - uShade * vec3(0.85, 1.0, 1.0), vec3(1.0), t); if (uFade > 0.05) diffuseColor.a *= smoothstep(0.0, uFade, vDeep - uTop); }\n totalEmissiveRadiance += diffuseColor.rgb * 0.2;
+    const near = (m, sss = 0) => { m.onBeforeCompile = (s) => { Object.assign(s.uniforms, this.u); s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying float vDeep;').replace('#include <begin_vertex>', '#include <begin_vertex>\n vDeep = -position.z;'); s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vDeep; uniform float uTop, uShade, uFade, uGel, uBlood;').replace('#include <opaque_fragment>', `{ float w = smoothstep(uBlood - 5.5, uBlood - 0.5, vDeep + 0.9 * sin(vViewPosition.x * 0.9 + 1.4 * sin(vViewPosition.y * 0.7)) + 0.5 * sin(vViewPosition.y * 2.3)); outgoingLight = mix(outgoingLight, vec3(0.16, 0.006, 0.008) + outgoingLight * vec3(0.28, 0.02, 0.02), w * 0.92); }\n { float d = max(0.0, vDeep - uGel) * 1.2; vec3 T = exp(-d * ${GEL.sigma}); outgoingLight = outgoingLight * T + ${GEL.glow} * (1.0 - T); }\n#include <opaque_fragment>`).replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n { float t = smoothstep(0.0, 8.0, vDeep - uTop); diffuseColor.rgb *= mix(vec3(1.0) - uShade * vec3(0.85, 1.0, 1.0), vec3(1.0), t); if (uFade > 0.05) diffuseColor.a *= smoothstep(0.0, uFade, vDeep - uTop); }\n totalEmissiveRadiance += diffuseColor.rgb * 0.2;
  ${sss ? `float rim = 1.0 - abs(dot(normalize(normal), normalize(vViewPosition))); totalEmissiveRadiance += diffuseColor.rgb * vec3(0.13, 0.07, 0.055) * ${sss.toFixed(2)} * (0.35 + rim * rim);` : ''}`); }; return m; };
     const std = (o, sss) => near(new THREE.MeshStandardMaterial({ ...base, ...o }), sss);
     const ramp = new THREE.DataTexture(new Uint8Array([150, 205, 255, 255]), 4, 1, THREE.RedFormat); ramp.minFilter = ramp.magFilter = THREE.NearestFilter; ramp.needsUpdate = true;
@@ -79,6 +81,8 @@ export class SkinFinger {
   // thicker toward the root (it shows around the real knuckle); the fingertip keeps its size
   setThick(k) { if (this.thick === k) return; this.thick = k; this.mode = null; }
   // the whole finger wider or narrower (which finger it is)
+  // gel: depth of the surface of the slime (mm below the glass), or null
+  setGel(d) { this.u.uGel.value = d ?? 1e4; }
   setWidth(k) { if (this.width === k) return; this.width = k; this.mode = null; }
   setLook(l) { if (this.look === l) return; this.look = l; this.mesh.material = this.mats[l === 'photo' && !this.hasPhoto ? 'real' : l] || this.mats.real; this.mode = null; this.capColor(); this.visible = this.vis; }
   setCut(c) { const o = this.cut; if (Object.keys(c).every((k) => o[k] === c[k])) return; Object.assign(o, c); this.clip.constant = -o.depth; this.u.uTop.value = o.depth; this.u.uShade.value = o.shade; this.u.uFade.value = o.fade; this.capColor(); }
@@ -112,7 +116,7 @@ export class SkinFinger {
     const pos = this.geo.attributes.position.array; let k = 0;
     for (let i = 0; i < RINGS; i++) { const q = R[i], lim = C.taper > 0.01 ? Math.max(0, (-q.c.z - C.depth - 0.3) / (10.5 * (this.thick || 1) * Math.sqrt(Math.max(0, 1 - q.t.z * q.t.z)) + 0.01)) : 1, f = C.taper > 0.01 ? Math.min(thin(q.c.z), 1 + (Math.min(1, lim) - 1) * C.taper) : 1, up = 1 + bends.reduce((v, [j, b]) => v + 0.16 * b * bell(q.s - j, 5), 0), pad = 1 + bends.reduce((v, [j, b]) => v + 0.09 * b * (bell(q.s - j + 8, 4) + bell(q.s - j - 8, 4)) - 0.1 * b * bell(q.s - j, 2.6), 0); for (let j = 0; j <= SEG; j++) { const [x0, y0] = this.sec[i][j], x = x0 * f * (y0 > 0 ? 1 + (pad - 1) * 0.5 : 1), y = y0 * f * (y0 > 0 ? pad : up); pos[k++] = q.c.x + q.r.x * x + q.n.x * y; pos[k++] = q.c.y + q.r.y * x + q.n.y * y; pos[k++] = q.c.z + q.r.z * x + q.n.z * y; } }
     const sm = smear ? Math.hypot(...smear) : 0; if (sm > 0.2) { const ux = smear[0] / sm, uy = smear[1] / sm; for (let i = 0; i < RINGS; i++) { const c = R[i].c; if (c.z < -20) break; for (let j = 0; j <= SEG; j++) { const m = (i * (SEG + 1) + j) * 3, w = smooth(-15, -1, pos[m + 2]), o = ((pos[m] - c.x) * ux + (pos[m + 1] - c.y) * uy) / 9 * sm * w; pos[m] += ux * o; pos[m + 1] += uy * o; } } }
-    this.R = R; this.pos = pos; normals(this.geo, RINGS, SEG); if (this.slice != null) this.drawStump();
+    this.R = R; this.pos = pos; normals(this.geo, RINGS, SEG); if (this.slice != null) this.drawStump(); this.u.uBlood.value = this.slice != null && this.wet ? -R[this.slice].c.z : 1e4;
     // the cut, exactly along the skin
     const zc = -C.depth; { const a = this.capGeo.attributes.position.array, X = [], Y = []; let cx = 0, cy = 0; for (let j = 0; j <= SEG; j++) { X[j] = Y[j] = 0; for (let i = 0; i < RINGS - 1; i++) { const p = (i * (SEG + 1) + j) * 3, q = p + (SEG + 1) * 3, z0 = pos[p + 2], z1 = pos[q + 2]; if (z0 >= zc && z1 < zc) { const f = (z0 - zc) / (z0 - z1); X[j] = pos[p] + (pos[q] - pos[p]) * f; Y[j] = pos[p + 1] + (pos[q + 1] - pos[p + 1]) * f; break; } } if (j < SEG) { cx += X[j] / SEG; cy += Y[j] / SEG; } }
       for (let r = 0; r < this.CR; r++) for (let j = 0; j <= SEG; j++) { const m = (r * (SEG + 1) + j) * 3, f = r / (this.CR - 1); a[m] = cx + (X[j] - cx) * f; a[m + 1] = cy + (Y[j] - cy) * f; a[m + 2] = zc - 0.05; } this.capGeo.attributes.position.needsUpdate = true;
@@ -127,9 +131,9 @@ export class SkinFinger {
   sever(i) {
     if (this.look === 'bone') this.mesh.material = this.mats.plaster; const M = this.mesh.material, plain = ['robot', 'plaster', 'bone', 'shadow'].includes(this.look), from = i * SEG * 6, g = this.geo.clone(), c = this.R[i].c;
     g.translate(-c.x, -c.y, -c.z); g.setDrawRange(from, (RINGS - 1) * SEG * 6 - from); const face = new THREE.MeshStandardMaterial(plain ? { color: this.look === 'robot' ? 0x2b2f36 : 0xcfc8ba, roughness: 0.8, side: THREE.DoubleSide } : { map: flesh(), roughness: 0.32, side: THREE.DoubleSide });
-    const piece = new THREE.Group(), m = new THREE.Mesh(g, M.clone()); m.material.onBeforeCompile = M.onBeforeCompile; m.material.opacity = this.look === 'glass' ? 0.6 : 1; m.castShadow = m.receiveShadow = true; m.frustumCulled = false; piece.add(m);
+    const piece = new THREE.Group(), m = new THREE.Mesh(g, M.clone()); m.material.onBeforeCompile = (s) => { const u = this.u; this.u = { ...u, uGel: { value: 1e4 }, uBlood: { value: 1e4 }, uShade: { value: 0 }, uFade: { value: 0 } }; M.onBeforeCompile(s); this.u = u; }; m.material.customProgramCacheKey = () => 'piece' + this.look; m.material.opacity = this.look === 'glass' ? 0.6 : 1; m.castShadow = m.receiveShadow = true; m.frustumCulled = false; piece.add(m);
     const cap = () => { const q = new THREE.BufferGeometry(), N = SEG + 2, idx = [], uv = [0.5, 0.5]; for (let j = 0; j <= SEG; j++) { const a = j / SEG * TAU; uv.push(0.5 + 0.49 * Math.cos(a), 0.5 + 0.49 * Math.sin(a)); if (j < SEG) idx.push(0, j + 1, j + 2); } q.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3)); q.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(N * 3), 3)); q.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); q.setIndex(idx); const x = new THREE.Mesh(q, face); x.frustumCulled = false; x.castShadow = true; return x; };
-    const end = cap(); this.fill(end, i, c, -0.15); piece.add(end); piece.position.copy(c); this.scene.add(piece); if (!this.stump) { this.stump = cap(); this.scene.add(this.stump); } else this.stump.material = face; this.slice = i; this.geo.setDrawRange(0, from); this.drawStump(); this.visible = this.vis; this.piece = piece;
+    const end = cap(); this.fill(end, i, c, -0.15); piece.add(end); piece.position.copy(c); this.scene.add(piece); if (!this.stump) { this.stump = cap(); this.scene.add(this.stump); } else this.stump.material = face; this.slice = i; this.wet = !plain; this.geo.setDrawRange(0, from); this.drawStump(); this.visible = this.vis; this.piece = piece;
     return { group: piece, t: this.R[i].t.clone(), n: this.R[i].n.clone(), len: this.R[RINGS - 1].c.distanceTo(c), flesh: !plain };
   }
   fill(cap, i, o, out) { const a = cap.geometry.attributes.position.array, R = this.R[i], z = R.c; a[0] = z.x - o.x + R.t.x * out; a[1] = z.y - o.y + R.t.y * out; a[2] = z.z - o.z + R.t.z * out; for (let j = 0; j <= SEG; j++) { const k = (i * (SEG + 1) + j) * 3, m = (j + 1) * 3; a[m] = this.pos[k] - o.x; a[m + 1] = this.pos[k + 1] - o.y; a[m + 2] = this.pos[k + 2] - o.z; } cap.geometry.attributes.position.needsUpdate = true; cap.geometry.computeVertexNormals(); }

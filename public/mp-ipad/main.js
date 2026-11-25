@@ -1,25 +1,25 @@
 // Stroking on the iPad itself: the PIP knuckle or the fingertip of one or two fingers is on the glass, a virtual finger goes on from there into the screen. Only the hand slides.
 // touch -> where the contact is, motion sensor -> how the iPad stands, front camera -> where the eyes are. No server, no PC.
-import { Point, Pair, Lead, Ahead, Tilt, Eye, TOP, live, camera, cameraOff, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=12';
-import { MATS, CONTACTS, FINGERS, ORDER, RF, PRESS, Tip, solve, restTip, reach, within, lengths, grain, seenAt, add } from './finger.js?v=12';
-import { settle } from './world.js?v=12';
-import { THINGS, makeThing } from './objects.js?v=12';
-import { Scene, DEPTH } from './scene.js?v=12';
-import { tone, LOOKS } from './skin.js?v=12';
-import { fingerFromPhoto, keepPhoto, lastPhoto } from './photo.js?v=12';
+import { Point, Pair, Lead, Ahead, Tilt, Eye, TOP, live, camera, cameraOff, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=13';
+import { MATS, CONTACTS, FINGERS, ORDER, RF, PRESS, Tip, solve, restTip, reach, within, lengths, grain, seenAt, add } from './finger.js?v=13';
+import { settle } from './world.js?v=13';
+import { THINGS, makeThing } from './objects.js?v=13';
+import { Scene, DEPTH } from './scene.js?v=13';
+import { tone, LOOKS } from './skin.js?v=13';
+import { fingerFromPhoto, keepPhoto, lastPhoto } from './photo.js?v=13';
 import { Color, SRGBColorSpace } from 'three';
 let scene = null;
 
 const $ = (s) => document.querySelector(s), now = () => performance.now(), rad = (d) => d * Math.PI / 180, val = (id) => +$(id).value;
-const MM = 0.1924, STORE = 'mpIpad.v6', VERSION = 12; // mm per CSS px (264 ppi iPads)
+const MM = 0.1924, STORE = 'mpIpad.v7', VERSION = 13; // mm per CSS px (264 ppi iPads)
 // contact: joint / tip, pose: flat / side (thumb up), n: one or two fingers, pair: first finger of the two; effect: where the feeling comes from
 const O = { contact: 'joint', pose: 'flat', n: '1', finger: 'index', pair: '0', effect: 'both', group: 'thing', thing: 'harp', mat: 'sand', kind: 'finger', hand: 'right', eye: 'track', cam: 'top', look: 'real', skin: 'auto', cut: '0' };
 const REMEMBER = ['contact', 'pose', 'n', 'finger', 'pair', 'effect', 'group', 'thing', 'mat', 'hand', 'cam', 'look', 'skin'];
-const saved = (() => { try { const o = JSON.parse(localStorage.getItem('mpIpad.v5') || '{}'), k = o.set || {}; return JSON.parse(localStorage.getItem(STORE) || 'null') || { xShift: o.xShift, zScale: o.zScale, o: { cam: o.cam, hand: o.hand, look: o.look, skin: o.skin }, set: { lead: k.lead, bright: k.bright, tone: k.tone, l0: k.l0, l1: k.l1, l2: k.l2, shade: k.shade } }; } catch { return {}; } })();
+const saved = (() => { try { const o = JSON.parse(localStorage.getItem('mpIpad.v5') || '{}'), k = o.set || {}; { const n = JSON.parse(localStorage.getItem('mpIpad.v6') || 'null'); if (n && !localStorage.getItem(STORE)) { const was = { joint: { exag: 100, long: 150, thick: 120, peek: 180 }, tip: { exag: 0, long: 100, thick: 100, peek: 120 } }; for (const [k, v] of Object.entries(n.own || {})) for (const [a, x] of Object.entries(was[k.split('.')[0]] || {})) if (v[a] === x) delete v[a]; return n; } } return JSON.parse(localStorage.getItem(STORE) || 'null') || { xShift: o.xShift, zScale: o.zScale, o: { cam: o.cam, hand: o.hand, look: o.look, skin: o.skin }, set: { lead: k.lead, bright: k.bright, tone: k.tone, l0: k.l0, l1: k.l1, l2: k.l2, shade: k.shade } }; } catch { return {}; } })();
 const newFinger = () => ({ lead: new Lead(), ahead: new Ahead(), tip: new Tip(), root: null, f: null, at: null, smear: [0, 0], bob: 0, air: 0 });
 const S = { started: false, ready: false, raw: [], cancels: 0, contact: new Point(), fg: [newFinger(), newFinger()], tilt: new Tilt(), eye: new Eye(), eyes: null, xShift: saved.xShift || 0, zScale: saved.zScale || 1, thing: null, skin: null, fps: 0, rec: null, err: '', get root() { return this.fg[0].root; }, get f() { return this.fg[0].f; }, get tip() { return this.fg[0].tip; } };
 const two = () => O.n === '2', who = () => (two() ? [ORDER[+O.pair], ORDER[+O.pair + 1]] : [O.finger]), tracker = () => (two() ? new Pair(O.hand, +O.pair, O.pose) : new Point(O.hand, ORDER.indexOf(O.finger), O.pose)), tracks = () => (two() ? S.contact.t : [S.contact]);
-const clean = () => { for (const q of S.fg) { q.root = q.f = null; q.tip.reset(); q.lead.reset(); q.ahead.reset(); q.bob = 0; } S.thing?.reset(); };
+const clean = () => { for (const q of S.fg) { q.x = q.dx = null; q.root = q.f = null; q.tip.reset(); q.lead.reset(); q.ahead.reset(); q.bob = 0; } S.thing?.reset(); };
 const GHOST = new URLSearchParams(location.search).has('ghost'); // draws the real finger too (to check on a PC how the two join)
 const landscape = () => innerWidth > innerHeight;
 
@@ -98,9 +98,9 @@ $('#cal').onclick = () => {
   const rest = Math.hypot(m[0], m[1]), z = Math.sqrt(Math.max(100, 400 * 400 - rest * rest)); S.zScale = Math.max(0.4, Math.min(2.5, S.zScale * z / m[2]));
   store(); flash('40cmに合わせました');
 };
-const KEEP = ['soft', 'vx', 'vy', 'taper', 'over', 'deep', 'cshade', 'blob', 'fade', 'shade', 'gain', 'l0', 'l1', 'l2', 'tone', 'bright', 'lead', 'ahead', 'smear'];
+const KEEP = ['near', 'soft', 'vx', 'vy', 'taper', 'over', 'deep', 'cshade', 'blob', 'fade', 'shade', 'gain', 'l0', 'l1', 'l2', 'tone', 'bright', 'lead', 'ahead', 'smear'];
 // each way of touching has its own place, direction and exaggeration
-const ADJ = ['off', 'offx', 'exag', 'long', 'thick', 'peek', 'roll', 'lr', 'dn'], START = { joint: { off: 0, offx: 0, exag: 100, long: 150, thick: 120, peek: 180, roll: 0, lr: 0, dn: 0 }, tip: { off: 0, offx: 0, exag: 0, long: 100, thick: 100, peek: 120, roll: 0, lr: 0, dn: -48 } }, own = {};
+const ADJ = ['off', 'offx', 'exag', 'long', 'thick', 'peek', 'roll', 'lr', 'dn'], START = { joint: { off: 0, offx: 0, exag: 110, long: 155, thick: 126, peek: 190, roll: 0, lr: 0, dn: 0 }, tip: { off: 0, offx: 0, exag: 20, long: 110, thick: 106, peek: 130, roll: 0, lr: 0, dn: -48 } }, own = {};
 for (const c of ['joint', 'tip']) for (const p of ['flat', 'side']) own[`${c}.${p}`] = { ...START[c], ...(c === 'joint' && p === 'flat' ? { roll: 8 } : {}) };
 const store = () => { try { localStorage.setItem(STORE, JSON.stringify({ xShift: S.xShift, zScale: S.zScale, o: Object.fromEntries(REMEMBER.map((k) => [k, O[k]])), own, set: Object.fromEntries(KEEP.map((id) => [id, val(`#${id}`)])) })); } catch {} };
 let flashT = 0, flashM = ''; function flash(t, ms = 2500) { flashM = t; flashT = now() + ms; }
@@ -142,10 +142,10 @@ function mend() { if (!scene) return; scene.blade.mend(); $('#mend').hidden = tr
 seg('#cuts', [['0', 'なし'], ['10', '10秒後'], ['30', '30秒後']], 'cut', () => { mend(); S.cutAt = +O.cut ? now() + 1000 * O.cut : null; }); $('#mend').onclick = mend;
 function bomb(t, dt) {
   const B = scene.blade, on = tracks().map((q, i) => S.fg[i].f && q.down), any = on.some(Boolean);
-  if (S.cutAt && t >= S.cutAt && any && O.kind === 'finger' && !B.busy && !B.pieces.length) { S.cutOn = [0, 1].filter((i) => on[i]); B.start(S.cutOn.map((i) => scene.skins[i]), scene.H / 2); }
+  if (S.cutAt && t >= S.cutAt && any && O.kind === 'finger' && !B.busy && !B.pieces.length) { S.cutOn = [0, 1].filter((i) => on[i]); B.start(S.cutOn.map((i) => scene.skins[i]), [scene.W / 2, scene.H / 2]); }
   if (B.busy && !B.cut && !any) B.mend(); // the hand has gone: it waits
-  if (B.step(dt, upOf(tiltDeg()).map((v) => -v), (x, y) => scene.below(x, y))) { S.cutAt = null; O.cut = '0'; syncSeg('#cuts', 'cut'); S.thing?.reset(); for (const q of S.fg) q.tip.reset(); try { navigator.vibrate?.(40); } catch {} }
-  { const h = !(B.pieces.length && !B.busy); if ($('#mend').hidden !== h) $('#mend').hidden = h; }
+  if (B.step(dt, upOf(tiltDeg()).map((v) => -v), (x, y) => scene.below(x, y), !!S.thing?.pool)) { S.cutAt = null; S.cutT = t; O.cut = '0'; syncSeg('#cuts', 'cut'); S.thing?.reset(); for (const q of S.fg) q.tip.reset(); try { navigator.vibrate?.(40); } catch {} }
+  { const h = !(B.pieces.length && !B.busy && t - (S.cutT || 0) > 1500); if ($('#mend').hidden !== h) $('#mend').hidden = h; }
   const left = S.cutAt ? Math.ceil((S.cutAt - t) / 1000) : 0, text = S.cutAt ? (left > 0 ? `${left}` : any ? '' : '指を置く') : ''; if ($('#bomb').textContent !== text) $('#bomb').textContent = text;
 }
 const tray = (on) => { $('#tray').hidden = !on; $('#open').setAttribute('aria-pressed', on); }; $('#open').onclick = () => tray($('#tray').hidden);
@@ -185,27 +185,32 @@ function finger(dt, t) {
   const sgn = O.hand === 'right' ? 1 : -1, yaw = -rad(val('#roll') + (O.pose === 'side' ? 90 : 0)) * sgn, names = who(), soft = val('#soft') / 100, { gf, go } = gains(), C = CONTACTS[O.contact];
   const base = { contact: O.contact, len: lengths([val('#l0'), val('#l1'), val('#l2')], names, O.contact, val('#long') / 100), dir: [rad(val('#lr')) * sgn, rad(val('#dn'))], yaw, soft }, home = { ...base, root: [0, 0, C.h] }, low = restTip(home)[2] - RF, R = reach(home); S.yaw = yaw; S.low = low; S.names = names;
   scene.shade(val('#shade') / 100); for (const q of scene.skins) { q.setThick(val('#thick') / 100); q.setCut({ taper: val('#taper') / 100, over: val('#over'), depth: val('#deep'), shade: val('#cshade') / 100, fade: val('#fade'), blob: val('#blob') / 100 }); }
-  thing(O.group === 'thing' ? low : null); const T = S.thing, mkey = T ? 'slime' : O.mat, M = MATS[mkey], fit = (l) => within(R, l, gf > 0 ? 1 : 0); scene.setDepth(low + PRESS); scene.setMaterial(mkey);
+  thing(O.group === 'thing' ? low : null); for (const q of scene.skins) q.setGel(S.thing?.deep ? -S.thing.surf : null); const T = S.thing, mkey = T ? 'slime' : O.mat, M = MATS[mkey], fit = (l) => within(R, l, gf > 0 ? 1 : 0); scene.setDepth(low + PRESS + (T ? 0 : val('#near') * 0.4)); scene.setMaterial(mkey);
   tracks().forEach((c, i) => {
-    const q = S.fg[i], p = c.p; if (!p) { if (q.root) { q.root = q.f = null; q.tip.reset(); T?.reset(i); q.lead.reset(); q.ahead.reset(); } return; }
+    const q = S.fg[i], p = c.p; if (!p) { if (q.root) { q.x = q.dx = null; q.root = q.f = null; q.tip.reset(); T?.reset(i); q.lead.reset(); q.ahead.reset(); } return; }
     const at = c.down && q.lead.at(t, val('#lead')) || p, [x, y] = c.down || !q.root ? at : q.at; q.at = [x, y]; const A = q.ahead.step(c.down ? q.lead.vel : [0, 0], val('#ahead'), dt);
     q.root = [x + A[0] + val('#offx'), y + A[1] + val('#off'), C.h];
     { const v = q.lead.vel, sp = Math.hypot(...v), n = c.down && sp > 5 ? Math.min(val('#smear'), 1.2 * q.lead.miss + sp * 0.004) / sp : 0; q.smear = [0, 1].map((k) => q.smear[k] + (v[k] * n - q.smear[k]) * Math.min(1, dt * 20)); }
     const o = { ...base, root: q.root, reach: R, kind: O.kind }, rest = restTip(o);
     if (scene.skins[i].slice != null) { q.tip.lag = [0, 0, 0]; q.f = solve(o); q.pull = q.lean = [0, 0]; } // what is left of it feels nothing
     else if (T) {
-      const lag = T.step(i, rest, dt, { fit, gain: gf, go }); q.tip.lag = lag; q.f = T.w ? settle(T.w, { ...o, lag }) : solve({ ...o, lag, ...(T.flat ? { lo: scene.surfZ + RF - PRESS - M.dent, hi: scene.surfZ + RF - 0.3 } : {}) }); q.pull = [0, 1].map((k) => -lag[k] * M.drag * Math.min(1.4, go)); q.lean = q.pull;
+      const lag0 = T.step(i, rest, dt, { fit, gain: gf, go }), lag = spring(q, lag0, R, dt); q.tip.lag = lag; q.f = T.w ? settle(T.w, { ...o, lag }) : solve({ ...o, lag, ...(T.touch != null ? { lo: T.touch + RF - PRESS - 2.5 } : {}) }); T.tipZ = q.f.tip[2]; q.pull = [0, 1].map((k) => -lag[k] * M.drag * Math.min(1.4, go)); q.lean = q.pull;
     } else {
       // over the edge of the island there is nothing to touch
-      const p0 = q.tip.p || rest, off = Math.abs(p0[0]) > scene.IW / 2 || Math.abs(p0[1]) > scene.IH / 2, lag = q.tip.step(rest, off ? { k: 45, hold: 0 } : M, dt, (l) => fit(l.map((v) => v * gf))), h = M.bump && !off ? M.bump * grain(q.tip.p[0], q.tip.p[1], M.f) : 0; q.bob += (h - q.bob) * Math.min(1, dt * 40); q.air = Math.max(0, Math.min(1, q.air + (off ? dt : -dt) * 12));
+      const p0 = q.tip.p || rest, off = Math.abs(p0[0]) > scene.IW / 2 || Math.abs(p0[1]) > scene.IH / 2, lag = spring(q, q.tip.step(rest, off ? { k: 45, hold: 0 } : M, dt, (l) => fit(l.map((v) => v * gf))), R, dt), h = M.bump && !off ? M.bump * grain(q.tip.p[0], q.tip.p[1], M.f) : 0; q.bob += (h - q.bob) * Math.min(1, dt * 40); q.air = Math.max(0, Math.min(1, q.air + (off ? dt : -dt) * 12));
       const z = scene.surfZ + q.bob * (0.4 + 0.6 * Math.min(2, gf)) - 40 * q.air; q.f = solve({ ...o, lag, lo: z + RF - PRESS - M.dent * Math.min(1, go), ...(q.air ? {} : { hi: z + RF - 0.3 }) }); const d = Math.max(M.drag, O.effect === 'thing' ? 0.65 : 0) * Math.min(1.4, go); q.pull = off ? [0, 0] : [0, 1].map((k) => -q.tip.raw[k] * d); q.lean = go > 0 ? [-q.tip.raw[0], -q.tip.raw[1]] : [0, 0];
     }
     q.f.rest = rest;
   });
   T?.world(dt);
 }
+// when the fingertip gets free it snaps past its place and back, as after plucking
+function spring(q, lag, R, dt) {
+  q.x ||= [0, 0]; q.dx ||= [0, 0]; if (!Number.isFinite(q.x[0] + q.x[1])) q.x = [0, 0]; const n = Math.max(1, Math.ceil(dt * 480)), h = dt / n, w = 75, z = 0.42; for (let k = 0; k < n; k++) for (const i of [0, 1]) { q.dx[i] += (w * w * (lag[i] - q.x[i]) - 2 * z * w * q.dx[i]) * h; q.x[i] += q.dx[i] * h; }
+  if (Math.hypot(...lag) < 1e-6 && Math.hypot(...q.x) < 1e-3) { q.x = [0, 0]; q.dx = [0, 0]; } return O.effect === 'both' || O.effect === 'finger' ? within(R, [q.x[0], q.x[1], 0]) : lag;
+}
 function thing(low) { // made again only when something about it has changed
-  const k = low == null ? '' : [O.thing, low.toFixed(1), scene.W, scene.H].join(); if (k === S.thingKey) return; S.thingKey = k; S.thing = low == null ? null : makeThing(O.thing, scene.IW * 1.06, scene.IH * 1.06, low, DEPTH); scene.setThing(S.thing);
+  const k = low == null ? '' : [O.thing, low.toFixed(1), scene.W, scene.H, val('#near')].join(); if (k === S.thingKey) return; S.thingKey = k; S.thing = low == null ? null : makeThing(O.thing, scene.IW * 1.06, scene.IH * 1.06, low, DEPTH, val('#near')); scene.setThing(S.thing);
 }
 function failed(x) { S.fails = (S.fails || 0) + 1; S.err = `${x?.message || x}`; console.error(x); }
 function loop() { requestAnimationFrame(loop); try { frame(); } catch (x) { failed(x); $('#msg').textContent = `エラー：${S.err}`; for (const q of S.fg) q.root = q.f = null; } }
@@ -218,7 +223,7 @@ function frame() {
   const down = S.contact.down; if (S.eyes) S.eyes.busy = S.started && down && S.fg.some((q) => (q.lead.speed || 0) > 10);
   if (S.started) finger(dt, t); else { if (t - (S.tEvent || 0) > 40) sense(); for (const q of S.fg) q.f = null; } lines();
   if (S.started && dt < 0.05 && t - (S.tSlow ||= t) > 3000) { S.tSlow = t; if (S.fps < 50) scene.lighter(); }
-  scene.finger(tracks().map((c, i) => ({ ...S.fg[i], alpha: c.down ? 1 : 0.5, width: FINGERS[who()[i]].w })), O.kind, O.contact, O.look, S.yaw || 0, gains().go); if (S.started) bomb(t, dt); const col = skinColor(dt); for (const q of scene.skins) { q.photoGain = 2 ** (val('#bright') / 50); q.setColor(col); } scene.ghost(GHOST && S.f && O.contact === 'joint' ? [S.root, S.f.base, S.yaw || 0, [val('#l0'), val('#l1'), val('#l2')]] : null); scene.render([eye[0] * val('#peek') / 100 + val('#vx'), eye[1] + val('#vy'), eye[2]]);
+  scene.finger(tracks().map((c, i) => ({ ...S.fg[i], alpha: c.down ? 1 : 0.5, width: FINGERS[who()[i]].w * 1.07 })), O.kind, O.contact, O.look, S.yaw || 0, gains().go); if (S.started) bomb(t, dt); const col = skinColor(dt); for (const q of scene.skins) { q.photoGain = 2 ** (val('#bright') / 50); q.setColor(col); } scene.ghost(GHOST && S.f && O.contact === 'joint' ? [S.root, S.f.base, S.yaw || 0, [val('#l0'), val('#l1'), val('#l2')]] : null); scene.render([eye[0] * val('#peek') / 100 + val('#vx'), eye[1] + val('#vy'), eye[2]]);
   const missing = two() && down && !S.contact.t.every((q) => q.down), msg = scene.lost ? '絵が止まりました。［最新にする］を押してください' : t < flashT ? flashM : !S.started ? '' : S.rec ? `記録中 あと ${Math.max(0, Math.ceil(20 - (t - S.rec.t0) / 1000))} 秒` : t - (S.cancelAt || -1e9) < 4000 ? 'iPadが接触を打ち切りました。いちど手を離してください' : !S.fg.some((q) => q.root) ? `${$('#way').textContent}を画面に付けて、すべらせる` : missing ? 'もう1本も画面に付ける' : O.eye === 'track' && S.eye.src !== 'measured' && t - (S.eye.tLast || 0) > 1500 ? '顔が見えません' : '';
   if ($('#msg').textContent !== msg) $('#msg').textContent = msg;
   if (S.rec) { const f = S.f; S.rec.rows.push({ t: +(t - S.rec.t0).toFixed(1), c: S.raw.map((c) => [c.id, +c.x.toFixed(2), +c.y.toFixed(2), +c.rx.toFixed(2), +c.ry.toFixed(2)]), p: tracks().map((q) => q.p?.map((v) => +v.toFixed(2))), root: S.fg.map((q) => q.root?.map((v) => +v.toFixed(2))), lag: S.fg.map((q) => q.tip.lag.map((v) => +v.toFixed(2))), bend: f && +f.bendDeg.toFixed(1), miss: +S.fg[0].lead.miss.toFixed(2), tilt: S.tilt.deg && +S.tilt.deg.toFixed(2), eye: eye.map((v) => +v.toFixed(1)), src: S.eye.src, fps: +S.fps.toFixed(0) }); if (t - S.rec.t0 > 20000) sendRec(); }

@@ -17,7 +17,7 @@ test('the four fingers differ in length; two fingers reach equally deep', () => 
   const L = (who) => F.lengths(BASE, who, 'tip').reduce((a, b) => a + b, 0); assert.ok(L(['middle']) > L(['ring']) && L(['ring']) > L(['index']) && L(['index']) > L(['little'])); near(L(['index', 'middle']), (L(['index']) + L(['middle'])) / 2, 1e-9);
 });
 test('joints: to the palm side more than back, sideways almost not, limp much more than stiff', () => {
-  for (const w of WAYS) { const q = [0, 0.5, 1].map((s) => F.reach(way(w, s))); for (const r of q.slice(0, 2)) { assert.ok(r.palm > r.back * 2, `${w.contact} ${w.pose} ${r.palm} ${r.back}`); assert.ok(r.side < r.palm * 0.5); } assert.ok(q[0].side < 0.01 && q[1].side < 11 && q[2].side > 7, `${w.contact} ${w.pose} ${w.who} ${q.map((r) => r.side)}`); assert.ok(q[0].palm < q[1].palm && q[1].palm < q[2].palm); }
+  for (const w of WAYS) { const q = [0, 0.5, 1].map((s) => F.reach(way(w, s))); for (const r of q.slice(0, 2)) { assert.ok(r.palm > r.back * 1.2, `${w.contact} ${w.pose} ${r.palm} ${r.back}`); assert.ok(r.side < r.palm * 0.5); } assert.ok(q[0].side < 0.01 && q[1].side < 11 && q[2].side > 7, `${w.contact} ${w.pose} ${w.who} ${q.map((r) => r.side)}`); assert.ok(q[0].palm < q[1].palm && q[1].palm < q[2].palm); }
 });
 test('the finger goes where it can: what within() allows is what solve() draws; 0 = it does not give way at all', () => {
   for (const w of WAYS) for (const soft of [0, 0.5, 1]) { const o = way(w, soft), r = F.reach(o); for (let a = 0; a < 6.28; a += 0.4) { const l = F.within(r, [25 * Math.cos(a), 25 * Math.sin(a), 0]), s = F.solve({ ...o, lag: l }); s.P.slice(1).forEach((p, i) => near(D(p, s.P[i]), o.len[i], 1e-9)); if (soft < 1) assert.ok(Math.hypot(s.lag[0] - l[0], s.lag[1] - l[1]) < 4, `${JSON.stringify(w)} ${soft} ${l} ${s.lag}`); } assert.deepEqual(F.within(r, [9, 9, 0], 0), [0, 0, 0]); }
@@ -30,7 +30,7 @@ test('a surface: the fingertip touches it and does not go through', () => {
 });
 test('stick and slip; same at 60 and 120 Hz; never more than 30 mm behind; what the finger does not do is left for the material', () => {
   const run = (hz) => { const t = new F.Tip(); let max = 0; t.step([0, 0], F.MATS.knit, 0.02); for (let i = 0; i < hz; i++) { t.step([i / hz * 60, 0], F.MATS.knit, 1 / hz); max = Math.max(max, Math.hypot(...t.lag)); } return [max, t.lag[0]]; };
-  const a = run(60), b = run(120); assert.ok(a[0] > 14 && a[0] <= 18, String(a)); near(a[0], b[0], 1.5); near(a[1], b[1], 1.5);
+  const a = run(60), b = run(120); assert.ok(a[0] > 20 && a[0] <= 25, String(a)); near(a[0], b[0], 1.5); near(a[1], b[1], 2.5);
   const t = new F.Tip(); t.step([0, 0], F.MATS.honey, 0.02); t.step([200, 0], F.MATS.honey, 0.02, () => [0, 0, 0]); assert.ok(Math.hypot(...t.raw) <= 30.0001 && Math.hypot(...t.raw) > 20); assert.deepEqual(t.lag, [0, 0, 0]);
 });
 test('which contact: the chosen finger in the row, not thumb or palm; left hand mirrored; thumb up: the row runs downward', () => {

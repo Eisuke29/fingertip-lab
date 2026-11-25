@@ -65,7 +65,8 @@
     <h2>感触の出し方</h2><div class="seg fill" id="effects"></div>
     <h2>関節</h2><div class="seg fill" id="softs"></div><label>細かく <span></span><input class="ui" id="soft" type="range" min="0" max="100" step="5" value="50" data-u=""></label>
     <h2>強さ</h2><div class="seg fill" id="power"></div><label>細かく <span></span><input class="ui" id="gain" type="range" min="0.2" max="2.5" step="0.1" value="1" data-u=" 倍"></label>
-    <h2>指を切り落とす</h2><div class="seg fill" id="cuts"></div><p class="mut" style="margin:8px 0 0">刃物が落ちて指が切れます。苦手な人は「なし」で。</p>
+    <label>物を手前へ <span></span><input class="ui" id="near" type="range" min="0" max="12" step="0.5" value="5" data-u=" mm"></label>
+    <h2>指を切り落とす</h2><div class="seg fill" id="cuts"></div><p class="mut" style="margin:8px 0 0">包丁が落ちて指が切れ、血が出ます。苦手な人は「なし」で。</p>
   </section>
   <section data-t="look" hidden>
     <h2>指の見た目</h2><div class="cards" id="looks" style="margin-top:0"></div><div class="row" style="margin-top:10px"><button class="btn ui" id="photo">自分の指を撮る</button><input type="file" id="photoIn" accept="image/*" capture="environment" hidden></div>
@@ -95,6 +96,6 @@
   <button class="btn" id="noeye" hidden>カメラなしで始める</button>
 </div></div>
 <div id="rotate">iPadを横向きにしてください</div>
-<script type="module" src="./main.js?v=12"></script>
+<script type="module" src="./main.js?v=13"></script>
 </body>
 </html>

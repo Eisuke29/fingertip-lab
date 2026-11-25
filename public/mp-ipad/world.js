@@ -1,6 +1,6 @@
-// Solid things with a height: cubes, hills and holes, soft balls. Which heights the fingertip can have there, and how it catches at the edges.
+// Solid things with a height: cubes, hills, soft balls. Which heights the fingertip can have there, and how it catches at the edges.
 // Pure functions, no DOM, no three.js. mm; z out of the screen.
-import { RF, clamp, solve } from './finger.js?v=12';
+import { RF, clamp, solve } from './finger.js?v=13';
 
 export const REACH = 4.5; // the things stand this much higher than the lowest point of the resting fingertip
 let seed = 1; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
@@ -16,9 +16,9 @@ export function makeWorld(kind, W, H, low, depth) {
       objs.push({ type: 'box', x, y, a, r: 2, top, base: top - e }); for (let q = 1; q < k; q++) deco.push({ x: x + (rnd() - 0.5) * 2, y: y + (rnd() - 0.5) * 2, a: a * 1.02, top: top - q * e - 0.3, base: top - (q + 1) * e });
     }
     for (let j = 0; j <= m; j++) for (let i = 0; i <= n; i++) deco.push({ x: -W / 2 + dx * i, y: -H / 2 + dy * j, a: 8 + 4 * rnd(), top: top - 30 - rnd() * (depth + top - 55), base: -depth });
-  } else if (kind === 'bumps') { // hills and holes in one plate: a height field, steep and high
-    const f = [[-0.36, 0.22, 1], [-0.12, -0.22, -1], [0.12, 0.22, 1], [0.36, -0.22, -1], [-0.36, -0.22, -1], [-0.12, 0.22, -1], [0.12, -0.22, 1], [0.36, 0.22, 1]].map(([x, y, s], i) => ({ x: x * W, y: y * H, s: s > 0 ? [1.25, 0, 1.05, 0, 0, 0, 1.3, 1.1][i] : -2, R: Math.min(19, W * 0.12) }));
-    objs.push({ type: 'field', x: 0, y: 0, f, base: low - 6, amp: 21 });
+  } else if (kind === 'bumps') { // hills on one plate: a height field, steep and high
+    const f = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => ({ x: ((i % 4) - 1.5) * W * 0.242 + (i < 4 ? -1 : 1) * W * 0.012, y: (i < 4 ? 1 : -1) * H * 0.245, s: [1, 0.72, 1.12, 0.86, 0.8, 1.15, 0.92, 1.05][i], R: Math.min(20, W * 0.125) })); // eight hills, high and low
+    objs.push({ type: 'field', x: 0, y: 0, f, base: low - 5, amp: 23 });
   } else if (kind === 'soft') { // from hard to soft
     const u = W / 4; [[-u - 4, 14, 0.6], [0, 17, 3], [u + 4, 20, 6]].forEach(([x, r, soft], i) => objs.push({ type: 'ball', i, x, y: 0, r, z: low + 5.5 + soft - r, soft, k: 260 + 500 / soft }));
   }
@@ -43,7 +43,7 @@ export class TipOver {
   reset() { this.p = null; this.lag = [0, 0, 0]; this.obj = null; this.z = 0; this.push = [0, 0]; }
   // fit: the part of a displacement that the finger can do; gain: how strong
   step(target, w, dt, { fit = (v) => v, gain = 1 } = {}) {
-    const free = target[2], R = 3.2 * gain; if (!this.p) this.p = [target[0], target[1]];
+    const free = target[2], R = 4.6 * gain; if (!this.p) this.p = [target[0], target[1]];
     const n = Math.max(1, Math.ceil(dt * 360)), h = dt / n, p = this.p, z = (a, b) => Math.max(free, ground(w, a, b).z); let px = 0, py = 0;
     for (let s = 0; s < n; s++) {
       const g = ground(w, p[0], p[1]), pen = Math.max(0, g.z - free); let fx = target[0] - p[0], fy = target[1] - p[1], sx = 0, sy = 0;
