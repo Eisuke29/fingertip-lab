@@ -1,8 +1,8 @@
 // Things to touch behind the glass, after what earlier pseudo-haptics studies let people touch. Two ways to feel them, each with its own strength:
 // the fingertip is held back (o.fit: how far this finger gives way, o.gain), and the thing gives way (o.go). One or two fingers.
 // Pure functions, no DOM, no three.js. mm; z out of the screen; forces in mm of finger bending.
-import { RF, PRESS, clamp } from './finger.js?v=13';
-import { makeWorld, TipOver, swing as swingWorld } from './world.js?v=13';
+import { RF, PRESS, clamp } from './finger.js?v=14';
+import { makeWorld, TipOver, swing as swingWorld } from './world.js?v=14';
 
 // id, name
 export const THINGS = [['harp', 'ギターの弦'], ['grass', '草むら'], ['slime', 'スライム（つかる）'], ['slimetop', 'スライム（つからない）'], ['bumps', '山'], ['cube', '立方体'], ['push', '重い箱'], ['soft', 'やわらかい球'], ['posts', 'ばねの棒']];

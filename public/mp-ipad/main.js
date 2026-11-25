@@ -1,17 +1,17 @@
 // Stroking on the iPad itself: the PIP knuckle or the fingertip of one or two fingers is on the glass, a virtual finger goes on from there into the screen. Only the hand slides.
 // touch -> where the contact is, motion sensor -> how the iPad stands, front camera -> where the eyes are. No server, no PC.
-import { Point, Pair, Lead, Ahead, Tilt, Eye, TOP, live, camera, cameraOff, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=13';
-import { MATS, CONTACTS, FINGERS, ORDER, RF, PRESS, Tip, solve, restTip, reach, within, lengths, grain, seenAt, add } from './finger.js?v=13';
-import { settle } from './world.js?v=13';
-import { THINGS, makeThing } from './objects.js?v=13';
-import { Scene, DEPTH } from './scene.js?v=13';
-import { tone, LOOKS } from './skin.js?v=13';
-import { fingerFromPhoto, keepPhoto, lastPhoto } from './photo.js?v=13';
+import { Point, Pair, Lead, Ahead, Tilt, Eye, TOP, live, camera, cameraOff, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=14';
+import { MATS, CONTACTS, FINGERS, ORDER, RF, PRESS, Tip, solve, restTip, reach, within, lengths, grain, seenAt, add } from './finger.js?v=14';
+import { settle } from './world.js?v=14';
+import { THINGS, makeThing } from './objects.js?v=14';
+import { Scene, DEPTH } from './scene.js?v=14';
+import { tone, LOOKS } from './skin.js?v=14';
+import { fingerFromPhoto, keepPhoto, lastPhoto } from './photo.js?v=14';
 import { Color, SRGBColorSpace } from 'three';
 let scene = null;
 
 const $ = (s) => document.querySelector(s), now = () => performance.now(), rad = (d) => d * Math.PI / 180, val = (id) => +$(id).value;
-const MM = 0.1924, STORE = 'mpIpad.v7', VERSION = 13; // mm per CSS px (264 ppi iPads)
+const MM = 0.1924, STORE = 'mpIpad.v7', VERSION = 14; // mm per CSS px (264 ppi iPads)
 // contact: joint / tip, pose: flat / side (thumb up), n: one or two fingers, pair: first finger of the two; effect: where the feeling comes from
 const O = { contact: 'joint', pose: 'flat', n: '1', finger: 'index', pair: '0', effect: 'both', group: 'thing', thing: 'harp', mat: 'sand', kind: 'finger', hand: 'right', eye: 'track', cam: 'top', look: 'real', skin: 'auto', cut: '0' };
 const REMEMBER = ['contact', 'pose', 'n', 'finger', 'pair', 'effect', 'group', 'thing', 'mat', 'hand', 'cam', 'look', 'skin'];
@@ -100,7 +100,7 @@ $('#cal').onclick = () => {
 };
 const KEEP = ['near', 'soft', 'vx', 'vy', 'taper', 'over', 'deep', 'cshade', 'blob', 'fade', 'shade', 'gain', 'l0', 'l1', 'l2', 'tone', 'bright', 'lead', 'ahead', 'smear'];
 // each way of touching has its own place, direction and exaggeration
-const ADJ = ['off', 'offx', 'exag', 'long', 'thick', 'peek', 'roll', 'lr', 'dn'], START = { joint: { off: 0, offx: 0, exag: 110, long: 155, thick: 126, peek: 190, roll: 0, lr: 0, dn: 0 }, tip: { off: 0, offx: 0, exag: 20, long: 110, thick: 106, peek: 130, roll: 0, lr: 0, dn: -48 } }, own = {};
+const ADJ = ['off', 'offx', 'exag', 'long', 'thick', 'peek', 'roll', 'rt', 'dn'], START = { joint: { off: 0, offx: 0, exag: 110, long: 155, thick: 126, peek: 190, roll: 0, rt: 0, dn: 0 }, tip: { off: 0, offx: 0, exag: 20, long: 110, thick: 106, peek: 130, roll: 0, rt: 0, dn: -48 } }, own = {};
 for (const c of ['joint', 'tip']) for (const p of ['flat', 'side']) own[`${c}.${p}`] = { ...START[c], ...(c === 'joint' && p === 'flat' ? { roll: 8 } : {}) };
 const store = () => { try { localStorage.setItem(STORE, JSON.stringify({ xShift: S.xShift, zScale: S.zScale, o: Object.fromEntries(REMEMBER.map((k) => [k, O[k]])), own, set: Object.fromEntries(KEEP.map((id) => [id, val(`#${id}`)])) })); } catch {} };
 let flashT = 0, flashM = ''; function flash(t, ms = 2500) { flashM = t; flashT = now() + ms; }
@@ -113,6 +113,7 @@ const pic = (k, n) => `${svg(PIC[k])}<b>${n}</b>`, card = (p, name) => `${p}<b>$
 function seg(id, list, key, f) { $(id).innerHTML = list.map(([k, t]) => `<button class="btn ui" data-k="${k}">${t}</button>`).join(''); for (const b of $(id).children) b.onclick = () => { O[key] = b.dataset.k; syncSeg(id, key); f?.(); }; syncSeg(id, key); }
 function syncSeg(id, key) { for (const b of $(id).children) b.setAttribute('aria-pressed', b.dataset.k === O[key]); }
 for (const k of REMEMBER) if (saved.o?.[k] != null) O[k] = saved.o[k]; if (!MATS[O.mat]?.name) O.mat = 'sand'; if (!THINGS.some((x) => x[0] === O.thing)) O.thing = 'harp'; if (!FINGERS[O.finger]) O.finger = 'index'; if (!CONTACTS[O.contact]) O.contact = 'joint';
+for (const o of Object.values(saved.own || {})) if (o.rt == null && o.lr) o.rt = -o.lr * (O.hand === 'right' ? 1 : -1); // before version 14 the other way round
 for (const k of Object.keys(own)) for (const a of ADJ) if (Number.isFinite(saved.own?.[k]?.[a])) own[k][a] = saved.own[k][a]; for (const [id, v] of Object.entries(saved.set || {})) if (KEEP.includes(id) && Number.isFinite(v)) $(`#${id}`).value = v;
 const EFFECT = [['both', '指と物'], ['finger', '指だけ'], ['thing', '物だけ'], ['none', 'なし']], SOFT = [['0', '固い'], ['50', 'ふつう'], ['100', 'ふにゃ']], POWER = [['0.6', '弱'], ['1', '中'], ['1.6', '強']], TEX = Object.entries(MATS).filter(([, m]) => m.name);
 const name = () => (O.group === 'thing' ? THINGS.find((q) => q[0] === O.thing)[1] : MATS[O.mat].name), label = () => { $('#now').textContent = name(); $('#eff').textContent = EFFECT.find((e) => e[0] === O.effect)[1]; $('#eff').dataset.e = O.effect; $('#way').textContent = `${two() ? who().map((k) => FINGERS[k].name).join('と') : FINGERS[O.finger].name}の${O.contact === 'tip' ? '指先' : '第2関節'}${O.pose === 'side' ? '・横向き' : ''}`; };
@@ -134,7 +135,7 @@ const near = (list, id) => list.map((q) => q[0]).reduce((a, b) => (Math.abs(b - 
 choice('#softs', SOFT, 'softK', '#soft'); choice('#power', POWER, 'powerK', '#gain');
 seg('#contacts', [['joint', pic('joint', '第2関節')], ['tip', pic('tip', '指先')]], 'contact', way); seg('#poses', [['flat', pic('flat', 'ふつう')], ['side', pic('side', '横向き（親指が上）')]], 'pose', way); seg('#count', [['1', '1本'], ['2', '2本']], 'n', way);
 seg('#fingers', ORDER.map((k) => [k, FINGERS[k].name]), 'finger', way); seg('#pairs', [0, 1, 2].map((i) => [`${i}`, `${FINGERS[ORDER[i]].name}＋${FINGERS[ORDER[i + 1]].name}`]), 'pair', way);
-seg('#hands', [['right', '右手'], ['left', '左手']], 'hand', () => { document.body.classList.toggle('left', O.hand === 'left'); way(); }); document.body.classList.toggle('left', O.hand === 'left');
+seg('#hands', [['left', '左手'], ['right', '右手']], 'hand', () => { document.body.classList.toggle('left', O.hand === 'left'); way(); }); document.body.classList.toggle('left', O.hand === 'left');
 seg('#looks', LOOKS.map(([k, n]) => [k, card(`<i class="l-${k}"></i>`, n)]), 'look', () => { mend(); store(); if (O.look === 'photo' && !S.photo) $('#photo').click(); }); seg('#skins', [['auto', '顔から自動'], ['hand', '手で選ぶ']], 'skin', () => store()); seg('#kinds', [['finger', '指'], ['stick', '棒'], ['cursor', 'カーソル']], 'kind', mend);
 seg('#eyes', [['track', '視線追従'], ['fixed', '追従しない']], 'eye', () => { if (O.eye === 'track') startEyes(); else { S.eyes?.stop(); cameraOff(); } }); seg('#cams', [['top', '上'], ['left', '左'], ['right', '右']], 'cam', () => { cameraPlace(); store(); });
 // the blade: falls once, so many seconds after it was switched on
@@ -153,7 +154,7 @@ function tab(t) { for (const b of $('#tabs').children) b.setAttribute('aria-pres
 $('#reset').onclick = () => { try { localStorage.removeItem(STORE); localStorage.removeItem('mpIpad.v5'); } catch {} renew(); };
 way();
 // the delay is set by eye: two long lines through the predicted contact; the other hand moves the slider until they stay with the knuckle
-const FIT = [['', '1. 正面', '画面の正面に座って、まっすぐ見る'], ['lead', '2. 遅れ', '手をすべらせながら、赤い線が関節についてくる所へ'], ['bright', '3. 肌の明るさ', '画面の中の指が、自分の指と同じ明るさになる所へ'], ['exag', '4. 誇張', '指がちょうどよく見える所へ'], ['roll', '5. ひねり', '爪の向きが自分の指と合う所へ'], ['lr', '6. 向き（左右）', '自分の指の続きに見える向きへ'], ['dn', '7. 向き（上下）', '自分の指の続きに見える向きへ'], ['taper', '8. 断面', '断面が見えなくなる所へ']];
+const FIT = [['', '1. 正面', '画面の正面に座って、まっすぐ見る'], ['lead', '2. 遅れ', '手をすべらせながら、赤い線が関節についてくる所へ'], ['bright', '3. 肌の明るさ', '画面の中の指が、自分の指と同じ明るさになる所へ'], ['exag', '4. 誇張', '指がちょうどよく見える所へ'], ['roll', '5. ひねり', '爪の向きが自分の指と合う所へ'], ['rt', '6. 向き（左右）', '自分の指の続きに見える向きへ'], ['dn', '7. 向き（上下）', '自分の指の続きに見える向きへ'], ['taper', '8. 断面', '断面が見えなくなる所へ']];
 function fit(i) {
   const f = FIT[i]; S.align = f?.[0] === 'lead'; S.fit = f ? i : null; $('#fit').hidden = !f; $('#bar').hidden = !!f; if (!f) return;
   const e = f[0] && $(`#${f[0]}`), r = $('#fitR'); $('#fitT').textContent = f[1]; $('#fitP').textContent = f[2]; $('#fitN').textContent = i < FIT.length - 1 ? 'つぎへ' : 'できた'; r.hidden = !e; if (!e) return; for (const k of ['min', 'max', 'step']) r[k] = e[k]; r.value = e.value; r.oninput = () => { e.value = r.value; e.oninput(); };
@@ -183,7 +184,7 @@ const gains = () => { const g = val('#gain'), e = O.effect; return { gf: e === '
 function finger(dt, t) {
   if (t - (S.tEvent || 0) > 40) sense(); // no news: the hand rests (or has gone)
   const sgn = O.hand === 'right' ? 1 : -1, yaw = -rad(val('#roll') + (O.pose === 'side' ? 90 : 0)) * sgn, names = who(), soft = val('#soft') / 100, { gf, go } = gains(), C = CONTACTS[O.contact];
-  const base = { contact: O.contact, len: lengths([val('#l0'), val('#l1'), val('#l2')], names, O.contact, val('#long') / 100), dir: [rad(val('#lr')) * sgn, rad(val('#dn'))], yaw, soft }, home = { ...base, root: [0, 0, C.h] }, low = restTip(home)[2] - RF, R = reach(home); S.yaw = yaw; S.low = low; S.names = names;
+  const base = { contact: O.contact, len: lengths([val('#l0'), val('#l1'), val('#l2')], names, O.contact, val('#long') / 100), dir: [-rad(val('#rt')), rad(val('#dn'))], yaw, soft }, home = { ...base, root: [0, 0, C.h] }, low = restTip(home)[2] - RF, R = reach(home); S.yaw = yaw; S.low = low; S.names = names;
   scene.shade(val('#shade') / 100); for (const q of scene.skins) { q.setThick(val('#thick') / 100); q.setCut({ taper: val('#taper') / 100, over: val('#over'), depth: val('#deep'), shade: val('#cshade') / 100, fade: val('#fade'), blob: val('#blob') / 100 }); }
   thing(O.group === 'thing' ? low : null); for (const q of scene.skins) q.setGel(S.thing?.deep ? -S.thing.surf : null); const T = S.thing, mkey = T ? 'slime' : O.mat, M = MATS[mkey], fit = (l) => within(R, l, gf > 0 ? 1 : 0); scene.setDepth(low + PRESS + (T ? 0 : val('#near') * 0.4)); scene.setMaterial(mkey);
   tracks().forEach((c, i) => {
