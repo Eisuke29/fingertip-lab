@@ -1,17 +1,17 @@
 // Stroking on the iPad itself: the PIP knuckle or the fingertip of one or two fingers is on the glass, a virtual finger goes on from there into the screen. Only the hand slides.
 // touch -> where the contact is, motion sensor -> how the iPad stands, front camera -> where the eyes are. No server, no PC.
-import { Point, Pair, Lead, Ahead, Tilt, Eye, TOP, live, camera, cameraOff, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=15';
-import { MATS, CONTACTS, FINGERS, ORDER, RF, PRESS, Tip, solve, restTip, reach, within, lengths, grain, seenAt, add } from './finger.js?v=15';
-import { settle } from './world.js?v=15';
-import { THINGS, makeThing } from './objects.js?v=15';
-import { Scene, DEPTH } from './scene.js?v=15';
-import { tone, LOOKS } from './skin.js?v=15';
-import { fingerFromPhoto, keepPhoto, lastPhoto } from './photo.js?v=15';
+import { Point, Pair, Lead, Ahead, Tilt, Eye, TOP, live, camera, cameraOff, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=16';
+import { MATS, CONTACTS, FINGERS, ORDER, RF, PRESS, Tip, solve, restTip, reach, within, lengths, grain, seenAt, add } from './finger.js?v=16';
+import { settle } from './world.js?v=16';
+import { THINGS, makeThing } from './objects.js?v=16';
+import { Scene, DEPTH } from './scene.js?v=16';
+import { tone, LOOKS } from './skin.js?v=16';
+import { fingerFromPhoto, keepPhoto, lastPhoto } from './photo.js?v=16';
 import { Color, SRGBColorSpace } from 'three';
 let scene = null;
 
 const $ = (s) => document.querySelector(s), now = () => performance.now(), rad = (d) => d * Math.PI / 180, val = (id) => +$(id).value;
-const MINI = typeof screen !== 'undefined' && Math.min(screen.width, screen.height) === 744, MM = MINI ? 0.1558 : 0.1924, STORE = 'mpIpad.v7', VERSION = 15; // mm per CSS px: iPads have 264 ppi, the iPad mini (744 points wide) 326; the finger must have its real size
+const MINI = typeof screen !== 'undefined' && Math.min(screen.width, screen.height) === 744, MM = MINI ? 0.1558 : 0.1924, STORE = 'mpIpad.v7', VERSION = 16; // mm per CSS px: iPads have 264 ppi, the iPad mini (744 points wide) 326; the finger must have its real size
 // contact: joint / tip, pose: flat / side (thumb up), n: one or two fingers, pair: first finger of the two; effect: where the feeling comes from
 const O = { contact: 'joint', pose: 'flat', n: '1', finger: 'index', pair: '0', effect: 'both', group: 'thing', thing: 'harp', mat: 'sand', kind: 'finger', hand: 'right', eye: 'track', cam: 'top', look: 'real', skin: 'auto', cut: '0' };
 const REMEMBER = ['contact', 'pose', 'n', 'finger', 'pair', 'effect', 'group', 'thing', 'mat', 'hand', 'cam', 'look', 'skin'];
@@ -106,7 +106,7 @@ const store = () => { try { localStorage.setItem(STORE, JSON.stringify({ xShift:
 let flashT = 0, flashM = ''; function flash(t, ms = 2500) { flashM = t; flashT = now() + ms; }
 
 // ---------- settings ----------
-const svg = (d) => `<svg viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="${d}"/></svg>`, SHAPE = { cube: 'M18 4l13 7v14l-13 7-13-7V11z M5 11l13 7 13-7 M18 18v14', bumps: 'M2 24c5 0 5-12 10-12s5 12 8 12 4 7 7 7 3-7 7-7', push: 'M14 12h16v16H14z M2 20h10 M8 16l4 4-4 4', harp: 'M3 8h30 M3 14h9l5 4 5-4h11 M3 22h30 M3 28h30 M6 4v28', slime: 'M4 18c4 0 5-4 9-4 M23 14c4 0 5 4 9 4 M4 18v9c0 4 28 4 28 0v-9 M15 3v17c0 4 6 4 6 0V3', slimetop: 'M4 30h28 M18 6v8 M18 14c-1 8-6 10-8 16 M18 14c1 8 6 10 8 16 M18 14v16', soft: 'M6 20a12 12 0 0124 0c0 8-5 11-12 11S6 28 6 20z M12 11c4 4 8 4 12 0', posts: 'M8 32V10 M18 32c0-12 2-18 8-22 M30 32V10 M4 32h28', grass: 'M4 32c2-10 0-14-2-18 M12 32c0-12 2-18 5-22 M20 32c-1-10 2-16 6-18 M28 32c0-8 2-12 5-14' }, ICON = (k) => svg(SHAPE[k]), DOT = { smooth: '#8fc3d6', sand: '#b08a62', stone: '#d9c499', knit: '#4f9a78', tape: '#c4a06a', honey: '#e09a35', rubber: '#ea8d98', fur: '#b8926a', water: '#1f6f93' };
+const svg = (d) => `<svg viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="${d}"/></svg>`, SHAPE = { cube: 'M18 4l13 7v14l-13 7-13-7V11z M5 11l13 7 13-7 M18 18v14', bumps: 'M2 24c5 0 5-12 10-12s5 12 8 12 4 7 7 7 3-7 7-7', push: 'M14 12h16v16H14z M2 20h10 M8 16l4 4-4 4', harp: 'M3 8h30 M3 14h9l5 4 5-4h11 M3 22h30 M3 28h30 M6 4v28', lyre: 'M4 5h28 M4 31h28 M9 5v26 M15 5v9l4 5-4 5v7 M22 5v26 M28 5v26', slime: 'M4 18c4 0 5-4 9-4 M23 14c4 0 5 4 9 4 M4 18v9c0 4 28 4 28 0v-9 M15 3v17c0 4 6 4 6 0V3', slimetop: 'M4 30h28 M18 6v8 M18 14c-1 8-6 10-8 16 M18 14c1 8 6 10 8 16 M18 14v16', soft: 'M6 20a12 12 0 0124 0c0 8-5 11-12 11S6 28 6 20z M12 11c4 4 8 4 12 0', posts: 'M8 32V10 M18 32c0-12 2-18 8-22 M30 32V10 M4 32h28', grass: 'M4 32c2-10 0-14-2-18 M12 32c0-12 2-18 5-22 M20 32c-1-10 2-16 6-18 M28 32c0-8 2-12 5-14' }, ICON = (k) => svg(SHAPE[k]), DOT = { smooth: '#8fc3d6', sand: '#b08a62', stone: '#d9c499', knit: '#4f9a78', tape: '#c4a06a', honey: '#e09a35', rubber: '#ea8d98', fur: '#b8926a', water: '#1f6f93' };
 // the hand, as small pictures
 const PIC = { joint: 'M6 26h24 M11 5v13c0 5 7 5 7 0V10 M18 18v-7c4-3 8 0 8 4v5', tip: 'M6 28h24 M28 5L17 24c-2 3-6 1-4-3L23 3', flat: 'M9 30V15 M14 30V9 M19 30V8 M24 30V11 M9 20L5 15', side: 'M30 9H15 M30 14H9 M30 19H8 M30 24H11 M20 9l-4-5' };
 const pic = (k, n) => `${svg(PIC[k])}<b>${n}</b>`, card = (p, name) => `${p}<b>${name}</b>`;

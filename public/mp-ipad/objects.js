@@ -1,17 +1,17 @@
 // Things to touch behind the glass, after what earlier pseudo-haptics studies let people touch. Two ways to feel them, each with its own strength:
 // the fingertip is held back (o.fit: how far this finger gives way, o.gain), and the thing gives way (o.go). One or two fingers.
 // Pure functions, no DOM, no three.js. mm; z out of the screen; forces in mm of finger bending.
-import { RF, PRESS, clamp } from './finger.js?v=15';
-import { makeWorld, TipOver, swing as swingWorld } from './world.js?v=15';
+import { RF, PRESS, clamp } from './finger.js?v=16';
+import { makeWorld, TipOver, swing as swingWorld } from './world.js?v=16';
 
 // id, name
-export const THINGS = [['harp', 'ギターの弦'], ['grass', '草むら'], ['slime', 'スライムの中'], ['slimetop', 'スライムの上'], ['bumps', '山'], ['cube', '立方体'], ['push', '重い箱'], ['soft', 'やわらかい球'], ['posts', 'ばねの棒']];
+export const THINGS = [['harp', 'ギターの弦'], ['lyre', 'ハープの弦'], ['grass', '草むら'], ['slime', 'スライムの中'], ['slimetop', 'スライムの上'], ['bumps', '山'], ['cube', '立方体'], ['push', '重い箱'], ['soft', 'やわらかい球'], ['posts', 'ばねの棒']];
 let NEAR = 0, seed = 1; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647, H = 1 / 360, Q = 1 - Math.exp(-45 * H), none = [0, 0, 0];
 
 // low: lowest point of the resting fingertip
 // near: how much nearer to the person it stands (mm)
 export function makeThing(kind, W, Hh, low, depth, near = 0) {
-  NEAR = near; seed = 42; return new ({ cube: Solid, bumps: Solid, soft: Solid, push: Push, harp: Harp, slime: Gel, slimetop: Gel, posts: Posts, grass: Posts }[kind])(kind, W, Hh, low, depth);
+  NEAR = near; seed = 42; return new ({ cube: Solid, bumps: Solid, soft: Solid, push: Push, harp: Harp, lyre: Harp, slime: Gel, slimetop: Gel, posts: Posts, grass: Posts }[kind])(kind, W, Hh, low, depth);
 }
 const finger = () => ({ p: null, lag: none, on: null, z: 0, d: {} }); // d: what the thing remembers about this finger
 // what all have in common: the fingertip is drawn to its resting place and held back by force()
@@ -66,24 +66,25 @@ class Push extends Thing {
   }
   world(dt) { for (const b of this.boxes) { const t = b.lean || [0, 0]; b.tilt = b.tilt.map((v, i) => v + (t[i] - v) * Math.min(1, dt * 18)); b.lean = null; } }
 }
-// ---------- guitar: six strings from left to right; caught, drawn along, let go, trembling. From thin to thick ----------
+// ---------- strings: caught, drawn along, let go, trembling. harp: a guitar, six strings from left to right, plucked up and down. lyre: a harp, nine strings from far to near, plucked sideways ----------
+// a: the axis the strings run along, b: the one they are plucked along; s.y: where a string is on b
 class Harp extends Thing {
   constructor(kind, W, Hh, low, depth) {
-    super(kind, W, Hh, low, depth); this.zs = low + RF * 0.72 + NEAR; this.board = low - 1.5; const n = 6, d = (Hh - 12) / n;
-    this.strings = Array.from({ length: n }, (_, i) => ({ y: -Hh / 2 + 6 + d * (i + 0.5), r: 0.55 + 0.2 * i, k: 0.34 + 0.16 * i, max: 13 + i, u: 0, v: 0, held: [], hz: 12 - i }));
+    super(kind, W, Hh, low, depth); this.zs = low + RF * 0.72 + NEAR; this.board = low - 1.5; const V = this.vert = kind === 'lyre', n = V ? 9 : 6, span = V ? W : Hh, d = (span - 12) / n; this.a = V ? 1 : 0; this.b = V ? 0 : 1;
+    this.strings = Array.from({ length: n }, (_, i) => { const m = V ? (n - 1 - i) * 5 / (n - 1) : i; return { y: -span / 2 + 6 + d * (i + 0.5), r: 0.55 + 0.2 * m, k: (0.34 + 0.16 * m) * 1.08, max: 13 + m, u: 0, v: 0, held: [], hz: 12 - m }; }); // the harp: thick to the left, thin to the right
   }
-  land(F) { F.d.s = this.strings.map((s) => ({ side: F.p[1] < s.y ? -1 : 1, free: Math.abs(F.p[1] - s.y) < RF })); }
+  land(F) { F.d.s = this.strings.map((s) => ({ side: F.p[this.b] < s.y ? -1 : 1, free: Math.abs(F.p[this.b] - s.y) < RF })); }
   leave(F) { for (const s of this.strings) s.held = s.held.filter((h) => h.F !== F); }
   force(F, target, h, gain, go) {
-    let f = 0; const p = F.p; this.strings.forEach((s, i) => {
-      const m = F.d.s[i], R = RF * 0.6 + s.r, d = p[1] - s.y; if (m.free && Math.abs(d) > R + 0.5) { m.free = false; m.side = d < 0 ? -1 : 1; }
+    let f = 0; const p = F.p, { a, b } = this; this.strings.forEach((s, i) => {
+      const m = F.d.s[i], R = RF * 0.6 + s.r, d = p[b] - s.y; if (m.free && Math.abs(d) > R + 0.5) { m.free = false; m.side = d < 0 ? -1 : 1; }
       const u = m.side < 0 ? d + R : d - R, caught = !m.free && (m.side < 0 ? u > 0 : u < 0) && gain + go > 0.04, k = s.held.findIndex((q) => q.F === F);
       if (caught) { // the string gives way by go, the finger by gain
-        f -= s.k * (go > 0.05 ? 1.4 / Math.max(0.5, go) : 5) * u * Math.max(gain, 0.02); if (k < 0) s.held.push({ F, u, x: p[0] }); else Object.assign(s.held[k], { u, x: p[0] }); s.u = u; s.v = 0; F.on = s;
-        if (Math.abs(u) > s.max * (0.12 + 0.88 * Math.min(1.6, go)) || Math.abs(target[1] - p[1]) > 5 + 15 * Math.min(1.6, gain)) { m.free = true; s.held = s.held.filter((q) => q.F !== F); s.u *= Math.max(0.5, go); }
+        f -= s.k * (go > 0.05 ? 1.4 / Math.max(0.5, go) : 5) * u * Math.max(gain, 0.02); if (k < 0) s.held.push({ F, u, x: p[a] }); else Object.assign(s.held[k], { u, x: p[a] }); s.u = u; s.v = 0; F.on = s;
+        if (Math.abs(u) > s.max * (0.12 + 0.88 * Math.min(1.6, go)) || Math.abs(target[b] - p[b]) > 5 + 15 * Math.min(1.6, gain)) { m.free = true; s.held = s.held.filter((q) => q.F !== F); s.u *= Math.max(0.5, go); }
       } else if (k >= 0) s.held.splice(k, 1);
     });
-    return [0, f];
+    return b ? [0, f] : [f, 0];
   }
   world(dt) { for (const s of this.strings) if (!s.held.length) for (let t = 0; t < dt; t += H) tremble(s, H); }
 }

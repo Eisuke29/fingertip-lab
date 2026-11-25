@@ -1,11 +1,11 @@
 // The picture: a box behind the glass, the material, the virtual finger. Drawn for one eye position (off-axis projection).
 import * as THREE from 'three';
-import { MATS, RF, grain, toHand, add } from './finger.js?v=15';
-import { ground } from './world.js?v=15';
-import { Blade } from './blade.js?v=15';
-import { SkinFinger } from './skin.js?v=15';
-import { surface, copyOf, TILE } from './tex.js?v=15';
-import { view, terraces } from './objview.js?v=15';
+import { MATS, RF, grain, toHand, add } from './finger.js?v=16';
+import { ground } from './world.js?v=16';
+import { Blade } from './blade.js?v=16';
+import { SkinFinger } from './skin.js?v=16';
+import { surface, copyOf, TILE } from './tex.js?v=16';
+import { view, terraces } from './objview.js?v=16';
 
 const V = (a) => new THREE.Vector3(a[0], a[1], a[2]), UP = new THREE.Vector3(0, 1, 0);
 export const DEPTH = 165; // mm, the room behind the glass
@@ -142,7 +142,7 @@ export class Scene {
     if (this.surf.visible) this.deform(this.groups, go); this.hair(!t && this.mat === 'fur', this.groups); if (t) this.vw.update(this.groups.flatMap((g) => g.spheres), 0, this.surfZ, go);
   }
   // what lies below a point, for things that fall
-  below(x, y) { const t = this.thing; if (Math.abs(x) > this.IW / 2 || Math.abs(y) > this.IH / 2) return -DEPTH; if (!t) return this.surfZ; if (t.w) return Math.max(ground(t.w, x, y).z - RF, t.floor ?? t.low - 24); return t.pool ? (t.deep ? t.surf - 4 : t.surf - 1) : t.floor ?? (t.kind === 'harp' ? t.board : t.low - 6); }
+  below(x, y) { const t = this.thing; if (Math.abs(x) > this.IW / 2 || Math.abs(y) > this.IH / 2) return -DEPTH; if (!t) return this.surfZ; if (t.w) return Math.max(ground(t.w, x, y).z - RF, t.floor ?? t.low - 24); return t.pool ? (t.deep ? t.surf - 4 : t.surf - 1) : t.floor ?? (t.strings ? t.board : t.low - 6); }
   // the real finger in front of the glass: proximal phalanx up from the knuckle, the rest folded into the fist
   ghost(g) {
     if (!g) { for (const m of this.gm || []) m.visible = false; return; }

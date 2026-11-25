@@ -41,7 +41,7 @@ export function aim(dir, yaw) {
   const u = norm([-Math.tan(dir[0]), -Math.tan(dir[1]), -1]), H = toHand(yaw), n = norm(add(H, u, -dot(H, u))); return { u, n, r: cross(u, n) };
 }
 // How far the finger gives way: 0 stiff .. 1 as limp as rubber (degrees). A real finger bends to the palm side, hardly backward and not sideways.
-const STEP = [{ flex: 15, ext: 10, side: 0, base: 0, lean: 0 }, { flex: 36, ext: 27, side: 3, base: 6, lean: 3 }, { flex: 72, ext: 48, side: 30, base: 10, lean: 6 }]; // ext: the last joint is pressed back when the fingertip catches on something (as when plucking)
+const STEP = [{ flex: 15, ext: 10, side: 0, base: 0, lean: 0 }, { flex: 40, ext: 30, side: 8, base: 7, lean: 5 }, { flex: 72, ext: 48, side: 30, base: 10, lean: 6 }]; // ext: the last joint is pressed back when the fingertip catches on something (as when plucking)
 export function limits(soft) { const x = clamp(soft, 0, 1) * 2, i = Math.min(1, Math.floor(x)), t = x - i, o = {}; for (const k of Object.keys(STEP[0])) o[k] = STEP[i][k] + (STEP[i + 1][k] - STEP[i][k]) * t; return o; }
 // The chain for how much it is bent (f: -1 fully back .. 1 fully to the palm), how much sideways (s: -1..1) and how much it is lifted at the glass (lift, rad)
 function chain(q, f, s, lift = 0) {

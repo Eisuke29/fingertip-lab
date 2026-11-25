@@ -1,8 +1,8 @@
 // How the things of objects.js look. view(thing, scene) puts the meshes into a group and returns { group, update(spheres, dt) }.
 import * as THREE from 'three';
-import { RF } from './finger.js?v=15';
-import { fieldZ } from './world.js?v=15';
-import { surface, copyOf, roundBox, TILE } from './tex.js?v=15';
+import { RF } from './finger.js?v=16';
+import { fieldZ } from './world.js?v=16';
+import { surface, copyOf, roundBox, TILE } from './tex.js?v=16';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v)), tinted = (key, c) => { const m = copyOf(key); m.color = new THREE.Color(c); return m; };
 // steps that get wider downward: every step an edge, its top light, its side dark toward the foot
@@ -67,16 +67,21 @@ export function view(t) {
     });
   } else if (t.kind === 'push') {
     slab(t.floor, 'wood'); const M = [tinted('foam', 0xf6f1e4), tinted('block', 0xe0a36a), surface('iron')], m = t.boxes.map((b, i) => put(roundBox(b.a, t.top - t.floor, 1.2, TILE[['foam', 'block', 'iron'][i]]), M[i])); update = () => t.boxes.forEach((b, i) => { const q = m[i], tl = b.tilt; q.position.set(b.x, b.y, t.floor); q.rotation.set(-tl[1] * 0.012, tl[0] * 0.012, 0); });
-  } else if (t.kind === 'harp') {
-    const L = t.W / 2 - 5, S = 36, n = t.strings.length, T = new Tubes(n, S, 8, new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.75, vertexColors: true, envMapIntensity: 1.6 }), true); G.add(T.mesh);
+  } else if (t.strings) {
+    const V = t.vert, L = (V ? t.H : t.W) / 2 - 5, S = 36, n = t.strings.length, T = new Tubes(n, S, 8, new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.75, vertexColors: true, envMapIntensity: 1.6 }), true); G.add(T.mesh);
     // the guitar: body with a sound hole to the right, the neck with frets to the left
     const zb = t.board, box = (w, h, d, x, y, z, mat) => put(new THREE.BoxGeometry(w, h, d), mat, x, y, z - d / 2), hx = t.W * 0.22, dark = tinted('block', 0x4a2c1c), gold = new THREE.MeshStandardMaterial({ color: 0xd8c48a, metalness: 0.85, roughness: 0.28 }), flat = new THREE.MeshStandardMaterial({ color: 0x0a0605, roughness: 1 }), pearl = new THREE.MeshStandardMaterial({ color: 0xf1ece0, roughness: 0.25 });
+    if (V) { // the harp: a dark sounding board, a bar far and a bar near, a golden pin where every string ends
+      const bg = new THREE.BoxGeometry(t.W + 14, t.H, 10), uv = bg.attributes.uv, bp = bg.attributes.position; for (let i = 0; i < uv.count; i++) uv.setXY(i, bp.getX(i) / 150, bp.getY(i) / 60); put(bg, tinted('block', 0x7a4a2a), 0, 0, zb - 5); G.add(terraces(t.W / 2 + 7, t.H / 2, zb - 10, t.depth, 'wood'));
+      for (const y of [-1, 1]) { box(t.W + 4, 7, 8, 0, y * (t.H / 2 - 3.5), t.zs - 1, tinted('block', 0xd9a25a)); for (const q of t.strings) put(new THREE.SphereGeometry(1.5, 14, 10), gold, q.y, y * (t.H / 2 - 5), t.zs - 0.4); }
+    } else {
     const bg = new THREE.BoxGeometry(t.W, t.H + 14, 10), uv = bg.attributes.uv, bp = bg.attributes.position; for (let i = 0; i < uv.count; i++) uv.setXY(i, bp.getX(i) / 150, bp.getY(i) / 60); const body = put(bg, tinted('block', 0xd9934e), 0, 0, zb - 5); body.receiveShadow = true; G.add(terraces(t.W / 2, t.H / 2 + 7, zb - 10, t.depth, 'wood'));
     const hole = put(new THREE.CircleGeometry(t.H * 0.36, 56), flat, hx, 0, zb + 0.06); hole.castShadow = false; for (const [r, w, c] of [[0.375, 1.4, 0x2b1a10], [0.405, 1.2, 0xefe0bd], [0.43, 1.6, 0x6a3b20]]) { const q = put(new THREE.RingGeometry(t.H * r, t.H * r + w, 64), new THREE.MeshStandardMaterial({ color: c, roughness: 0.4 }), hx, 0, zb + 0.08); q.castShadow = false; }
     const nx = -t.W / 2, nw = t.W * 0.5; box(nw, t.H + 2, 1.6, nx + nw / 2, 0, zb + 1.2, dark); let fx = nx + 4; const frets = []; for (let i = 0, w = nw * 0.24; fx < nx + nw - 2; i++, w *= 0.86) { frets.push(fx); const c = put(new THREE.CylinderGeometry(0.7, 0.7, t.H + 2, 10), gold, fx, 0, zb + 1.2); c.castShadow = true; fx += w; if (fx < nx + nw - 4 && i % 2 === 0) { const d = put(new THREE.CircleGeometry(2.3, 24), pearl, fx - w / 2, 0, zb + 1.26); d.castShadow = false; } }
     box(4, t.H + 4, 7, nx + 2, 0, t.zs - 1, pearl); box(5, t.H * 0.96, 8, t.W / 2 - 6, 0, t.zs - 1, dark);
-    const C = [[0.95, 0.95, 0.98], [0.92, 0.92, 0.95], [0.9, 0.82, 0.62], [0.86, 0.68, 0.42], [0.8, 0.58, 0.34], [0.72, 0.5, 0.3]]; t.strings.forEach((s, i) => T.paint(i, () => C[i % 6]));
-    update = () => { t.strings.forEach((s, c) => { const now = s.held.map((q) => `${q.u.toFixed(2)},${q.x.toFixed(1)}`).join(';') || s.u.toFixed(2); if (s.shown === now) return; s.shown = now; const P = [[-L, 0], ...s.held.map((q) => [clamp(q.x, -L + 8, L - 8), q.u]).sort((a, b) => a[0] - b[0]), [L, 0]]; T.set(c, (i) => { const x = -L + 2 * L * i / S; let u; if (s.held.length) { let k = 0; while (k < P.length - 2 && x > P[k + 1][0]) k++; const f = (x - P[k][0]) / Math.max(1e-3, P[k + 1][0] - P[k][0]); u = P[k][1] + (P[k + 1][1] - P[k][1]) * f; } else u = s.u * Math.sin(Math.PI * i / S); return [x, s.y + u, t.zs, s.r]; }, [0, 0, 1]); }); T.done(); };
+    }
+    const C = [[0.95, 0.95, 0.98], [0.92, 0.92, 0.95], [0.9, 0.82, 0.62], [0.86, 0.68, 0.42], [0.8, 0.58, 0.34], [0.72, 0.5, 0.3]]; t.strings.forEach((s, i) => T.paint(i, () => (V ? (i % 7 === 0 ? [0.86, 0.2, 0.16] : i % 7 === 3 ? [0.16, 0.2, 0.42] : [0.94, 0.9, 0.8]) : C[i % 6]))); // a harp marks every C red and every F dark
+    update = () => { t.strings.forEach((s, c) => { const now = s.held.map((q) => `${q.u.toFixed(2)},${q.x.toFixed(1)}`).join(';') || s.u.toFixed(2); if (s.shown === now) return; s.shown = now; const P = [[-L, 0], ...s.held.map((q) => [clamp(q.x, -L + 8, L - 8), q.u]).sort((a, b) => a[0] - b[0]), [L, 0]]; T.set(c, (i) => { const x = -L + 2 * L * i / S; let u; if (s.held.length) { let k = 0; while (k < P.length - 2 && x > P[k + 1][0]) k++; const f = (x - P[k][0]) / Math.max(1e-3, P[k + 1][0] - P[k][0]); u = P[k][1] + (P[k + 1][1] - P[k][1]) * f; } else u = s.u * Math.sin(Math.PI * i / S); return V ? [s.y + u, x, t.zs, s.r] : [x, s.y + u, t.zs, s.r]; }, [0, 0, 1]); }); T.done(); };
   } else if (t.pool) {
     // a clear, thick jelly in a white tray: what is inside is seen through it, greener the deeper it lies
     const { nx, ny, dye, h } = t, g = new THREE.PlaneGeometry(t.W, t.H, nx, ny), p = g.attributes.position, nm = g.attributes.normal, c = new THREE.BufferAttribute(new Float32Array(p.count * 3), 3), z = t.surf, w = nx + 1, sx = t.W / nx, sy = t.H / ny; g.setAttribute('color', c);
