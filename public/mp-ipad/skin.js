@@ -1,9 +1,9 @@
 // The virtual finger: one shape, drawn in several ways (the ways earlier studies on virtual hands drew them). The skin was made by Sol and
 // wrapped around by scripts/bake-finger.py. Rest coordinate s (mm): MP 0, PIP 42, DIP 67, fingertip centre 89, end 97.
 import * as THREE from 'three';
-import { surface } from './tex.js?v=10';
+import { surface } from './tex.js?v=11';
 
-export const NODES = { mp: [0, 42, 67, 89], pip: [42, 67, 89], point: [42, 67, 89], fist: [42, 67, 89] };
+export const NODES = { mp: [0, 42, 67, 89], pip: [42, 67, 89], point: [42, 67, 89] };
 // id, name
 export const LOOKS = [['real', '本物'], ['photo', '自分の写真'], ['glove', '手袋'], ['toon', 'アニメ'], ['plaster', '石こう'], ['robot', 'ロボット'], ['bone', '骨'], ['glass', '半透明'], ['shadow', '影だけ']];
 const MEAN = 0.72; // the linear value of finger-color.jpg that stands for the skin colour itself
@@ -36,7 +36,7 @@ export function tone(x) { const p = Math.max(0, Math.min(1, x)) * (TONES.length 
 export class SkinFinger {
   constructor(scene, clip, ready) {
     this.clip = clip[0]; this.look = 'real'; this.cut = { taper: 0.7, over: 9, depth: 0, shade: 0.15, fade: 0, blob: 0.5 };
-    const pic = (name, srgb) => { const t = new THREE.TextureLoader().load(new URL(`./${name}?v=10`, import.meta.url).href, ready); t.flipY = false; t.wrapS = THREE.RepeatWrapping; t.anisotropy = 8; if (srgb) t.colorSpace = THREE.SRGBColorSpace; return t; };
+    const pic = (name, srgb) => { const t = new THREE.TextureLoader().load(new URL(`./${name}?v=11`, import.meta.url).href, ready); t.flipY = false; t.wrapS = THREE.RepeatWrapping; t.anisotropy = 8; if (srgb) t.colorSpace = THREE.SRGBColorSpace; return t; };
     const color = pic('finger-color.jpg', true), normalMap = pic('finger-normal.jpg'), roughnessMap = pic('finger-rough.jpg'), NS = (k) => new THREE.Vector2(k, k), base = { clippingPlanes: clip, clipShadows: true, transparent: true };
     this.u = { uTop: { value: 0 }, uShade: { value: 0.15 }, uFade: { value: 0 } };
     // near the cut: a little darker (the shadow of the knuckle), or dissolving. Skin also gives back some light from inside

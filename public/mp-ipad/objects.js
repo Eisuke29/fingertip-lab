@@ -1,7 +1,7 @@
 // Things to touch behind the glass, after what earlier pseudo-haptics studies let people touch. Each thing pulls back on the fingertip; the
 // fingertip (not the knuckle) stays behind. Pure functions, no DOM, no three.js. mm; z out of the screen; forces in mm of finger bending.
-import { RF, clamp } from './finger.js?v=10';
-import { makeWorld, TipOver } from './world.js?v=10';
+import { RF, clamp } from './finger.js?v=11';
+import { makeWorld, TipOver } from './world.js?v=11';
 
 // id, name, what to do, the study it follows (the property; not always the same object)
 export const THINGS = [

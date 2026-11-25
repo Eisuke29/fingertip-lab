@@ -125,9 +125,9 @@ test('the direction can be set freely: straight into the depth, a little down an
   for (const lr of [-0.3, 0, 0.3]) for (const dn of [-0.3, 0, 0.4]) { const A = F.aim([lr, dn], 0.7); near(Math.hypot(...A.u), 1); near(F.dot(A.u, A.n), 0); assert.ok(A.u[2] < -0.8); if (lr > 0) assert.ok(A.u[0] < 0); if (dn > 0) assert.ok(A.u[1] < 0);
     const root = [0, 0, 8.2], rest = F.restTip(root, 1, 0.7, len, 'point', 0.07, [lr, dn]), surf = rest[2] - F.RF + F.PRESS; for (let a = 0; a < 6; a += 0.5) { const s = F.solve({ joint: 'point', root, theta: 1, yaw: 0.7, dir: [lr, dn], ext: 0.07, lag: [8 * Math.cos(a), 8 * Math.sin(a), 0], len, surf, dent: 1.8 }); near(s.k, 1, 1e-6); assert.ok(s.tip[2] - F.RF < surf); } }
 });
-// the same with a fist: the neighbours come and go, the iPad merges and splits them, the root stays under the index knuckle
-test('fist: neighbours landing, leaving and merging hardly move the root; no delay', () => {
-  assert.equal(F.JOINTS.fist.off, 0); let seed = 21; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647, c = new Contact('right', 0.5), k = [0, 1, 2, 3].map((i) => ({ i, id: i + 1 })); let on = [true, true, false, false], worst = 0, jump = 0, prev = null;
+// several knuckles on the glass: the neighbours come and go, the iPad merges and splits them, the root stays under the index knuckle
+test('neighbours landing, leaving and merging hardly move the root; no delay', () => {
+  let seed = 21; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647, c = new Contact('right', 0.5), k = [0, 1, 2, 3].map((i) => ({ i, id: i + 1 })); let on = [true, true, false, false], worst = 0, jump = 0, prev = null;
   for (let t = 0; t < 10000; t += 16) { const x = 40 * Math.sin(t / 1000 * 4), y = 8 * Math.sin(t / 1000 * 1.7); if (t > 500 && rnd() < 0.03) { const i = 1 + Math.floor(rnd() * 3); on[i] = !on[i]; if (on[i]) k[i].id += 10; } const l = k.filter((q) => on[q.i]).map((q) => ({ id: q.id, x: x + q.i * 18, y: y + q.i * 5, rx: 6, ry: 6 })), p = c.update(l, t), e = [p[0] - x, p[1] - y]; worst = Math.max(worst, Math.hypot(...e)); if (prev) jump = Math.max(jump, Math.hypot(e[0] - prev[0], e[1] - prev[1])); prev = e; }
   assert.ok(worst < 4, `worst ${worst}`); assert.ok(jump < 3, `jump ${jump}`);
 });

@@ -144,8 +144,7 @@ export function eyeToWorld(deg, e) { const p = deg * Math.PI / 180; return { bac
 // ---------- eyes (front camera) ----------
 // sideways and up-down do not depend on the camera's field of view, the distance does: `zScale` is found once per iPad (40 cm button)
 // The face is found in a worker. If that does not work, here in the page, and then not while the hand moves (it would hold up drawing).
-// the outer page (index.html) holds the camera and the full screen; opened on its own, this page is its own outer page
-export const TOP = (() => { try { if (parent !== window && parent.shell) return parent; } catch {} return typeof window === 'undefined' ? {} : window; })();
+export const TOP = typeof window === 'undefined' ? {} : window;
 export const live = () => !!TOP.shell?.stream?.getVideoTracks().some((t) => t.readyState === 'live');
 export async function camera() { TOP.shell ||= {}; if (!live()) TOP.shell.stream = await TOP.navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false }); return TOP.shell.stream; }
 export function cameraOff() { TOP.shell?.stream?.getTracks().forEach((t) => t.stop()); if (TOP.shell) TOP.shell.stream = null; }
@@ -165,7 +164,7 @@ export async function makeEyes() {
       const stream = await camera();
       this.video = document.createElement('video'); this.video.muted = true; this.video.playsInline = true; this.video.srcObject = stream; await this.video.play();
       if (!this.worker) {
-        this.status = '顔の認識モデルを読み込み中…'; const w = new Worker(new URL('./eye-worker.js?v=10', import.meta.url));
+        this.status = '顔の認識モデルを読み込み中…'; const w = new Worker(new URL('./eye-worker.js?v=11', import.meta.url));
         await new Promise((res, rej) => { const to = setTimeout(() => rej(new Error('顔の認識の準備が時間切れ')), 25000); w.onmessage = (e) => { if (e.data.type === 'ready') { clearTimeout(to); res(); } else if (e.data.type === 'error') { clearTimeout(to); rej(new Error(e.data.msg)); } }; w.onerror = (e) => { clearTimeout(to); rej(new Error(e.message || 'worker')); }; w.postMessage({ type: 'init' }); });
         this.worker = w; this.mode = 'worker';
       }

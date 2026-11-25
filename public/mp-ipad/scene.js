@@ -1,9 +1,9 @@
 // The picture: a box behind the glass, the material, the virtual finger. Drawn for one eye position (off-axis projection).
 import * as THREE from 'three';
-import { MATS, RF, grain, toHand, add } from './finger.js?v=10';
-import { SkinFinger } from './skin.js?v=10';
-import { surface, copyOf, TILE } from './tex.js?v=10';
-import { view, terraces } from './objview.js?v=10';
+import { MATS, RF, grain, toHand, add } from './finger.js?v=11';
+import { SkinFinger } from './skin.js?v=11';
+import { surface, copyOf, TILE } from './tex.js?v=11';
+import { view, terraces } from './objview.js?v=11';
 
 const V = (a) => new THREE.Vector3(a[0], a[1], a[2]), UP = new THREE.Vector3(0, 1, 0);
 export const DEPTH = 165; // mm, the room behind the glass
@@ -36,7 +36,7 @@ export class Scene {
   }
   layout(mmPerPx) {
     const w = innerWidth, h = innerHeight; this.r.setSize(w, h, false); this.W = w * mmPerPx; this.H = h * mmPerPx;
-    this.box.clear(); const W = this.W - 8, H = this.H - 8;
+    this.box.traverse((m) => m.geometry?.dispose()); this.box.clear(); const W = this.W - 8, H = this.H - 8;
     // the room gets narrower in steps toward the back: every step is an edge, light on its face and dark behind it
     const D = DEPTH, Z = [0, 16, 36, 60, 90, 125, D], inset = (i) => i * 3.4, band = (key, pts, uv, col) => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts.flat(), 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv.flat().map((v) => v / TILE[key]), 2)); g.setAttribute('color', new THREE.Float32BufferAttribute(col.flatMap((c) => [c, c, c]), 3)); g.setIndex([0, 1, 2, 2, 1, 3]); g.computeVertexNormals(); const m = (this.wallMat ||= {})[key] ||= Object.assign(copyOf(key), { vertexColors: true, side: THREE.DoubleSide }), p = new THREE.Mesh(g, m); p.receiveShadow = p.castShadow = true; this.box.add(p); };
     const line = new THREE.LineBasicMaterial({ color: 0xf2cda6, transparent: true, opacity: 0.55 }), ring = (i, z) => { const a = W / 2 - inset(i), b = H / 2 - inset(i), g = new THREE.BufferGeometry().setFromPoints([[-a, -b], [a, -b], [a, b], [-a, b], [-a, -b]].map(([x, y]) => new THREE.Vector3(x, y, z))), l = new THREE.Line(g, line.clone()); l.material.opacity = 0.75 * (1 - i / 8); this.box.add(l); };
@@ -58,7 +58,7 @@ export class Scene {
     const e = Math.hypot(W, H) / 2 + 60, c = this.sun.shadow.camera; Object.assign(c, { left: -e, right: e, top: e, bottom: -e, near: 10, far: 900 }); c.updateProjectionMatrix();
   }
   // what the island stands on: steps that get wider downward
-  stand() { const on = this.surf.visible, k = on ? this.surfZ.toFixed(1) + this.mat + this.IW : ''; if (k === this.pedKey && this.ped) return; this.pedKey = k; if (this.ped) { this.scene.remove(this.ped); this.ped = null; } if (on) { this.ped = terraces(this.IW / 2, this.IH / 2, this.surfZ - 0.4, DEPTH, 'wood'); this.scene.add(this.ped); } }
+  stand() { const on = this.surf.visible, k = on ? this.surfZ.toFixed(1) + this.mat + this.IW : ''; if (k === this.pedKey && this.ped) return; this.pedKey = k; if (this.ped) { this.scene.remove(this.ped); this.ped.traverse((m) => m.geometry?.dispose()); this.ped = null; } if (on) { this.ped = terraces(this.IW / 2, this.IH / 2, this.surfZ - 0.4, DEPTH, 'wood'); this.scene.add(this.ped); } }
   // how strong light and dark are (0..1.5)
   shade(k) { if (this.sh === k) return; this.sh = k; this.sky.intensity = Math.max(0.12, 1.15 - 0.62 * k); this.sun.intensity = 1.3 + 1.1 * k; this.scene.environmentIntensity = Math.max(0.12, 0.55 - 0.2 * k); }
   // everything is prepared before the first touch (otherwise the first picture of the finger takes half a second)
