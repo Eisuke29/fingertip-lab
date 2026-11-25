@@ -1,11 +1,11 @@
 // Things to touch behind the glass, after what earlier pseudo-haptics studies let people touch. Two ways to feel them, each with its own strength:
 // the fingertip is held back (o.fit: how far this finger gives way, o.gain), and the thing gives way (o.go). One or two fingers.
 // Pure functions, no DOM, no three.js. mm; z out of the screen; forces in mm of finger bending.
-import { RF, PRESS, clamp } from './finger.js?v=14';
-import { makeWorld, TipOver, swing as swingWorld } from './world.js?v=14';
+import { RF, PRESS, clamp } from './finger.js?v=15';
+import { makeWorld, TipOver, swing as swingWorld } from './world.js?v=15';
 
 // id, name
-export const THINGS = [['harp', 'ギターの弦'], ['grass', '草むら'], ['slime', 'スライム（つかる）'], ['slimetop', 'スライム（つからない）'], ['bumps', '山'], ['cube', '立方体'], ['push', '重い箱'], ['soft', 'やわらかい球'], ['posts', 'ばねの棒']];
+export const THINGS = [['harp', 'ギターの弦'], ['grass', '草むら'], ['slime', 'スライムの中'], ['slimetop', 'スライムの上'], ['bumps', '山'], ['cube', '立方体'], ['push', '重い箱'], ['soft', 'やわらかい球'], ['posts', 'ばねの棒']];
 let NEAR = 0, seed = 1; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647, H = 1 / 360, Q = 1 - Math.exp(-45 * H), none = [0, 0, 0];
 
 // low: lowest point of the resting fingertip
