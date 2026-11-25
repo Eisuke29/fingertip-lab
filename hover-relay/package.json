@@ -1,0 +1,1 @@
+{ "name": "hover-relay", "version": "0.1.0", "private": true, "type": "module", "engines": { "node": "24.x" }, "dependencies": { "ws": "8.19.0" } }
