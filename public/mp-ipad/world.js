@@ -1,6 +1,6 @@
 // Solid things with a height: cubes, hills and holes, soft balls. Which heights the fingertip can have there, and how it catches at the edges.
 // Pure functions, no DOM, no three.js. mm; z out of the screen.
-import { RF, clamp, solve } from './finger.js?v=8';
+import { RF, clamp, solve } from './finger.js?v=9';
 
 export const REACH = 4.5; // the things stand this much higher than the lowest point of the resting fingertip
 let seed = 1; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
@@ -10,17 +10,17 @@ const K = 34; // how fast the fingertip follows on them (1/s)
 export function makeWorld(kind, W, H, low, depth) {
   seed = 42; const objs = [], deco = [], top = low + REACH;
   if (kind === 'cube') { // towers of cubes; the uppermost ones can be touched
-    const n = Math.max(2, Math.round((W - 20) / 54)), m = Math.max(1, Math.round((H - 20) / 54)), dx = W / n, dy = H / m, a = Math.min(dx, dy) * 0.33;
+    const n = Math.max(2, Math.round(W / 50)), m = Math.max(1, Math.round(H / 50)), dx = W / n, dy = H / m, a = Math.min(dx, dy) * 0.33;
     for (let j = 0; j < m; j++) for (let i = 0; i < n; i++) {
       const x = -W / 2 + dx * (i + 0.5), y = -H / 2 + dy * (j + 0.5), k = Math.max(1, Math.round((depth + top) / (2 * a))), e = (depth + top) / k;
       objs.push({ type: 'box', x, y, a, r: 2, top, base: top - e }); for (let q = 1; q < k; q++) deco.push({ x: x + (rnd() - 0.5) * 2, y: y + (rnd() - 0.5) * 2, a: a * 1.02, top: top - q * e - 0.3, base: top - (q + 1) * e });
     }
     for (let j = 0; j <= m; j++) for (let i = 0; i <= n; i++) deco.push({ x: -W / 2 + dx * i, y: -H / 2 + dy * j, a: 8 + 4 * rnd(), top: top - 30 - rnd() * (depth + top - 55), base: -depth });
   } else if (kind === 'bumps') { // hills and holes in one plate: a height field
-    const f = [[-0.36, 0.22, 1], [-0.12, -0.22, -1], [0.12, 0.22, 1], [0.36, -0.22, -1], [-0.36, -0.22, -1], [-0.12, 0.22, -1], [0.12, -0.22, 1], [0.36, 0.22, 1]].map(([x, y, s]) => ({ x: x * W, y: y * H, s: s > 0 ? 1 : -2.2, R: 15 }));
-    objs.push({ type: 'field', x: 0, y: 0, f, base: low + 2.2, amp: 5.5 });
+    const f = [[-0.36, 0.22, 1], [-0.12, -0.22, -1], [0.12, 0.22, 1], [0.36, -0.22, -1], [-0.36, -0.22, -1], [-0.12, 0.22, -1], [0.12, -0.22, 1], [0.36, 0.22, 1]].map(([x, y, s]) => ({ x: x * W, y: y * H, s: s > 0 ? 1 : -1.5, R: Math.min(16, W * 0.1) }));
+    objs.push({ type: 'field', x: 0, y: 0, f, base: low - 4, amp: 11.5 });
   } else if (kind === 'soft') { // from hard to soft
-    const u = W / 4; [[-u, 20, 0.6], [0, 24, 3], [u, 28, 6]].forEach(([x, r, soft], i) => objs.push({ type: 'ball', i, x, y: 0, r, z: low + 5.5 + soft - r, soft, k: 260 + 500 / soft }));
+    const u = W / 4; [[-u - 4, 14, 0.6], [0, 17, 3], [u + 4, 20, 6]].forEach(([x, r, soft], i) => objs.push({ type: 'ball', i, x, y: 0, r, z: low + 5.5 + soft - r, soft, k: 260 + 500 / soft }));
   }
   for (const o of objs) Object.assign(o, { ox: 0, oy: 0, vx: 0, vy: 0, sink: 0 });
   return { kind, objs, deco, top, W, H, low };

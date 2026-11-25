@@ -6,14 +6,14 @@ export const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 export const norm = (a) => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
 export const DIPK = 0.67, REST = 2 * Math.PI / 180, REST_PIP = 6 * Math.PI / 180, RF = 8; // DIP follows PIP; the resting finger is (almost) straight; finger radius
 // h: height of the joint above the glass (mm), theta: usual angle of the segment above the joint, off: from the middle of the contact to the joint
-export const JOINTS = { mp: { h: 11, theta: 90, off: 12 }, pip: { h: 8.2, theta: 78, off: 12.5 },
+export const JOINTS = { mp: { h: 11, theta: 90, off: 12 }, pip: { h: 8.2, theta: 78, off: 6 },
   point: { h: 8.2, theta: 75, off: 0 } }; // point: only the PIP knuckle touches, so the joint is exactly at the middle of the contact
 
 // Surfaces to stroke. k: how fast the fingertip follows (1/s), hold: how far it sticks before slipping (mm), bump: grain height (f: how fine), drag: pull on the surface, dent: how deep it gives way. from: the study that used it
 export const MATS = {
   smooth: { name: 'つるつる', from: 'なめらかさ：VisualHaptics', k: 45, hold: 0, bump: 0, drag: 0, dent: 0.6 },
-  sand: { name: '細かいざらざら', from: '細かい粗さ：Touchy、宇治土公 2019', k: 24, hold: 1.6, bump: 0.55, f: 2.6, drag: 0, dent: 0.4 },
-  stone: { name: '粗いごつごつ', from: '粗さ：Touchy', k: 20, hold: 3.5, bump: 1.7, f: 0.75, drag: 0, dent: 0.4 },
+  sand: { name: '細かいざらざら', from: '細かい粗さ：Touchy、宇治土公 2019', k: 24, hold: 1.6, bump: 0.8, f: 2.0, drag: 0, dent: 0.4 },
+  stone: { name: '粗いごつごつ', from: '粗さ：Touchy', k: 20, hold: 3.5, bump: 4.6, f: 0.36, drag: 0, dent: 0.4 },
   knit: { name: '引っかかる', from: '引っかかる摩擦：Touchy（Stick）', k: 15, hold: 16, bump: 0, drag: 0.35, dent: 1.8 },
   tape: { name: 'べたべた', from: 'べたべた：傳田 2024（ガムテープ）', k: 9, hold: 11, bump: 0, drag: 0.5, dent: 1.0 },
   honey: { name: 'ねっとり', from: '流れる摩擦：Touchy（Slide）', k: 3, hold: 0, bump: 0, drag: 0.6, dent: 3.0 },
@@ -69,14 +69,20 @@ function shapePip({ theta, yaw, lag, gain = 1, kind = 'finger' }, s) {
 // carries the lag: its end goes where the fingertip is (lag), as far as it can while still touching. Pressed against something the
 // fingertip is bent back a little (ext) as a real one is, so that the nail is seen from above.
 // floor: lowest height of the fingertip's centre (instead of surf); then the finger may also hang in the air
-export const EXT = 0.35;
-function solvePoint({ root, theta, yaw, lag, gain = 1, ext = EXT, kind = 'finger', len, surf, dent = 0, floor }) {
-  const A = toHand(yaw), b = frame(theta, yaw, 0), d0 = frame(theta, yaw, -ext).m, L = len[2], dip = add(root, b.u, len[1]), air = floor != null, lo = air ? floor : surf + RF - PRESS - dent;
+export const EXT = 0.07;
+// dir: [left, down] (rad): how far the finger points to the left and down on the screen instead of straight into the depth. yaw: which side the palm faces
+export function aim(dir, yaw, curl = 0) {
+  const u = norm([-Math.tan(dir[0]), -Math.tan(dir[1]), -1]), H = toHand(yaw), n = norm(add(H, u, -dot(H, u)));
+  return { u, n, up: [-u[0], -u[1], -u[2]], m: add([u[0] * Math.cos(curl), u[1] * Math.cos(curl), u[2] * Math.cos(curl)], n, Math.sin(curl)) };
+}
+const seat = (theta, yaw, dir, curl) => (dir ? aim(dir, yaw, curl) : frame(theta, yaw, curl));
+function solvePoint({ root, theta, yaw, dir, lag, gain = 1, ext = EXT, kind = 'finger', len, surf, dent = 0, floor }) {
+  const A = toHand(yaw), b = seat(theta, yaw, dir, 0), d0 = seat(theta, yaw, dir, -ext).m, L = len[2], dip = add(root, b.u, len[1]), air = floor != null, lo = air ? floor : surf + RF - PRESS - dent;
   if (kind !== 'finger') { const q = add(add(dip, d0, L), lag, gain), tip = [q[0], q[1], Math.max(lo, q[2])], d = norm(add(tip, root, -1)); return { base: { u: b.u, d: d0 }, u: d, d, pip: root, dip, tip, k: 1, eased: 1, bendDeg: 0 }; }
   let x = d0[0] * L + lag[0] * gain, y = d0[1] * L + lag[1] * gain; const want = Math.hypot(x, y), hi = surf + RF - 0.3;
   const most = air ? 0.95 * L : Math.min(0.95 * L, Math.sqrt(Math.max(0, L * L - (dip[2] - hi) ** 2))); // how far sideways it reaches and still touches
   if (want > most) { x *= most / want; y *= most / want; }
-  let m = Math.hypot(x, y); const room = dip[2] - lo, need = Math.sqrt(Math.max(0, L * L - Math.max(0, room) ** 2)); // need: how flat it must lie to stay above lo
+  let m = Math.hypot(x, y); const room = dip[2] - lo, need = Math.min(0.97 * L, Math.sqrt(Math.max(0, L * L - Math.max(0, room) ** 2))); // need: how flat it must lie to stay above lo
   if (m < need) { // bent outward by what is under it, the way a fingertip gives
     const w = (need - m) / L, vx = x - A[0] * w * L * 1.4, vy = y - A[1] * w * L * 1.4, n = Math.hypot(vx, vy) || 1; x = vx / n * need; y = vy / n * need; m = need;
   }
@@ -84,8 +90,8 @@ function solvePoint({ root, theta, yaw, lag, gain = 1, ext = EXT, kind = 'finger
   const tip = [dip[0] + x, dip[1] + y, dip[2] - drop], d = norm(add(tip, dip, -1));
   return { base: { u: b.u, d: d0 }, u: b.u, d, pip: root, dip, tip, k: Math.hypot(x, y, drop) / L, eased: want > most ? most / want : 1, bendDeg: Math.acos(clamp(dot(d, d0), -1, 1)) * 180 / Math.PI };
 }
-export function restTip(root, theta, yaw, len, joint = 'mp', ext = EXT) {
-  if (joint === 'point') return add(add(root, frame(theta, yaw, 0).u, len[1]), frame(theta, yaw, -ext).m, len[2]);
+export function restTip(root, theta, yaw, len, joint = 'mp', ext = EXT, dir = null) {
+  if (joint === 'point') return add(add(root, seat(theta, yaw, dir, 0).u, len[1]), seat(theta, yaw, dir, -ext).m, len[2]);
   if (joint === 'pip') { const f = frame(theta, yaw, REST_PIP); return add(add(root, f.u, len[1]), f.m, len[2]); } const f = frame(theta, yaw, REST); return add(add(add(root, f.u, len[0]), f.m, len[1]), f.d, len[2]); }
 
 // The fingertip follows its resting place, sticks to the material and slips.

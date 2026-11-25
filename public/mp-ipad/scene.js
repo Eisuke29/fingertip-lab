@@ -1,12 +1,11 @@
 // The picture: a box behind the glass, the material, the virtual finger. Drawn for one eye position (off-axis projection).
 import * as THREE from 'three';
-import { MATS, RF, grain, toHand, frame, add } from './finger.js?v=8';
-import { SkinFinger } from './skin.js?v=8';
-import { surface, TILE } from './tex.js?v=8';
-import { view } from './objview.js?v=8';
+import { MATS, RF, grain, toHand, add } from './finger.js?v=9';
+import { SkinFinger } from './skin.js?v=9';
+import { surface, copyOf, TILE } from './tex.js?v=9';
+import { view, terraces } from './objview.js?v=9';
 
 const V = (a) => new THREE.Vector3(a[0], a[1], a[2]), UP = new THREE.Vector3(0, 1, 0);
-const COL = { prox: 0x35a57a, mid: 0x4f8fe6, dist: 0xf09a3e };
 export const DEPTH = 165; // mm, the room behind the glass
 
 export class Scene {
@@ -14,16 +13,14 @@ export class Scene {
     this.r = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' }); this.r.setPixelRatio(Math.min(1.5, devicePixelRatio)); this.r.localClippingEnabled = true;
     this.r.shadowMap.enabled = true; this.r.shadowMap.type = THREE.PCFShadowMap; this.r.setClearColor(0x0a0c0c);
     this.scene = new THREE.Scene(); this.cam = new THREE.PerspectiveCamera();
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x7a746e, 1.2)); this.scene.fog = new THREE.Fog(0x0b0d12, 600, 900); this.environment();
-    this.sun = new THREE.DirectionalLight(0xfff6ea, 1.75); this.sun.castShadow = true; this.sun.shadow.mapSize.set(1024, 1024); this.sun.shadow.radius = 4; this.sun.shadow.bias = -0.0008;
+    this.sky = new THREE.HemisphereLight(0xffffff, 0x6a6660, 1); this.scene.add(this.sky); this.scene.fog = new THREE.Fog(0x0b0d12, 600, 900); this.environment();
+    this.sun = new THREE.DirectionalLight(0xfff6ea, 1.75); this.sun.castShadow = true; this.sun.shadow.mapSize.set(1024, 1024); this.sun.shadow.radius = 4; this.sun.shadow.bias = -0.0008; this.sun.shadow.normalBias = 0.7;
     this.scene.add(this.sun, this.sun.target);
     const clip = [new THREE.Plane(new THREE.Vector3(0, 0, -1), 0)], mat = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.55, clippingPlanes: clip, transparent: true, side: THREE.DoubleSide });
     const add = (g, m) => { const x = new THREE.Mesh(g, m); x.castShadow = true; x.visible = false; x.frustumCulled = false; this.scene.add(x); return x; };
-    this.seg = [COL.prox, COL.mid, COL.dist].map((c) => add(new THREE.BufferGeometry(), mat(c)));
-    this.cap = add(new THREE.CircleGeometry(RF, 40), new THREE.MeshStandardMaterial({ color: COL.prox, roughness: 0.55, transparent: true })); this.cap.castShadow = false; // closes the finger where the glass cuts it
     this.skin = new SkinFinger(this.scene, clip, (t) => this.r.initTexture(t)); // to the graphics chip as soon as it is here, not when the finger first appears
     this.stick = add(new THREE.CylinderGeometry(2.6, 2.6, 1, 20), mat(0xe6e9ec)); this.cursor = add(new THREE.SphereGeometry(5, 28, 18), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 }));
-    this.surfMat = surface('knit').clone();
+    this.surfMat = surface('knit'); { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'), q = g.createRadialGradient(32, 32, 2, 32, 32, 32); q.addColorStop(0, 'rgba(0,0,0,.8)'); q.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = q; g.fillRect(0, 0, 64, 64); this.under = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 })); this.under.visible = false; this.scene.add(this.under); }
     this.box = new THREE.Group(); this.scene.add(this.box); this.surfZ = -78; this.mat = null; this.thing = null; this.fur = []; this.wave = null;
   }
   // soft light from all sides with two bright windows: what shines (ceramic, honey, nail) has something to reflect
@@ -34,35 +31,46 @@ export class Scene {
   }
   // the thing to touch (objects.js), or none: then the plain surface. flat: the surface is there too
   setThing(t) {
-    if (this.thing === t) return; this.thing = t; if (this.vw) { this.scene.remove(this.vw.group); this.vw.group.traverse((m) => m.geometry?.dispose()); this.vw = null; } this.surf.visible = !t || t.kind === 'slime';
+    if (this.thing === t) return; this.thing = t; if (this.vw) { this.scene.remove(this.vw.group); this.vw.group.traverse((m) => m.geometry?.dispose()); this.vw = null; } this.surf.visible = !t || t.kind === 'slime'; this.stand();
     if (t) { this.vw = view(t); this.scene.add(this.vw.group); this.vw.update([], 0, this.surfZ); } this.dirty = true;
   }
   layout(mmPerPx) {
     const w = innerWidth, h = innerHeight; this.r.setSize(w, h, false); this.W = w * mmPerPx; this.H = h * mmPerPx;
     this.box.clear(); const W = this.W - 8, H = this.H - 8;
-    // the room: brick walls and a plank floor, lines that run away from the person, darker toward the back
-    const plane = (key, a, b, pos, rot, shade) => { const g = new THREE.PlaneGeometry(a, b, 12, 12), u = g.attributes.uv, n = u.count, c = new Float32Array(n * 3), T = TILE[key]; for (let i = 0; i < n; i++) { const x = u.getX(i), y = u.getY(i), k = shade(x, y); c.set([k, k, k], i * 3); u.setXY(i, x * a / T, y * b / T); } g.setAttribute('color', new THREE.BufferAttribute(c, 3)); const m = (this.wallMat ||= {})[key] ||= Object.assign(surface(key).clone(), { vertexColors: true }), p = new THREE.Mesh(g, m); p.position.set(...pos); p.rotation.set(...rot); p.receiveShadow = true; this.box.add(p); };
-    const edge = (x, y, k = 0.5) => 1 - k * Math.max(0, 1 - Math.min(x, 1 - x, y, 1 - y) * 6), D = DEPTH;
-    plane('wood', W, H, [0, 0, -D], [0, 0, 0], (x, y) => 0.85 * edge(x, y)); plane('wall', D, H, [-W / 2, 0, -D / 2], [0, Math.PI / 2, 0], (x) => 0.5 + 0.5 * x); plane('wall', D, H, [W / 2, 0, -D / 2], [0, -Math.PI / 2, 0], (x) => 0.5 + 0.5 * (1 - x));
-    plane('wall', W, D, [0, -H / 2, -D / 2], [-Math.PI / 2, 0, 0], (x, y) => 0.45 + 0.55 * (1 - y)); plane('wall', W, D, [0, H / 2, -D / 2], [Math.PI / 2, 0, 0], (x, y) => 0.45 + 0.55 * y);
+    // the room gets narrower in steps toward the back: every step is an edge, light on its face and dark behind it
+    const D = DEPTH, Z = [0, 16, 36, 60, 90, 125, D], inset = (i) => i * 3.4, band = (key, pts, uv, col) => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts.flat(), 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv.flat().map((v) => v / TILE[key]), 2)); g.setAttribute('color', new THREE.Float32BufferAttribute(col.flatMap((c) => [c, c, c]), 3)); g.setIndex([0, 1, 2, 2, 1, 3]); g.computeVertexNormals(); const m = (this.wallMat ||= {})[key] ||= Object.assign(copyOf(key), { vertexColors: true, side: THREE.DoubleSide }), p = new THREE.Mesh(g, m); p.receiveShadow = p.castShadow = true; this.box.add(p); };
+    const line = new THREE.LineBasicMaterial({ color: 0xf2cda6, transparent: true, opacity: 0.55 }), ring = (i, z) => { const a = W / 2 - inset(i), b = H / 2 - inset(i), g = new THREE.BufferGeometry().setFromPoints([[-a, -b], [a, -b], [a, b], [-a, b], [-a, -b]].map(([x, y]) => new THREE.Vector3(x, y, z))), l = new THREE.Line(g, line.clone()); l.material.opacity = 0.75 * (1 - i / 8); this.box.add(l); };
+    for (let i = 0; i < Z.length - 1; i++) {
+      const z0 = -Z[i], z1 = -Z[i + 1], a = W / 2 - inset(i), b = H / 2 - inset(i), a1 = W / 2 - inset(i + 1), b1 = H / 2 - inset(i + 1), f = 1 - i / 7.5, hi = 1.15 * f + 0.1, lo = hi * 0.36, d = Z[i + 1] - Z[i];
+      for (const s of [-1, 1]) { // walls: dark in the corner behind the step, then the face of the next step, light
+        band('wall', [[s * a, -b, z0], [s * a, b, z0], [s * a, -b, z1], [s * a, b, z1]], [[-b, 0], [b, 0], [-b, d], [b, d]], [hi * 0.75, hi * 0.75, lo, lo]); band('wall', [[-a, s * b, z0], [a, s * b, z0], [-a, s * b, z1], [a, s * b, z1]], [[-a, 0], [a, 0], [-a, d], [a, d]], s > 0 ? [hi * 0.6, hi * 0.6, lo * 0.8, lo * 0.8] : [hi * 0.85, hi * 0.85, lo, lo]);
+        band('wall', [[s * a, -b, z1], [s * a, b, z1], [s * a1, -b1, z1], [s * a1, b1, z1]], [[-b, 0], [b, 0], [-b, 4], [b, 4]], [lo, lo, hi * 1.1, hi * 1.1]); band('wall', [[-a, s * b, z1], [a, s * b, z1], [-a1, s * b1, z1], [a1, s * b1, z1]], [[-a, 0], [a, 0], [-a, 4], [a, 4]], [lo, lo, hi * 1.1, hi * 1.1]);
+      }
+      ring(i + 1, z1 + 0.2);
+    }
+    { const a = W / 2 - inset(6), b = H / 2 - inset(6); band('wood', [[-a, -b, -D], [a, -b, -D], [-a, b, -D], [a, b, -D]], [[-a, -b], [a, -b], [-a, b], [a, b]], [0.3, 0.3, 0.3, 0.3]); }
     const frame = new THREE.MeshBasicMaterial({ color: 0x050606 }), rect = (x0, y0, x1, y1) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, y1 - y0), frame); m.position.set((x0 + x1) / 2, (y0 + y1) / 2, 0); this.box.add(m); };
     rect(-W, -H, W, -H / 2); rect(-W, H / 2, W, H); rect(-W, -H / 2, -W / 2, H / 2); rect(W / 2, -H / 2, W, H / 2);
-    const nx = 120, ny = Math.round(120 * H / W); this.n = [nx, ny]; this.size = [W, H];
+    const IW = this.IW = W * 0.62, IH = this.IH = H * 0.62, nx = 120, ny = Math.round(120 * IH / IW); this.n = [nx, ny]; this.size = [IW, IH]; this.ped = null; // the part that can be touched is an island in the middle
     for (const f of this.fur) this.scene.remove(f); if (this.surf) { this.scene.remove(this.surf); this.surf.geometry.dispose(); }
-    this.surf = new THREE.Mesh(new THREE.PlaneGeometry(W, H, nx, ny), this.surfMat); this.surf.receiveShadow = true; this.surf.frustumCulled = false; this.scene.add(this.surf);
+    this.surf = new THREE.Mesh(new THREE.PlaneGeometry(IW, IH, nx, ny), this.surfMat); this.surf.receiveShadow = true; this.surf.frustumCulled = false; this.scene.add(this.surf);
     this.surf.visible = !this.thing || this.thing.kind === 'slime'; this.tile(); this.wave = null; this.fur = []; this.rest = this.surf.geometry.attributes.position.array.slice(); this.dirty = true; this.box0 = null;
     const e = Math.hypot(W, H) / 2 + 60, c = this.sun.shadow.camera; Object.assign(c, { left: -e, right: e, top: e, bottom: -e, near: 10, far: 900 }); c.updateProjectionMatrix();
   }
+  // what the island stands on: steps that get wider downward
+  stand() { const on = this.surf.visible, k = on ? this.surfZ.toFixed(1) + this.mat + this.IW : ''; if (k === this.pedKey && this.ped) return; this.pedKey = k; if (this.ped) { this.scene.remove(this.ped); this.ped = null; } if (on) { this.ped = terraces(this.IW / 2, this.IH / 2, this.surfZ - 0.4, DEPTH, 'wood'); this.scene.add(this.ped); } }
+  // how strong light and dark are (0..1.5)
+  shade(k) { if (this.sh === k) return; this.sh = k; this.sky.intensity = Math.max(0.12, 1.15 - 0.62 * k); this.sun.intensity = 1.3 + 1.1 * k; this.scene.environmentIntensity = Math.max(0.12, 0.55 - 0.2 * k); }
   // everything is prepared before the first touch (otherwise the first picture of the finger takes half a second)
-  warm() { this.skin.update([[0, 0, 11], [0, 0, -32], [0, 0, -57], [0, 0, -74]], 'mp', [0, -1, 0], 1); const on = [...this.seg, this.cap, this.stick, this.cursor, this.skin.mesh, this.skin.nail, this.skin.cap], was = on.map((m) => m.visible); for (const m of on) m.visible = true; this.r.compile(this.scene, this.cam); this.render([0, -175, 553]); on.forEach((m, i) => { m.visible = was[i]; }); }
+  warm() { this.skin.update([[0, 0, 11], [0, 0, -32], [0, 0, -57], [0, 0, -74]], 'mp', [0, -1, 0], 1); const on = [this.stick, this.cursor, this.skin.mesh, this.skin.cap, this.skin.blob], was = on.map((m) => m.visible); for (const m of on) m.visible = true; this.r.compile(this.scene, this.cam); this.render([0, -175, 553]); on.forEach((m, i) => { m.visible = was[i]; }); }
   // the light comes from above in the real world (measured tilt), a little from the right so that the shadow falls sideways
   light(up) { const t = [0, 0, -DEPTH]; this.sun.target.position.set(...t); this.sun.position.set(up[0] * 300 + 190, up[1] * 300 + 20, Math.max(120, up[2] * 300)); }
-  setMaterial(key) { if (this.mat === key) return; this.mat = key; this.surfMat = this.surf.material = surface(key); this.tile(); this.dirty = true; this.wave = null; }
+  setMaterial(key) { if (this.mat === key) return; this.mat = key; this.surfMat = this.surf.material = surface(key); this.tile(); this.dirty = true; this.wave = null; this.stand(); }
   // the texture keeps its size in mm
   tile() { const g = this.surf?.geometry, T = TILE[this.mat]; if (!g || !T) return; const u = g.attributes.uv, p = this.rest; for (let i = 0; i < u.count; i++) u.setXY(i, p[i * 3] / T, p[i * 3 + 1] / T); u.needsUpdate = true; }
   // drawing cannot keep up: fewer pixels (less delay)
   lighter() { const p = this.r.getPixelRatio(); if (p <= 1) return; this.r.setPixelRatio(p - 0.25); this.r.setSize(innerWidth, innerHeight, false); }
-  setDepth(z) { if (Math.abs(z - this.surfZ) < 0.01) return; this.surfZ = z; this.dirty = true; }
+  setDepth(z) { if (Math.abs(z - this.surfZ) < 0.01) return; this.surfZ = z; this.dirty = true; this.stand(); }
   // the finger never goes into the material: the material gives way. spheres: [[x, y, z], r]. Only the part around the finger is computed.
   deform(spheres, pull) {
     if (this.mat === 'water') { this.ripple(spheres); return; }
@@ -96,7 +104,7 @@ export class Scene {
     if (on && !this.fur.length) {
       const S = 128, c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d'), im = g.createImageData(S, S); let q = 9; for (let i = 0; i < S * S; i++) { q = (q * 16807) % 2147483647; const v = q / 2147483647 * 255; im.data.set([v, v, v, 255], i * 4); } g.putImageData(im, 0, 0); const tx = new THREE.CanvasTexture(c); tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.magFilter = THREE.LinearFilter;
       this.furU = { tip: { value: new THREE.Vector2(999, 999) }, lean: { value: new THREE.Vector2() }, hairs: { value: tx } };
-      for (let i = 1; i <= 7; i++) { const m = surface('fur').clone(), L = i / 7; m.onBeforeCompile = (s) => { Object.assign(s.uniforms, this.furU); s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nuniform vec2 tip, lean; varying vec2 vP;').replace('#include <begin_vertex>', `vec3 transformed = position; vP = position.xy; float dd = dot(position.xy - tip, position.xy - tip); float near = exp(-dd / 260.0); transformed.xy += (vec2(0.4, -0.9) * 1.4 + lean * near) * ${(L * L).toFixed(3)}; transformed.z += ${(L * 5).toFixed(2)} * (1.0 - 0.85 * exp(-dd / 110.0));`); s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D hairs; varying vec2 vP;').replace('#include <map_fragment>', `#include <map_fragment>\n if (texture2D(hairs, vP / 26.0).r < ${(0.25 + 0.68 * L).toFixed(3)}) discard; diffuseColor.rgb *= ${(0.55 + 0.6 * L).toFixed(3)};`); }; m.customProgramCacheKey = () => 'fur' + i; const f = new THREE.Mesh(this.surf.geometry, m); f.frustumCulled = false; f.receiveShadow = true; this.scene.add(f); this.fur.push(f); }
+      for (let i = 1; i <= 7; i++) { const m = copyOf('fur'), L = i / 7; m.onBeforeCompile = (s) => { Object.assign(s.uniforms, this.furU); s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nuniform vec2 tip, lean; varying vec2 vP;').replace('#include <begin_vertex>', `vec3 transformed = position; vP = position.xy; float dd = dot(position.xy - tip, position.xy - tip); float near = exp(-dd / 260.0); transformed.xy += (vec2(0.4, -0.9) * 1.4 + lean * near) * ${(L * L).toFixed(3)}; transformed.z += ${(L * 5).toFixed(2)} * (1.0 - 0.85 * exp(-dd / 110.0));`); s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D hairs; varying vec2 vP;').replace('#include <map_fragment>', `#include <map_fragment>\n if (texture2D(hairs, vP / 26.0).r < ${(0.25 + 0.68 * L).toFixed(3)}) discard; diffuseColor.rgb *= ${(0.55 + 0.6 * L).toFixed(3)};`); }; m.customProgramCacheKey = () => 'fur' + i; const f = new THREE.Mesh(this.surf.geometry, m); f.frustumCulled = false; f.receiveShadow = true; this.scene.add(f); this.fur.push(f); }
     }
     for (const f of this.fur) { f.visible = on; f.geometry = this.surf.geometry; } if (on && this.furU) { if (tip) { this.furU.tip.value.set(tip[0], tip[1]); this.furU.lean.value.lerp(new THREE.Vector2(-lag[0], -lag[1]).multiplyScalar(0.7), 0.3); } else { this.furU.lean.value.multiplyScalar(0.9); if (this.furU.lean.value.length() < 0.05) this.furU.tip.value.set(999, 999); } }
   }
@@ -114,31 +122,27 @@ export class Scene {
   }
   // f: the solved finger (or null), kind: finger / stick / cursor
   finger(f, kind, root, alpha, lag, joint = 'mp', look = 'real', yaw = 0, smear = null) {
-    const on = !!f, real = look === 'real'; this.skin.visible = on && kind === 'finger' && real; this.seg.forEach((m, i) => { m.visible = on && kind === 'finger' && !real && (i > 0 || joint === 'mp'); }); this.cap.visible = on && kind === 'finger' && !real; this.stick.visible = on && kind === 'stick'; this.cursor.visible = on && kind === 'cursor';
-    if (!on) { this.spheres = []; this.after([0, 0], null); return; }
-    for (const m of this.seg) m.material.opacity = alpha; this.cap.material.opacity = alpha;
+    const on = !!f; this.skin.setLook(look); this.skin.visible = on && kind === 'finger'; this.stick.visible = on && kind === 'stick'; this.cursor.visible = on && kind === 'cursor';
+    if (!on) { this.spheres = []; this.under.visible = false; this.after([0, 0], null); return; }
     let sp;
     if (kind === 'finger') {
-      if (real) this.skin.update(joint === 'mp' ? [root, f.pip, f.dip, f.tip] : [root, f.dip, f.tip], joint, toHand(yaw), alpha, smear); else {
-      if (joint === 'mp') this.capsule(this.seg[0], root, f.pip, RF); this.cap.material.color.setHex(joint === 'mp' ? COL.prox : COL.mid);
-      this.capsule(this.seg[1], f.pip, f.dip, RF * 0.975); this.capsule(this.seg[2], f.dip, f.tip, RF * 0.95); // a little thinner each: the joints do not flicker
-      const s = Math.max(0.3, -f.u[2]), cx = root[0] + f.u[0] * root[2] / s, cy = root[1] + f.u[1] * root[2] / s; this.cap.position.set(cx, cy, -0.05); this.cap.rotation.z = Math.atan2(f.u[1], f.u[0]); this.cap.scale.set(Math.min(2, 1 / s), 1, 1); }
+      this.skin.update(joint === 'mp' ? [root, f.pip, f.dip, f.tip] : [root, f.dip, f.tip], joint, toHand(yaw), alpha, smear);
       sp = [[f.tip, RF]]; for (let i = 1; i <= 5; i++) sp.push([[0, 1, 2].map((j) => f.tip[j] + (f.dip[j] - f.tip[j]) * i / 5), RF]);
     } else if (kind === 'stick') {
       const e = [f.tip[0], f.tip[1], f.tip[2] - RF + 2.6], a = V(e).sub(V(root)); this.stick.scale.y = a.length(); this.stick.position.copy(V(root)).addScaledVector(a, 0.5); this.stick.quaternion.setFromUnitVectors(UP, a.normalize()); sp = [[e, 2.6]];
     } else { const e = [f.cursor[0], f.cursor[1], f.tip[2] - RF + 5]; this.cursor.position.set(...e); sp = [[e, 5]]; }
     this.spheres = sp; this.after(lag, sp[0][0]);
   }
-  after(lag, tip) { const t = this.thing; if (this.surf.visible) this.deform(this.spheres, [-lag[0], -lag[1]]); this.hair(!t && this.mat === 'fur', tip, lag); if (t) this.vw.update(this.spheres, 0, this.surfZ); }
+  after(lag, tip) { const t = this.thing; { const z = tip && (t ? t.floor : Math.abs(tip[0]) < this.IW / 2 && Math.abs(tip[1]) < this.IH / 2 ? this.surfZ : null), up = z == null ? 99 : tip[2] - RF - z; this.under.visible = up < 30; if (up < 30) { const r = 22 + Math.max(0, up) * 1.4; this.under.position.set(tip[0], tip[1], z + 0.3); this.under.scale.set(r, r, 1); this.under.material.opacity = 0.75 * (1 - Math.max(0, up) / 30); } } if (this.surf.visible) this.deform(this.spheres, [-lag[0], -lag[1]]); this.hair(!t && this.mat === 'fur', tip, lag); if (t) this.vw.update(this.spheres, 0, this.surfZ); }
   // the real finger in front of the glass: proximal phalanx up from the knuckle, the rest folded into the fist
   ghost(g) {
     if (!g) { for (const m of this.gm || []) m.visible = false; return; }
-    const [root, th, yaw, len] = g, mat = this.skin.mat.clone(); this.gm ||= [0, 1, 2].map(() => { const m = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshStandardMaterial({ roughness: 0.6 })); m.frustumCulled = false; this.scene.add(m); return m; }); mat.dispose();
-    const r = [root[0], root[1], 9.6], f = frame(th, yaw, 0), H = toHand(yaw), mcp = add(r, f.up, len[0]), dip = add(add(r, H, len[1]), [0, 0, 1], 5), end = add(add(dip, f.up, 14), H, -6);
-    for (const [m, a, b, w] of [[this.gm[0], r, mcp, 9.6], [this.gm[1], r, dip, 8.6], [this.gm[2], dip, end, 8]]) { this.capsule(m, a, b, w); m.visible = true; m.material.color.copy(this.skin.mat.color).multiplyScalar(0.86); }
+    const [root, u, yaw, len] = g; this.gm ||= [0, 1, 2].map(() => { const m = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshStandardMaterial({ roughness: 0.6 })); m.frustumCulled = false; this.scene.add(m); return m; });
+    const r = [root[0], root[1], 9.6], f = { up: u.map((v) => -v) }, H = toHand(yaw), mcp = add(r, f.up, len[0]), dip = add(add(r, H, len[1]), [0, 0, 1], 5), end = add(add(dip, f.up, 14), H, -6);
+    for (const [m, a, b, w] of [[this.gm[0], r, mcp, 9.6], [this.gm[1], r, dip, 8.6], [this.gm[2], dip, end, 8]]) { this.capsule(m, a, b, w); m.visible = true; m.material.color.copy(this.skin.skin); }
   }
   render(eye) {
-    this.scene.fog.near = eye[2] + 55; this.scene.fog.far = eye[2] + DEPTH * 2.1;
+    { const k = this.sh ?? 1; this.scene.fog.near = eye[2] + 45; this.scene.fog.far = eye[2] + DEPTH * (2.6 - 1.1 * k); }
     const n = 5, [x, y] = eye, z = Math.max(80, eye[2]), w = this.W / 2, h = this.H / 2, c = this.cam;
     c.position.set(x, y, z); c.quaternion.identity(); c.updateMatrixWorld();
     c.projectionMatrix.makePerspective((-w - x) * n / z, (w - x) * n / z, (h - y) * n / z, (-h - y) * n / z, n, 4000); c.projectionMatrixInverse.copy(c.projectionMatrix).invert();

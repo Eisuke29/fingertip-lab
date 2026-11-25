@@ -1,10 +1,22 @@
 // How the things of objects.js look. view(thing, scene) puts the meshes into a group and returns { group, update(spheres, dt) }.
 import * as THREE from 'three';
-import { RF } from './finger.js?v=8';
-import { fieldZ } from './world.js?v=8';
-import { surface, roundBox, TILE } from './tex.js?v=8';
+import { RF } from './finger.js?v=9';
+import { fieldZ } from './world.js?v=9';
+import { surface, copyOf, roundBox, TILE } from './tex.js?v=9';
 
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v)), tinted = (key, c) => { const m = surface(key).clone(); m.color = new THREE.Color(c); return m; };
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v)), tinted = (key, c) => { const m = copyOf(key); m.color = new THREE.Color(c); return m; };
+// steps that get wider downward: every step an edge, its top light, its side dark toward the foot
+export function terraces(a, b, top, depth, key) {
+  const G = new THREE.Group(), m = Object.assign(copyOf(key), { vertexColors: true, side: THREE.DoubleSide }), T = TILE[key], n = 4, h = (depth + top) / n; let x = a, y = b, z = top;
+  const quad = (p, uv, c) => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(p.flat(), 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv.flat().map((v) => v / T), 2)); g.setAttribute('color', new THREE.Float32BufferAttribute(c.flatMap((k) => [k, k, k]), 3)); g.setIndex([0, 1, 2, 2, 1, 3]); g.computeVertexNormals(); const q = new THREE.Mesh(g, m); q.castShadow = q.receiveShadow = true; G.add(q); };
+  for (let i = 0; i < n; i++) {
+    const f = 1 - i * 0.2, x1 = x + 6.5, y1 = y + 6.5, z1 = z - h, slope = 2.2;
+    for (const s of [-1, 1]) { quad([[s * x, -y, z], [s * x, y, z], [s * (x + slope), -y - slope, z1], [s * (x + slope), y + slope, z1]], [[-y, 0], [y, 0], [-y, h], [y, h]], [0.75 * f, 0.75 * f, 0.18 * f, 0.18 * f]); quad([[-x, s * y, z], [x, s * y, z], [-x - slope, s * (y + slope), z1], [x + slope, s * (y + slope), z1]], [[-x, 0], [x, 0], [-x, h], [x, h]], [0.65 * f, 0.65 * f, 0.16 * f, 0.16 * f]);
+      quad([[s * (x + slope), -y - slope, z1], [s * (x + slope), y + slope, z1], [s * x1, -y1, z1], [s * x1, y1, z1]], [[-y, 0], [y, 0], [-y, 5], [y, 5]], [0.25 * f, 0.25 * f, f, f]); quad([[-x - slope, s * (y + slope), z1], [x + slope, s * (y + slope), z1], [-x1, s * y1, z1], [x1, s * y1, z1]], [[-x, 0], [x, 0], [-x, 5], [x, 5]], [0.25 * f, 0.25 * f, f, f]); }
+    const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([[-x, -y], [x, -y], [x, y], [-x, y], [-x, -y]].map(([p, q]) => new THREE.Vector3(p, q, z + 0.25))), new THREE.LineBasicMaterial({ color: 0xffe2bd, transparent: true, opacity: 0.8 * f })); G.add(l); x = x1; y = y1; z = z1;
+  }
+  return G;
+}
 // many tubes in one mesh; each tube: a line of points with radii, rewritten only when it changes
 class Tubes {
   constructor(count, seg, sides, mat, color) {
@@ -28,14 +40,14 @@ class Tubes {
 }
 export function view(t) {
   const G = new THREE.Group(), put = (g, mat, x = 0, y = 0, z = 0) => { const m = new THREE.Mesh(g, mat); m.castShadow = m.receiveShadow = true; m.frustumCulled = false; m.position.set(x, y, z); G.add(m); return m; };
-  const slab = (z, key, c, thick = 9) => { const w = t.W - 2 * t.table, h = t.H - 2 * t.table, g = new THREE.BoxGeometry(w, h, thick), u = g.attributes.uv, p = g.attributes.position; for (let i = 0; i < u.count; i++) u.setXY(i, p.getX(i) / TILE[key], (p.getY(i) + p.getZ(i)) / TILE[key]); return put(g, c ? tinted(key, c) : surface(key), 0, 0, z - thick / 2); };
+  const slab = (z, key, c, thick = 9) => { const w = t.W - 2 * t.table, h = t.H - 2 * t.table, g = new THREE.BoxGeometry(w, h, thick), u = g.attributes.uv, p = g.attributes.position; for (let i = 0; i < u.count; i++) u.setXY(i, p.getX(i) / TILE[key], (p.getY(i) + p.getZ(i)) / TILE[key]); G.add(terraces(w / 2, h / 2, z - 0.2, t.depth, 'wood')); return put(g, c ? tinted(key, c) : surface(key), 0, 0, z - thick / 2); };
   let update = () => {};
   if (t.kind === 'cube') {
     const C = [0xf3d9b0, 0xe9a08a, 0x9fc3d8, 0xc9d79a], M = C.map((c) => tinted('block', c)); t.w.objs.forEach((o, i) => put(roundBox(o.a, o.top - o.base, o.r, TILE.block), M[(i + (i >> 2)) % 4], o.x, o.y, o.base)); t.w.deco.forEach((d, i) => put(roundBox(d.a, d.top - d.base, 1.4, TILE.block), M[(i * 7 + 1) % 4], d.x, d.y, d.base));
   } else if (t.kind === 'bumps') {
-    const o = t.w.objs[0], nx = 130, ny = 92, g = new THREE.PlaneGeometry(t.W, t.H, nx, ny), p = g.attributes.position, u = g.attributes.uv; for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i); p.setZ(i, fieldZ(o, x, y)); u.setXY(i, x / TILE.check, y / TILE.check); } g.computeVertexNormals(); put(g, surface('check'));
+    const o = t.w.objs[0], nx = 130, ny = 92, g = new THREE.PlaneGeometry(t.W, t.H, nx, ny), p = g.attributes.position, u = g.attributes.uv; for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i); p.setZ(i, fieldZ(o, x, y)); u.setXY(i, x / TILE.check, y / TILE.check); } g.computeVertexNormals(); put(g, surface('check')); G.add(terraces(t.W / 2, t.H / 2, o.base - 0.6, t.depth, 'wood'));
   } else if (t.kind === 'soft') {
-    t.table = 14; slab(t.low - 30, 'wood');
+    t.table = 0; t.floor = t.low - 24; slab(t.floor, 'wood');
     const balls = t.w.objs.map((o, i) => { const g = new THREE.SphereGeometry(o.r, 56, 36).rotateX(Math.PI / 2), m = put(g, [surface('smooth'), surface('rubber'), surface('jelly')][i]); m.userData.rest = g.attributes.position.array.slice(); return m; });
     update = (spheres) => t.w.objs.forEach((o, i) => {
       const m = balls[i], g = m.geometry, p = g.attributes.position.array, r = m.userData.rest, near = t.on === o ? spheres : []; m.position.set(o.x + o.ox * 0.3, o.y + o.oy * 0.3, o.z); if (!near.length && !m.userData.was && Math.abs(o.ox) + Math.abs(o.oy) < 0.02) return;

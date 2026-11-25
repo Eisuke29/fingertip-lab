@@ -1,17 +1,18 @@
 // Stroking on the iPad itself. The hand is a fist; MP: the back of the index finger's proximal phalanx is on the glass, PIP: the back of its middle phalanx. Only the hand slides.
 // touch -> where the knuckle is, motion sensor -> how the iPad stands, front camera -> where the eyes are. No server, no PC.
-import { Contact, Point, Lead, Ahead, Tilt, Eye, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=8';
-import { MATS, JOINTS, RF, PRESS, Tip, solve, restTip, grain, seenAt, add, frame } from './finger.js?v=8';
-import { ground, settle } from './world.js?v=8';
-import { THINGS, makeThing } from './objects.js?v=8';
-import { Scene, DEPTH } from './scene.js?v=8';
-import { tone } from './skin.js?v=8';
+import { Contact, Point, Lead, Ahead, Tilt, Eye, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=9';
+import { MATS, JOINTS, RF, PRESS, Tip, solve, restTip, grain, seenAt, add, aim } from './finger.js?v=9';
+import { ground, settle } from './world.js?v=9';
+import { THINGS, makeThing } from './objects.js?v=9';
+import { Scene, DEPTH } from './scene.js?v=9';
+import { tone, LOOKS } from './skin.js?v=9';
+import { fingerFromPhoto, keepPhoto, lastPhoto } from './photo.js?v=9';
 import { Color, SRGBColorSpace } from 'three';
 
 const $ = (s) => document.querySelector(s), now = () => performance.now(), rad = (d) => d * Math.PI / 180, val = (id) => +$(id).value;
-const MM = 0.1924, STORE = 'mpIpad.v3'; // mm per CSS px (264 ppi iPads); phalanges
+const MM = 0.1924, STORE = 'mpIpad.v4'; // mm per CSS px (264 ppi iPads); phalanges
 const O = { group: 'thing', thing: 'cube', mat: 'sand', kind: 'finger', bend: 'whole', hand: 'right', eye: 'track', cam: 'top', joint: 'point', look: 'real', skin: 'auto' };
-const saved = (() => { try { const o = JSON.parse(localStorage.getItem('mpIpad.v2') || localStorage.getItem('mpIpad.v1') || '{}'); return JSON.parse(localStorage.getItem(STORE) || 'null') || { ...o, mat: null, joint: null }; } catch { return {}; } })();
+const saved = (() => { try { const o = JSON.parse(localStorage.getItem('mpIpad.v3') || '{}'); return JSON.parse(localStorage.getItem(STORE) || 'null') || { zScale: o.zScale, cam: o.cam, hand: o.hand, joint: o.joint, set: o.set && { lead: o.set.lead, bright: o.set.bright, tone: o.set.tone } }; } catch { return {}; } })();
 const S = { started: false, ready: false, raw: [], cancels: 0, root: null, contact: new Contact(), tilt: new Tilt(), eye: new Eye(), eyes: null, zScale: saved.zScale || 1, tip: new Tip(), thing: null, skin: null, bob: 0, f: null, fps: 0, rec: null, err: '' };
 const lead = new Lead(), ahead = new Ahead(), tracker = () => (O.joint === 'point' ? new Point(O.hand, rad(val('#yaw'))) : new Contact(O.hand, rad(val('#yaw'))));
 const GHOST = new URLSearchParams(location.search).has('ghost'); // draws the real finger too (to check on a PC how the two join)
@@ -73,7 +74,7 @@ $('#cal').onclick = () => {
   const rest = Math.hypot(m[0], m[1]), z = Math.sqrt(Math.max(100, 400 * 400 - rest * rest)); S.zScale = Math.max(0.4, Math.min(2.5, S.zScale * z / m[2]));
   store(); flash('40cmに合わせました');
 };
-const KEEP = ['gain', 'l0', 'l1', 'l2', 'tone', 'bright', 'ext', 'lead', 'ahead', 'smear', 'yaw'];
+const KEEP = ['lr', 'dn', 'taper', 'over', 'deep', 'cshade', 'blob', 'fade', 'shade', 'gain', 'l0', 'l1', 'l2', 'tone', 'bright', 'ext', 'lead', 'ahead', 'smear', 'yaw'];
 const store = () => { try { localStorage.setItem(STORE, JSON.stringify({ zScale: S.zScale, cam: O.cam, joint: O.joint, look: O.look, hand: O.hand, skin: O.skin, group: O.group, thing: O.thing, mat: O.mat, own, set: Object.fromEntries(KEEP.map((id) => [id, val(`#${id}`)])) })); } catch {} };
 let flashT = 0, flashM = ''; function flash(t, ms = 2500) { flashM = t; flashT = now() + ms; }
 
@@ -81,13 +82,14 @@ let flashT = 0, flashM = ''; function flash(t, ms = 2500) { flashM = t; flashT =
 const svg = (d) => `<svg viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="${d}"/></svg>`, SHAPE = { cube: 'M18 4l13 7v14l-13 7-13-7V11z M5 11l13 7 13-7 M18 18v14', bumps: 'M2 24c5 0 5-12 10-12s5 12 8 12 4 7 7 7 3-7 7-7', push: 'M14 12h16v16H14z M2 20h10 M8 16l4 4-4 4', harp: 'M6 4h24 M6 32h24 M10 4v28 M18 4c5 10 5 18 0 28 M26 4v28', slime: 'M4 30h28 M18 6v8 M18 14c-1 8-6 10-8 16 M18 14c1 8 6 10 8 16 M18 14v16', soft: 'M6 20a12 12 0 0124 0c0 8-5 11-12 11S6 28 6 20z M12 11c4 4 8 4 12 0', posts: 'M8 32V10 M18 32c0-12 2-18 8-22 M30 32V10 M4 32h28', grass: 'M4 32c2-10 0-14-2-18 M12 32c0-12 2-18 5-22 M20 32c-1-10 2-16 6-18 M28 32c0-8 2-12 5-14' }, ICON = (k) => svg(SHAPE[k]), DOT = { smooth: '#8fc3d6', sand: '#b08a62', stone: '#d9c499', knit: '#4f9a78', tape: '#c4a06a', honey: '#e09a35', rubber: '#ea8d98', fur: '#b8926a', water: '#1f6f93' };
 function seg(id, list, key, f) { $(id).innerHTML = list.map(([k, t]) => `<button class="btn ui" data-k="${k}">${t}</button>`).join(''); for (const b of $(id).children) b.onclick = () => { O[key] = b.dataset.k; syncSeg(id, key); f?.(); }; syncSeg(id, key); }
 function syncSeg(id, key) { for (const b of $(id).children) b.setAttribute('aria-pressed', b.dataset.k === O[key]); }
-const shown2 = () => { $('#things').hidden = O.group !== 'thing'; $('#mats').hidden = O.group !== 'tex'; }, card = (pic, name, from) => `${pic}<b>${name}</b><small>${from}</small>`, changed = () => { S.tip.reset(); S.thing?.reset(); shown2(); store(); label(); }, label = () => { const th = O.joint !== 'mp' && O.group === 'thing', x = th ? THINGS.find((q) => q[0] === O.thing) : [0, MATS[O.mat].name, 'なでる', MATS[O.mat].from]; $('#now').textContent = x[1]; $('#src').textContent = `もと：${x[3]}`; };
+const shown2 = () => { $('#things').hidden = O.group !== 'thing'; $('#mats').hidden = O.group !== 'tex'; }, card = (pic, name) => `${pic}<b>${name}</b>`, changed = () => { S.tip.reset(); S.thing?.reset(); shown2(); store(); label(); }, label = () => { const th = O.joint !== 'mp' && O.group === 'thing', x = th ? THINGS.find((q) => q[0] === O.thing) : [0, MATS[O.mat].name, 'なでる', MATS[O.mat].from]; $('#now').textContent = x[1]; };
+seg('#looks', LOOKS.map(([k, n]) => [k, card(`<i class="l-${k}"></i>`, n)]), 'look', () => { store(); if (O.look === 'photo' && !S.photo) $('#photo').click(); });
 seg('#group', [['thing', '物を触る'], ['tex', '質感を触る']], 'group', changed); const TEX = Object.entries(MATS).filter(([, m]) => m.name);
-seg('#things', THINGS.map(([k, n, f]) => [k, card(ICON(k), n, f)]), 'thing', changed); seg('#mats', TEX.map(([k, m]) => [k, card(`<i style="background:${DOT[k]}"></i>`, m.name, '')]), 'mat', changed);
+seg('#things', THINGS.map(([k, n, f]) => [k, card(ICON(k), n)]), 'thing', changed); seg('#mats', TEX.map(([k, m]) => [k, card(`<i style="background:${DOT[k]}"></i>`, m.name)]), 'mat', changed);
 // to the next one without opening the tray
 function turn(d) { const pt = O.joint !== 'mp', all = pt && O.group === 'thing' ? THINGS.map((x) => ['thing', x[0], x[1]]) : TEX.map(([k, m]) => ['tex', k, m.name]), i = all.findIndex((x) => x[1] === (x[0] === 'thing' ? O.thing : O.mat)), n = all[(i + d + all.length) % all.length]; O.group = n[0]; O[n[0] === 'thing' ? 'thing' : 'mat'] = n[1]; for (const [a, b] of [['#group', 'group'], ['#things', 'thing'], ['#mats', 'mat']]) syncSeg(a, b); changed(); }
 $('#cmp').onclick = () => { O.off = !O.off; $('#cmp').textContent = O.off ? '感触 なし' : '感触 あり'; $('#cmp').setAttribute('aria-pressed', O.off); };
-$('#prev').onclick = () => turn(-1); $('#next').onclick = () => turn(1); seg('#skins', [['auto', '顔から自動'], ['hand', '手で選ぶ']], 'skin', () => store()); seg('#kinds', [['finger', '指'], ['stick', '棒'], ['cursor', 'カーソル']], 'kind'); seg('#looks', [['real', '本物'], ['color', '3色']], 'look', () => store()); seg('#bends', [['whole', '全体がしなる'], ['distal', '末節だけ']], 'bend');
+$('#prev').onclick = () => turn(-1); $('#next').onclick = () => turn(1); seg('#skins', [['auto', '顔から自動'], ['hand', '手で選ぶ']], 'skin', () => store()); seg('#kinds', [['finger', '指'], ['stick', '棒'], ['cursor', 'カーソル']], 'kind');  seg('#bends', [['whole', '全体がしなる'], ['distal', '末節だけ']], 'bend');
 seg('#hands', [['right', '右手'], ['left', '左手']], 'hand', () => { $('#yaw').value = O.hand === 'right' ? 45 : -45; document.body.classList.toggle('left', O.hand === 'left'); S.contact = tracker(); labels(); });
 seg('#eyes', [['track', '視線追従'], ['fixed', '追従しない']], 'eye', () => { if (O.eye === 'track') startEyes(); else S.eyes?.stop(); });
 // PIP / MP: each has its own place of the joint and angle of the hand
@@ -98,7 +100,7 @@ syncSeg('#looks', 'look'); syncSeg('#hands', 'hand'); document.body.classList.to
 function setJoint() {
   if (shown) for (const id of ADJ) own[shown][id] = val(`#${id}`);
   shown = O.joint; for (const id of ADJ) $(`#${id}`).value = own[shown][id];
-  const mp = shown === 'mp', pt = shown !== 'mp'; $('#bendBox').hidden = !mp; $('#group').hidden = !pt; if (!pt) { $('#things').hidden = true; $('#mats').hidden = false; } else shown2(); $('#extBox').hidden = !pt; S.contact = tracker(); S.thing?.reset(); $('#thetaN').textContent = mp ? '手の甲の傾き（画面から）' : '基節の傾き（画面から）';
+  const mp = shown === 'mp', pt = shown !== 'mp'; $('#bendBox').hidden = !mp; $('#theta').parentElement.hidden = !mp; $('#group').hidden = !pt; if (!pt) { $('#things').hidden = true; $('#mats').hidden = false; } else shown2(); $('#extBox').hidden = !pt; S.contact = tracker(); S.thing?.reset(); $('#thetaN').textContent = mp ? '手の甲の傾き（画面から）' : '基節の傾き（画面から）';
   $('#how').textContent = `${WHERE[shown]}を画面に付けて、すべらせます`;
   S.root = null; S.f = null; S.tip.reset(); S.bob = 0; labels(); store();
 }
@@ -110,15 +112,17 @@ function tab(t) { for (const b of $('#tabs').children) if (b.dataset.t) b.setAtt
 for (const b of $('#tabs').children) if (b.dataset.t) b.onclick = () => tab(b.dataset.t);
 $('#reset').onclick = () => { try { localStorage.removeItem(STORE); localStorage.removeItem('mpIpad.v1'); } catch {} location.reload(); };
 O.power = ['0', '0.6', '1', '1.6'].reduce((a, b) => (Math.abs(b - val('#gain')) < Math.abs(a - val('#gain')) ? b : a)); seg('#power', [['0', 'なし'], ['0.6', '弱'], ['1', '中'], ['1.6', '強']], 'power', () => { $('#gain').value = O.power; labels(); store(); });
-const labels = () => { for (const i of document.querySelectorAll('#panel input')) i.previousElementSibling.textContent = `${i.value}${i.dataset.u}`; };
-for (const i of document.querySelectorAll('#panel input')) i.oninput = () => { labels(); if (shown) for (const id of ADJ) own[shown][id] = val(`#${id}`); store(); };
+const labels = () => { for (const i of document.querySelectorAll('#tray input[type=range]')) i.previousElementSibling.textContent = `${i.value}${i.dataset.u}`; };
+for (const i of document.querySelectorAll('#tray input[type=range]')) i.oninput = () => { labels(); if (shown) for (const id of ADJ) own[shown][id] = val(`#${id}`); store(); };
 seg('#mode', [['point', '第2関節だけ'], ['pip', '中節の背']], 'joint', () => { setJoint(); syncSeg('#mode2', 'joint'); label(); }); seg('#mode2', [['mp', 'MP（付け根の関節）']], 'joint', () => { setJoint(); syncSeg('#mode', 'joint'); label(); }); setJoint(); label();
 // the delay is set by eye: two long lines through the predicted contact; the other hand moves the slider until they stay with the knuckle
-const FIT = [['lead', '1. 遅れ', '手をすべらせながら、赤い線が関節についてくる所へ'], ['bright', '2. 肌の明るさ', '画面の中の指が、自分の指と同じ明るさになる所へ'], ['yaw', '3. 向き', '画面の中の指が、自分の指の続きに見える向きへ']];
+const FIT = [['lead', '1. 遅れ', '手をすべらせながら、赤い線が関節についてくる所へ'], ['bright', '2. 肌の明るさ', '画面の中の指が、自分の指と同じ明るさになる所へ'], ['lr', '3. 向き（左右）', '自分の指の続きに見える向きへ'], ['dn', '4. 向き（上下）', '自分の指の続きに見える向きへ'], ['taper', '5. 断面', '断面が見えなくなる所へ']];
 function fit(i) {
   const f = FIT[i]; S.align = i === 0; S.fit = f ? i : null; $('#fit').hidden = !f; $('#bar').hidden = !!f; if (!f) return;
   const e = $(`#${f[0]}`), r = $('#fitR'); $('#fitT').textContent = f[1]; $('#fitP').textContent = f[2]; $('#fitN').textContent = i < FIT.length - 1 ? 'つぎへ' : 'できた'; for (const k of ['min', 'max', 'step']) r[k] = e[k]; r.value = e.value; r.oninput = () => { e.value = r.value; e.oninput(); };
 }
+for (const b of $('#qt').children) b.onclick = () => qt(b.dataset.q); function qt(k) { for (const b of $('#qt').children) b.setAttribute('aria-pressed', b.dataset.q === k); for (const q of document.querySelectorAll('#quick section')) q.hidden = q.dataset.q !== k; } qt('touch');
+$('#photo').onclick = () => $('#photoIn').click(); $('#photoIn').onchange = async (e) => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; $('#photo').textContent = '作っています'; try { S.photo = await fingerFromPhoto(f); keepPhoto(S.photo); scene.skin.setPhoto(S.photo.texture, S.photo.mean); O.look = 'photo'; scene.skin.look = ''; syncSeg('#looks', 'look'); flash('できました'); } catch (x) { flash(x.message || '作れませんでした', 4000); } $('#photo').textContent = '自分の指を撮る'; };
 $('#fitGo').onclick = () => { tray(false); fit(0); }; $('#fitN').onclick = () => fit(S.fit + 1); $('#fitX').onclick = () => fit(-1);
 function lines() { const on = S.align && S.root; for (const id of ['#lx', '#ly']) $(id).style.display = on ? 'block' : 'none'; if (on) { $('#lx').style.transform = `translateX(${innerWidth / 2 + S.root[0] / MM}px)`; $('#ly').style.transform = `translateY(${innerHeight / 2 - S.root[1] / MM}px)`; } }
 // the colour of the skin: hue from the face (measured all the time, slowly), brightness by the slider because a screen shines and a hand does not
@@ -130,7 +134,7 @@ function skinColor(dt) {
 $('#rec').onclick = () => { S.rec = { t0: now(), rows: [] }; $('#rec').disabled = true; tray(false); };
 async function sendRec() {
   const R = S.rec; S.rec = null; $('#rec').disabled = false;
-  const file = new File([JSON.stringify({ at: new Date().toISOString(), page: [innerWidth, innerHeight], mmPerPx: MM, zScale: S.zScale, options: O, settings: Object.fromEntries([...document.querySelectorAll('#panel input')].map((i) => [i.id, +i.value])), cancels: S.cancels, faceMs: S.eyes?.cost, jumps: S.contact.jumps, rows: R.rows })], `mp-ipad-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`, { type: 'application/json' });
+  const file = new File([JSON.stringify({ at: new Date().toISOString(), page: [innerWidth, innerHeight], mmPerPx: MM, zScale: S.zScale, options: O, settings: Object.fromEntries([...document.querySelectorAll('#tray input[type=range]')].map((i) => [i.id, +i.value])), cancels: S.cancels, faceMs: S.eyes?.cost, jumps: S.contact.jumps, rows: R.rows })], `mp-ipad-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`, { type: 'application/json' });
   S.file = file; tray(true); page(true); tab('data'); $('#rec').textContent = '記録を送る'; $('#rec').onclick = async () => {
     try { if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file] }); return; } } catch (e) { if (e.name === 'AbortError') return; }
     const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; a.click();
@@ -141,25 +145,26 @@ async function sendRec() {
 let scene = null, last = now();
 function finger(dt, t) {
   if (t - (S.tEvent || 0) > 40) sense(); // no news: the hand rests (or has gone)
-  const p = S.contact.p, yaw = rad(val('#yaw')), theta = rad(val('#theta')), ext = rad(val('#ext')), len = [val('#l0'), val('#l1'), val('#l2') - RF], J = JOINTS[O.joint], pt = O.joint !== 'mp', how = pt ? 'point' : 'mp', low = restTip([0, 0, J.h], theta, yaw, len, how, ext)[2] - RF; thing(pt && O.group === 'thing' ? low : null); // the things stand where this finger can touch them
+  const p = S.contact.p, yaw = rad(val('#yaw')), theta = rad(val('#theta')), ext = rad(val('#ext')), sgn = O.hand === 'right' ? 1 : -1, dir = [rad(val('#lr')) * sgn, rad(val('#dn'))], len = [val('#l0'), val('#l1'), val('#l2') - RF], J = JOINTS[O.joint], pt = O.joint !== 'mp', how = pt ? 'point' : 'mp', low = restTip([0, 0, J.h], theta, yaw, len, how, ext, dir)[2] - RF; scene.shade(val('#shade') / 100); scene.skin.setCut({ taper: val('#taper') / 100, over: val('#over'), depth: val('#deep'), shade: val('#cshade') / 100, fade: val('#fade'), blob: val('#blob') / 100 }); S.axis = aim(dir, yaw).u; thing(pt && O.group === 'thing' ? low : null); // the things stand where this finger can touch them
   const T = S.thing, key = T ? 'slime' : O.mat, M = MATS[key]; scene.setDepth(low + PRESS); scene.setMaterial(key);
   if (!p) { S.root = null; S.f = null; S.tip.reset(); T?.reset(); T?.rest(dt); lead.reset(); ahead.reset(); return; }
   const at = S.contact.down && lead.at(t, val('#lead')) || p, [x, y] = S.contact.down || !S.root ? at : S.at; S.at = [x, y]; const A = ahead.step(S.contact.down ? lead.vel : [0, 0], val('#ahead'), dt);
   // from the middle of the contact to the joint: away from the hand, along the phalanx on the glass (nothing when only the knuckle touches)
   S.root = [x + A[0] + val('#offx'), y + A[1] + val('#off'), J.h]; // straight away from the person: which way the hand comes from is not known well enough to go sideways
   { const v = lead.vel, sp = Math.hypot(...v), n = S.contact.down && sp > 5 ? Math.min(val('#smear'), 1.2 * lead.miss + sp * 0.004) / sp : 0; S.smear = [0, 1].map((i) => (S.smear?.[i] || 0) + (v[i] * n - (S.smear?.[i] || 0)) * Math.min(1, dt * 20)); }
-  const rest = restTip(S.root, theta, yaw, len, how, ext), g = O.off ? 0 : val('#gain'), o = { joint: how, root: S.root, theta, yaw, gain: g, ext, bend: O.bend, kind: O.kind, len, dent: M.dent };
+  const rest = restTip(S.root, theta, yaw, len, how, ext, dir), g = O.off ? 0 : val('#gain'), o = { joint: how, root: S.root, theta, yaw, dir, gain: g, ext, bend: O.bend, kind: O.kind, len, dent: M.dent };
   if (T) {
-    const lag = T.step(rest, dt, O.kind === 'finger' ? { dip: add(S.root, frame(theta, yaw, 0).u, len[1]), reach: 0.95 * len[2], gain: g } : { gain: g }); S.tip.lag = lag;
+    const lag = T.step(rest, dt, O.kind === 'finger' ? { dip: add(S.root, S.axis, len[1]), reach: 0.95 * len[2], gain: g } : { gain: g }); S.tip.lag = lag;
     S.f = T.w ? settle(T.w, { ...o, lag }) : solve({ ...o, gain: 1, lag, ...(T.kind === 'slime' ? { surf: scene.surfZ } : { surf: -1e4, floor: -1e4 }) }); S.f.cursor = add(rest, lag); if (T.w) S.f.cursor[2] = Math.max(rest[2], ground(T.w, S.f.cursor[0], S.f.cursor[1]).z);
   } else {
-    const lag = S.tip.step(rest, M, dt), h = M.bump ? M.bump * grain(S.tip.p[0], S.tip.p[1], M.f) : 0; S.bob += (h - S.bob) * Math.min(1, dt * 40);
-    S.f = solve({ ...o, lag: O.off ? [0, 0, 0] : lag, surf: scene.surfZ + S.bob * (0.4 + 0.6 * Math.min(2, g)) }); S.f.cursor = add(rest, lag, g);
+    // over the edge of the island there is nothing to touch
+    const p0 = S.tip.p || rest, off = pt && (Math.abs(p0[0]) > scene.IW / 2 || Math.abs(p0[1]) > scene.IH / 2), lag = S.tip.step(rest, off ? { k: 45, hold: 0 } : M, dt), h = M.bump && !off ? M.bump * grain(S.tip.p[0], S.tip.p[1], M.f) : 0; S.bob += (h - S.bob) * Math.min(1, dt * 40); S.air = Math.max(0, Math.min(1, (S.air || 0) + (off ? dt : -dt) * 12));
+    const u = O.off ? [0, 0, 0] : lag, f = solve({ ...o, lag: u, surf: scene.surfZ + S.bob * (0.4 + 0.6 * Math.min(2, g)) }); if (pt && S.air > 0 && O.kind === 'finger') { const q = solve({ ...o, lag: u, surf: -1e4, floor: -1e4 }), m = (a, b) => a.map((v, i) => v + (b[i] - v) * S.air); f.tip = m(f.tip, q.tip); } S.f = f; S.f.cursor = add(rest, lag, g);
   }
   S.f.rest = rest;
 }
 function thing(low) { // made again only when something about it has changed
-  const k = low == null ? '' : [O.thing, low.toFixed(1), scene.W, scene.H].join(); if (k === S.thingKey) return; S.thingKey = k; S.thing = low == null ? null : makeThing(O.thing, scene.W - 8, scene.H - 8, low, DEPTH); scene.setThing(S.thing);
+  const k = low == null ? '' : [O.thing, low.toFixed(1), scene.W, scene.H].join(); if (k === S.thingKey) return; S.thingKey = k; S.thing = low == null ? null : makeThing(O.thing, scene.IW * 1.06, scene.IH * 1.06, low, DEPTH); scene.setThing(S.thing);
 }
 function loop(t0) {
   const began = now(), t = began, dt = Math.min(0.05, (t - last) / 1000); last = t; S.fps += ((1 / Math.max(dt, 1e-3)) - S.fps) * 0.05;
@@ -170,7 +175,7 @@ function loop(t0) {
   if (S.eyes) S.eyes.busy = S.started && S.contact.down && (lead.speed || 0) > 10;
   if (S.started) finger(dt, t); else { if (t - (S.tEvent || 0) > 40) sense(); S.f = null; } lines();
   if (S.started && dt < 0.05 && t - (S.tSlow ||= t) > 3000) { S.tSlow = t; if (S.fps < 50) scene.lighter(); }
-  scene.finger(S.f, O.kind, S.root, S.contact.down ? 1 : 0.5, S.tip.lag, O.joint, O.look, rad(val('#yaw')), S.smear); scene.skin.setColor(skinColor(dt)); scene.ghost(GHOST && S.f ? [S.root, rad(val('#theta')), rad(val('#yaw')), [val('#l0'), val('#l1'), val('#l2')]] : null); scene.render(eye);
+  scene.finger(S.f, O.kind, S.root, S.contact.down ? 1 : 0.5, S.tip.lag, O.joint, O.look, rad(val('#yaw')), S.smear); scene.skin.photoGain = 2 ** (val('#bright') / 50); scene.skin.setColor(skinColor(dt)); scene.ghost(GHOST && S.f ? [S.root, S.f.u, rad(val('#yaw')), [val('#l0'), val('#l1'), val('#l2')]] : null); scene.render(eye);
   const msg = t < flashT ? flashM : !S.started ? '' : S.rec ? `記録中 あと ${Math.max(0, Math.ceil(20 - (t - S.rec.t0) / 1000))} 秒` : t - (S.cancelAt || -1e9) < 4000 ? 'iPadが接触を打ち切りました。いちど手を離してください' : !S.root ? `${WHERE[O.joint]}を画面に付けて、すべらせる` : O.eye === 'track' && S.eye.src !== 'measured' && t - (S.eye.tLast || 0) > 1500 ? '顔が見えません' : '';
   if ($('#msg').textContent !== msg) $('#msg').textContent = msg;
   if (S.rec) { const f = S.f; S.rec.rows.push({ t: +(t - S.rec.t0).toFixed(1), c: S.raw.map((c) => [c.id, +c.x.toFixed(2), +c.y.toFixed(2), +c.rx.toFixed(2), +c.ry.toFixed(2)]), p: S.contact.p?.map((v) => +v.toFixed(2)), root: S.root?.map((v) => +v.toFixed(2)), lag: S.tip.lag.map((v) => +v.toFixed(2)), bend: f && +f.bendDeg.toFixed(1), miss: +lead.miss.toFixed(2), tilt: S.tilt.deg && +S.tilt.deg.toFixed(2), eye: eye.map((v) => +v.toFixed(1)), src: S.eye.src, fps: +S.fps.toFixed(0) }); if (t - S.rec.t0 > 20000) sendRec(); }
@@ -186,6 +191,6 @@ function values(m, eye) {
     + row('仮想の指先が見える所', s ? `${Math.abs(dx).toFixed(0)} mm ${dx < 0 ? '左' : '右'}・${Math.abs(dy).toFixed(0)} mm ${dy < 0 ? '手前' : '奥'}` : '—') + row('遅れ／しなり', S.f ? `${Math.hypot(...S.tip.lag).toFixed(0)} mm／${S.f.bendDeg.toFixed(0)}°` : '—')
     + row('予測のはずれ', `${lead.miss.toFixed(1)} mm`) + row('肌の色', O.skin === 'auto' ? (S.skin ? '顔から測っている' : '顔を待っています（手で選んだ色）') : '手で選んだ色') + row('接触の数／つなぎ直し', `${S.raw.length}／${S.contact.jumps}`) + row('打ち切られた接触', S.cancels) + row('顔の認識', S.eyes?.cost ? `${S.eyes.cost.toFixed(0)} ms（${S.eyes.mode === 'worker' ? '別スレッド' : '同じスレッド'}）` : '—') + row('速さ／1コマの計算', `${S.fps.toFixed(0)} fps／${(S.ms || 0).toFixed(1)} ms`);
 }
-try { scene = new Scene($('#scene')); const lay = () => { scene.layout(MM); cameraPlace(); }; lay(); addEventListener('resize', lay); scene.setMaterial(O.mat); scene.warm(); requestAnimationFrame(loop); } catch (e) { $('#sMsg').textContent = `描画できません（${e.message}）。再読み込みしてください`; }
+try { scene = new Scene($('#scene')); const lay = () => { scene.layout(MM); cameraPlace(); }; lay(); addEventListener('resize', lay); scene.setMaterial(O.mat); scene.warm(); requestAnimationFrame(loop); lastPhoto().then((p) => { if (p) { S.photo = p; scene.skin.setPhoto(p.texture, p.mean); scene.skin.look = ''; } }); } catch (e) { $('#sMsg').textContent = `描画できません（${e.message}）。再読み込みしてください`; }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { try { navigator.wakeLock?.request('screen').catch(() => {}); } catch {} if (S.asked && O.eye === 'track') startEyes(); } });
 window.mpIpad = { S, O, get scene() { return scene; } };

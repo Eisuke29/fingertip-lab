@@ -1,7 +1,7 @@
 // Things to touch behind the glass, after what earlier pseudo-haptics studies let people touch. Each thing pulls back on the fingertip; the
 // fingertip (not the knuckle) stays behind. Pure functions, no DOM, no three.js. mm; z out of the screen; forces in mm of finger bending.
-import { RF, clamp } from './finger.js?v=8';
-import { makeWorld, TipOver } from './world.js?v=8';
+import { RF, clamp } from './finger.js?v=9';
+import { makeWorld, TipOver } from './world.js?v=9';
 
 // id, name, what to do, the study it follows (the property; not always the same object)
 export const THINGS = [
@@ -41,8 +41,8 @@ class Solid extends Thing {
 // ---------- boxes to push: nothing moves until the push is strong enough (static friction), then it goes with a jerk; heavy ones later and slower ----------
 class Push extends Thing {
   constructor(kind, W, Hh, low, depth) {
-    super(kind, W, Hh, low, depth); this.floor = low - 0.6; this.table = 16; this.top = low + 9;
-    const u = W / 4; this.boxes = [[-u, 0, 11, 3, 24], [0, 4, 14, 8, 12], [u, 0, 17, 14, 6]].map(([x, y, a, hold, v], i) => ({ x, y, a, hold, v, i, moving: false, sp: 0 }));
+    super(kind, W, Hh, low, depth); this.floor = low - 0.6; this.table = 0; this.top = low + 9;
+    const u = W / 4; this.boxes = [[-u, 0, 9, 3, 24], [0, 4, 11.5, 8, 12], [u, 0, 14, 14, 6]].map(([x, y, a, hold, v], i) => ({ x, y, a, hold, v, i, moving: false, sp: 0 }));
   }
   hard(p, target, h, gain) {
     const r = RF * 0.92; for (const b of this.boxes) {
@@ -67,8 +67,8 @@ Push.prototype.yield = function (p) {
 // ---------- strings under tension: caught, drawn along, let go, trembling. From thin and soft to thick and stiff ----------
 class Harp extends Thing {
   constructor(kind, W, Hh, low, depth) {
-    super(kind, W, Hh, low, depth); this.zs = low + RF * 0.75; const n = 6, d = (W - 40) / n;
-    this.strings = Array.from({ length: n }, (_, i) => ({ x: -W / 2 + 20 + d * (i + 0.5), r: 0.55 + 0.3 * i, k: 0.25 + 0.2 * i, max: 11 + i * 1.3, u: 0, v: 0, y: 0, side: 0, free: false, hz: 11 - i }));
+    super(kind, W, Hh, low, depth); this.zs = low + RF * 0.75; const n = 5, d = (W - 14) / n;
+    this.strings = Array.from({ length: n }, (_, i) => ({ x: -W / 2 + 7 + d * (i + 0.5), r: 0.6 + 0.3 * i, k: 0.25 + 0.2 * i, max: 11 + i * 1.3, u: 0, v: 0, y: 0, side: 0, free: false, hz: 11 - i }));
   }
   land(p) { for (const s of this.strings) { s.side = p[0] < s.x ? -1 : 1; s.free = Math.abs(p[0] - s.x) < RF; } }
   force(p, target, h, gain) {
@@ -84,7 +84,7 @@ class Harp extends Thing {
 function swing(s, h) { const w = 6.283 * s.hz; s.v += (-w * w * s.u - 3.2 * s.v) * h; s.u += s.v * h; if (Math.abs(s.u) < 0.01 && Math.abs(s.v) < 0.5) s.u = s.v = 0; }
 // ---------- slime: threads stretch between the fingertip and the surface, get thin and break one after the other ----------
 class Slime extends Thing {
-  constructor(kind, W, Hh, low, depth) { super(kind, W, Hh, low, depth); this.floor = low + 1.2; this.table = 16; this.threads = []; }
+  constructor(kind, W, Hh, low, depth) { super(kind, W, Hh, low, depth); this.floor = null; this.table = 0; this.threads = []; }
   reset() { super.reset(); this.threads = []; this.far = 0; }
   force(p, target, h, gain) { let x = 0, y = 0; for (const t of this.threads) if (!t.cut) { x += (t.x - p[0]) * 0.09; y += (t.y - p[1]) * 0.09; } const L = Math.hypot(x, y), m = 13 * gain; if (L > m) { x *= m / L; y *= m / L; } return gain > 0.02 ? [x, y] : [0, 0]; }
   after(p, target, dt) {
@@ -97,9 +97,9 @@ class Slime extends Thing {
 // ---------- springs standing on the floor (three stiffnesses), or grass ----------
 class Posts extends Thing {
   constructor(kind, W, Hh, low, depth) {
-    super(kind, W, Hh, low, depth); const g = kind === 'grass'; this.table = 12; this.floor = low - (g ? 18 : 62); this.posts = [];
-    if (g) for (let i = 0; i < 850; i++) this.posts.push({ x: (rnd() - 0.5) * (W - 34), y: (rnd() - 0.5) * (Hh - 34), r: 0.7 + 0.35 * rnd(), h: 20 + rnd() * 12, k: 0.04, max: 14, lx: (rnd() - 0.5) * 5, ly: (rnd() - 0.5) * 5, hz: 3 + rnd() * 2, dmp: 5, c: rnd() });
-    else { const n = 6, m = 3, dx = (W - 40) / n, dy = (Hh - 34) / m; for (let j = 0; j < m; j++) for (let i = 0; i < n; i++) { const s = Math.floor(i / 2); this.posts.push({ x: -W / 2 + 20 + dx * (i + 0.5), y: -Hh / 2 + 17 + dy * (j + 0.5), r: [2, 2.8, 3.6][s], h: 69, k: [0.22, 0.6, 1.5][s], max: [17, 14, 11][s], lx: 0, ly: 0, hz: [4, 6, 9][s], dmp: 4, c: s }); } }
+    super(kind, W, Hh, low, depth); const g = kind === 'grass'; this.table = 0; this.floor = low - (g ? 18 : 62); this.posts = [];
+    if (g) for (let i = 0; i < 620; i++) this.posts.push({ x: (rnd() - 0.5) * (W - 8), y: (rnd() - 0.5) * (Hh - 8), r: 0.7 + 0.35 * rnd(), h: 20 + rnd() * 12, k: 0.04, max: 14, lx: (rnd() - 0.5) * 5, ly: (rnd() - 0.5) * 5, hz: 3 + rnd() * 2, dmp: 5, c: rnd() });
+    else { const n = 6, m = 3, dx = (W - 10) / n, dy = (Hh - 10) / m; for (let j = 0; j < m; j++) for (let i = 0; i < n; i++) { const s = Math.floor(i / 2); this.posts.push({ x: -W / 2 + 5 + dx * (i + 0.5), y: -Hh / 2 + 5 + dy * (j + 0.5), r: [1.7, 2.3, 3][s], h: 69, k: [0.22, 0.6, 1.5][s], max: [17, 14, 11][s], lx: 0, ly: 0, hz: [4, 6, 9][s], dmp: 4, c: s }); } }
     for (const b of this.posts) Object.assign(b, { u: 0, w: 0, vu: 0, vw: 0, free: false, live: false });
   }
   land(p) { for (const b of this.posts) b.free = Math.hypot(p[0] - b.x, p[1] - b.y) < RF * 0.75 + b.r; }
