@@ -1,11 +1,11 @@
 // The picture: a box behind the glass, the material, the virtual finger. Drawn for one eye position (off-axis projection).
 import * as THREE from 'three';
-import { MATS, RF, grain, toHand, add } from './finger.js?v=17';
-import { ground } from './world.js?v=17';
-import { Blade } from './blade.js?v=17';
-import { SkinFinger } from './skin.js?v=17';
-import { surface, copyOf, TILE } from './tex.js?v=17';
-import { view, terraces } from './objview.js?v=17';
+import { MATS, RF, grain, toHand, add } from './finger.js?v=18';
+import { ground } from './world.js?v=18';
+import { Blade } from './blade.js?v=18';
+import { SkinFinger } from './skin.js?v=18';
+import { surface, copyOf, TILE } from './tex.js?v=18';
+import { view, terraces } from './objview.js?v=18';
 
 const V = (a) => new THREE.Vector3(a[0], a[1], a[2]), UP = new THREE.Vector3(0, 1, 0);
 export const DEPTH = 165; // mm, the room behind the glass
@@ -133,13 +133,13 @@ export class Scene {
       } else if (kind === 'stick') {
         const e = [f.tip[0], f.tip[1], f.tip[2] - RF + 2.6], a = V(e).sub(V(root)), m = this.sticks[i]; m.scale.y = a.length(); m.position.copy(V(root)).addScaledVector(a, 0.5); m.quaternion.setFromUnitVectors(UP, a.normalize()); sp = [[e, 2.6]];
       } else { const e = [f.tip[0], f.tip[1], f.tip[2] - RF + 5]; this.cursors[i].position.set(...e); sp = [[e, 5]]; }
-      if (S.slice == null) this.groups.push({ spheres: sp, pull: q.pull, lean: q.lean });
+      if (S.slice == null) this.groups.push({ spheres: sp, pull: q.pull, lean: q.lean, balls: kind === 'finger' ? S.balls() : sp });
     }
     this.after(go);
   }
   after(go) {
     const t = this.thing; [0, 1].forEach((i) => { const tip = this.groups[i]?.spheres[0][0], z = tip && (t ? (t.pool ? null : t.floor ?? this.surfZ) : Math.abs(tip[0]) < this.IW / 2 && Math.abs(tip[1]) < this.IH / 2 ? this.surfZ : null), up = z == null ? 99 : tip[2] - RF - z, u = this.under[i]; u.visible = up < 30; if (up < 30) { const r = 22 + Math.max(0, up) * 1.4; u.position.set(tip[0], tip[1], z + 0.3); u.scale.set(r, r, 1); u.material.opacity = 0.75 * (1 - Math.max(0, up) / 30); } });
-    if (this.surf.visible) this.deform(this.groups, go); this.hair(!t && this.mat === 'fur', this.groups); if (t) this.vw.update(this.groups.flatMap((g) => g.spheres), 0, this.surfZ, go);
+    if (this.surf.visible) this.deform(this.groups, go); this.hair(!t && this.mat === 'fur', this.groups); if (t) { const balls = this.groups.flatMap((g) => g.balls); t.give?.(balls); this.vw.update(this.groups.flatMap((g) => g.spheres), 0, this.surfZ, go, balls); }
   }
   // what lies below a point, for things that fall
   below(x, y) { const t = this.thing; if (Math.abs(x) > this.IW / 2 || Math.abs(y) > this.IH / 2) return -DEPTH; if (!t) return this.surfZ; if (t.w) return Math.max(ground(t.w, x, y).z - RF, t.floor ?? t.low - 24); return t.pool ? (t.deep ? t.surf - 4 : t.surf - 1) : t.floor ?? (t.strings ? t.board : t.low - 6); }

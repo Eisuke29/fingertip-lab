@@ -1,7 +1,7 @@
 // The virtual finger: one shape, drawn in several ways (the ways earlier studies on virtual hands drew them). The skin was made by Sol and
 // wrapped around by scripts/bake-finger.py. Rest coordinate s (mm): MP 0, PIP 42, DIP 67, fingertip centre 89, end 97.
 import * as THREE from 'three';
-import { surface } from './tex.js?v=17';
+import { surface } from './tex.js?v=18';
 
 export const NODES = { tip: [0, 42, 67, 89], joint: [42, 67, 89] };
 // id, name
@@ -39,7 +39,7 @@ export class SkinFinger {
   constructor(scene, clip, ready, share = null) {
     this.scene = scene; this.width = 1; this.slice = null;
     this.clip = clip[0]; this.look = 'real'; this.cut = { taper: 0.7, over: 9, depth: 0, shade: 0.15, fade: 0, blob: 0.5 };
-    const pic = (name, srgb) => { const t = new THREE.TextureLoader().load(new URL(`./${name}?v=17`, import.meta.url).href, ready); t.flipY = false; t.wrapS = THREE.RepeatWrapping; t.anisotropy = 8; if (srgb) t.colorSpace = THREE.SRGBColorSpace; return t; };
+    const pic = (name, srgb) => { const t = new THREE.TextureLoader().load(new URL(`./${name}?v=18`, import.meta.url).href, ready); t.flipY = false; t.wrapS = THREE.RepeatWrapping; t.anisotropy = 8; if (srgb) t.colorSpace = THREE.SRGBColorSpace; return t; };
     const [color, normalMap, roughnessMap] = this.pics = share?.pics || [pic('finger-color.jpg', true), pic('finger-normal.jpg'), pic('finger-rough.jpg')], NS = (k) => new THREE.Vector2(k, k), base = { clippingPlanes: clip, clipShadows: true, transparent: true };
     this.u = { uTop: { value: 0 }, uShade: { value: 0.15 }, uFade: { value: 0 }, uGel: { value: 1e4 }, uBlood: { value: 1e4 } };
     // near the cut: a little darker (the shadow of the knuckle), or dissolving. Skin also gives back some light from inside
@@ -123,6 +123,12 @@ export class SkinFinger {
       const B = 30 + 14 * C.blob + sm * 2; this.blob.position.set(cx, cy, -0.02); this.blob.scale.set(B, B, 1); this.blob.material.opacity = C.blob * alpha; }
     if (this.look === 'bone') this.bones.forEach((m, i) => { const j = i - (3 - (n - 1)); m.visible = this.vis && j >= 0 && this.slice == null; if (j < 0) return; const l = L[j] + (j === n - 2 ? 5 : -1.5); m.position.copy(P[j]).addScaledVector(D[j], 0.7); m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), D[j]); m.scale.set(j === n - 2 ? 0.85 : 1, l, j === n - 2 ? 0.85 : 1); });
     for (const n of Object.keys(this.mats)) if (n !== 'shadow') this.mats[n].opacity = alpha * (n === 'glass' ? 0.6 : 1); this.capMat.opacity = alpha;
+  }
+  // the finger as it is drawn, as a row of balls [[x, y, z], r] (only what is behind the glass): nothing may be drawn inside them
+  balls() {
+    const out = [], R = this.R, p = this.pos; if (!R) return out;
+    for (let i = 0; i < RINGS; i = i === RINGS - 1 ? RINGS : Math.min(RINGS - 1, i + 2)) { const c = R[i].c; if (c.z > 2) continue; let m = 0; for (let j = 0; j < SEG; j += 3) { const k = (i * (SEG + 1) + j) * 3; m = Math.max(m, Math.hypot(p[k] - c.x, p[k + 1] - c.y, p[k + 2] - c.z)); } out.push([[c.x, c.y, c.z], m]); }
+    return out;
   }
   // ---------- cut through ----------
   // the ring in the middle between the contact and the fingertip

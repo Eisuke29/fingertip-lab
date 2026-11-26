@@ -146,7 +146,7 @@ export async function makeEyes() {
       const stream = await camera();
       this.video = document.createElement('video'); this.video.muted = true; this.video.playsInline = true; this.video.srcObject = stream; await this.video.play();
       if (!this.worker) {
-        this.status = '顔の認識モデルを読み込み中…'; const w = new Worker(new URL('./eye-worker.js?v=17', import.meta.url));
+        this.status = '顔の認識モデルを読み込み中…'; const w = new Worker(new URL('./eye-worker.js?v=18', import.meta.url));
         await new Promise((res, rej) => { const to = setTimeout(() => rej(new Error('顔の認識の準備が時間切れ')), 25000); w.onmessage = (e) => { if (e.data.type === 'ready') { clearTimeout(to); res(); } else if (e.data.type === 'error') { clearTimeout(to); rej(new Error(e.data.msg)); } }; w.onerror = (e) => { clearTimeout(to); rej(new Error(e.message || 'worker')); }; w.postMessage({ type: 'init' }); });
         this.worker = w; this.mode = 'worker';
       }

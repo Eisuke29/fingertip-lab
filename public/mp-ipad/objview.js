@@ -1,8 +1,8 @@
 // How the things of objects.js look. view(thing, scene) puts the meshes into a group and returns { group, update(spheres, dt) }.
 import * as THREE from 'three';
-import { RF } from './finger.js?v=17';
-import { fieldZ } from './world.js?v=17';
-import { surface, copyOf, roundBox, TILE } from './tex.js?v=17';
+import { RF } from './finger.js?v=18';
+import { fieldZ } from './world.js?v=18';
+import { surface, copyOf, roundBox, TILE } from './tex.js?v=18';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v)), tinted = (key, c) => { const m = copyOf(key); m.color = new THREE.Color(c); return m; };
 // steps that get wider downward: every step an edge, its top light, its side dark toward the foot
@@ -38,6 +38,16 @@ class Tubes {
   paint(c, f) { const a = this.geo.attributes.color.array; for (let i = 0; i <= this.seg; i++) { const q = f(i / this.seg); for (let j = 0; j < this.sides; j++) a.set(q, ((c * (this.seg + 1) + i) * this.sides + j) * 3); } this.geo.attributes.color.needsUpdate = true; }
   done() { if (!this.dirty) return; this.dirty = false; this.geo.attributes.position.needsUpdate = this.geo.attributes.normal.needsUpdate = true; }
 }
+// Nothing is drawn inside the finger. pt: [x, y, z, r] is moved out of the balls of the finger: ax 0 / 1: sideways along x / y, 2: down under it, 3: away from it, level
+function clear(pt, balls, ax) {
+  for (const [c, R] of balls) {
+    const D = R + pt[3] + 0.15, dx = pt[0] - c[0], dy = pt[1] - c[1], dz = pt[2] - c[2]; if (dx * dx + dy * dy + dz * dz >= D * D) continue;
+    if (ax === 2) pt[2] = c[2] - Math.sqrt(D * D - dx * dx - dy * dy);
+    else if (ax === 3) { const h = Math.sqrt(D * D - dz * dz), l = Math.hypot(dx, dy); if (l > 1e-3) { pt[0] = c[0] + dx / l * h; pt[1] = c[1] + dy / l * h; } else pt[0] = c[0] + h; }
+    else { const o = ax ? dx : dy, w = Math.sqrt(Math.max(0, D * D - o * o - dz * dz)); pt[ax] = c[ax] + (pt[ax] >= c[ax] ? w : -w); }
+  }
+  return pt;
+}
 export function view(t) {
   const G = new THREE.Group(), put = (g, mat, x = 0, y = 0, z = 0) => { const m = new THREE.Mesh(g, mat); m.castShadow = m.receiveShadow = true; m.frustumCulled = false; m.position.set(x, y, z); G.add(m); return m; };
   const slab = (z, key, c, thick = 9) => { const w = t.W, h = t.H, g = new THREE.BoxGeometry(w, h, thick), u = g.attributes.uv, p = g.attributes.position; for (let i = 0; i < u.count; i++) u.setXY(i, p.getX(i) / TILE[key], (p.getY(i) + p.getZ(i)) / TILE[key]); G.add(terraces(w / 2, h / 2, z - 0.2, t.depth, 'wood')); return put(g, c ? tinted(key, c) : surface(key), 0, 0, z - thick / 2); };
@@ -68,7 +78,7 @@ export function view(t) {
   } else if (t.kind === 'push') {
     slab(t.floor, 'wood'); const M = [tinted('foam', 0xf6f1e4), tinted('block', 0xe0a36a), surface('iron')], m = t.boxes.map((b, i) => put(roundBox(b.a, t.top - t.floor, 1.2, TILE[['foam', 'block', 'iron'][i]]), M[i])); update = () => t.boxes.forEach((b, i) => { const q = m[i], tl = b.tilt; q.position.set(b.x, b.y, t.floor); q.rotation.set(-tl[1] * 0.012, tl[0] * 0.012, 0); });
   } else if (t.strings) {
-    const V = t.vert, L = (V ? t.H : t.W) / 2 - 5, S = 36, n = t.strings.length, T = new Tubes(n, S, 8, new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.75, vertexColors: true, envMapIntensity: 1.6 }), true); G.add(T.mesh);
+    const V = t.vert, L = (V ? t.H : t.W) / 2 - 5, S = 72, n = t.strings.length, T = new Tubes(n, S, 8, new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.75, vertexColors: true, envMapIntensity: 1.6 }), true); G.add(T.mesh);
     // the guitar: body with a sound hole to the right, the neck with frets to the left
     const zb = t.board, box = (w, h, d, x, y, z, mat) => put(new THREE.BoxGeometry(w, h, d), mat, x, y, z - d / 2), hx = t.W * 0.22, dark = tinted('block', 0x4a2c1c), gold = new THREE.MeshStandardMaterial({ color: 0xd8c48a, metalness: 0.85, roughness: 0.28 }), flat = new THREE.MeshStandardMaterial({ color: 0x0a0605, roughness: 1 }), pearl = new THREE.MeshStandardMaterial({ color: 0xf1ece0, roughness: 0.25 });
     if (V) { // the harp: a dark sounding board, a bar far and a bar near, a golden pin where every string ends
@@ -82,7 +92,8 @@ export function view(t) {
     }
     const C = [[0.95, 0.95, 0.98], [0.92, 0.92, 0.95], [0.9, 0.82, 0.62], [0.86, 0.68, 0.42], [0.8, 0.58, 0.34], [0.72, 0.5, 0.3]]; t.strings.forEach((s, i) => T.paint(i, () => (V ? (i % 7 === 0 ? [0.86, 0.2, 0.16] : i % 7 === 3 ? [0.16, 0.2, 0.42] : [0.94, 0.9, 0.8]) : C[i % 6]))); // a harp marks every C red and every F dark
     // a taut string does not follow a place of the finger that does not reach it
-    update = () => { t.strings.forEach((s, c) => { const now = s.held.map((q) => `${q.u.toFixed(2)},${q.x.toFixed(1)}`).join(';') || s.u.toFixed(2); if (s.shown === now) return; s.shown = now; const P = [[-L, 0], ...s.held.map((q) => [clamp(q.x, -L + 8, L - 8), q.u]).sort((a, b) => a[0] - b[0]), [L, 0]]; for (let k = 1; k < P.length - 1; k++) { const a = P[k - 1], e = P[k + 1], lin = a[1] + (e[1] - a[1]) * (P[k][0] - a[0]) / Math.max(1e-3, e[0] - a[0]), sg = Math.sign(P[k][1]) || 1; if (P[k][1] * sg < lin * sg - 1e-6) { P.splice(k, 1); k = 0; } } T.set(c, (i) => { const x = -L + 2 * L * i / S; let u; if (s.held.length) { let k = 0; while (k < P.length - 2 && x > P[k + 1][0]) k++; const f = (x - P[k][0]) / Math.max(1e-3, P[k + 1][0] - P[k][0]); u = P[k][1] + (P[k + 1][1] - P[k][1]) * f; } else u = s.u * Math.sin(Math.PI * i / S); return V ? [s.y + u, x, t.zs, s.r] : [x, s.y + u, t.zs, s.r]; }, [0, 0, 1]); }); T.done(); };
+    // a string that is held lies against the side of the finger, one that slips through goes under it
+    let tick = 0; update = (sp, dt, sz, go, balls = []) => { tick++; const B = balls.filter(([c, r]) => c[2] - r < t.zs + 2); t.strings.forEach((s, c) => { const near = B.filter(([q, r]) => Math.abs(q[t.b] - s.y) < r + 22), now = near.length ? tick : s.held.map((q) => `${q.u.toFixed(2)},${q.x.toFixed(1)}`).join(';') || s.u.toFixed(2); if (s.shown === now) return; s.shown = now; const ax = s.held.length ? t.b : 2; const P = [[-L, 0], ...s.held.map((q) => [clamp(q.x, -L + 8, L - 8), q.u]).sort((a, b) => a[0] - b[0]), [L, 0]]; for (let k = 1; k < P.length - 1; k++) { const a = P[k - 1], e = P[k + 1], lin = a[1] + (e[1] - a[1]) * (P[k][0] - a[0]) / Math.max(1e-3, e[0] - a[0]), sg = Math.sign(P[k][1]) || 1; if (P[k][1] * sg < lin * sg - 1e-6) { P.splice(k, 1); k = 0; } } T.set(c, (i) => { const x = -L + 2 * L * i / S; let u; if (s.held.length) { let k = 0; while (k < P.length - 2 && x > P[k + 1][0]) k++; const f = (x - P[k][0]) / Math.max(1e-3, P[k + 1][0] - P[k][0]); u = P[k][1] + (P[k + 1][1] - P[k][1]) * f; } else u = s.u * Math.sin(Math.PI * i / S); return clear(V ? [s.y + u, x, t.zs, s.r] : [x, s.y + u, t.zs, s.r], near, ax); }, V ? [1, 0, 0] : [0, 1, 0]); }); T.done(); };
   } else if (t.pool) {
     // a clear, thick jelly in a white tray: what is inside is seen through it, greener the deeper it lies
     const { nx, ny, dye, h } = t, g = new THREE.PlaneGeometry(t.W, t.H, nx, ny), p = g.attributes.position, nm = g.attributes.normal, c = new THREE.BufferAttribute(new Float32Array(p.count * 3), 3), z = t.surf, w = nx + 1, sx = t.W / nx, sy = t.H / ny; g.setAttribute('color', c);
@@ -106,8 +117,8 @@ export function view(t) {
   } else { // posts, grass
     const g = t.kind === 'grass', S = g ? 4 : 10, T = new Tubes(t.posts.length, S, g ? 3 : 12, new THREE.MeshStandardMaterial({ roughness: g ? 0.8 : 0.45, vertexColors: true, side: g ? THREE.DoubleSide : THREE.FrontSide }), true), C = [[0.55, 0.8, 0.92], [0.95, 0.78, 0.42], [0.86, 0.4, 0.36]]; G.add(T.mesh); slab(t.floor, g ? 'soil' : 'wood');
     t.posts.forEach((b, c) => T.paint(c, (f) => (g ? [0.1 + 0.35 * f + 0.1 * b.c, 0.28 + 0.45 * f + 0.1 * b.c, 0.1 + 0.08 * f] : C[b.c])));
-    const draw = (b, c) => { const bend = Math.hypot(b.u, b.w), z1 = b.h * Math.sqrt(Math.max(0.3, 1 - (bend / b.h) ** 2)); T.set(c, (i) => { const f = i / S, q = f * f, coil = g ? 0 : 0.22 * b.r * Math.sin(f * 40); return [b.x + (b.lx + b.u) * q, b.y + (b.ly + b.w) * q, t.floor + z1 * f, g ? b.r * (1 - 0.85 * f) : b.r * (f > 0.99 ? 0.4 : 1) + coil]; }, [0, 1, 0]); };
-    t.posts.forEach(draw); T.done(); let was = new Set(); update = () => { const now = new Set(); t.posts.forEach((b, c) => { if (b.live || was.has(c)) draw(b, c); if (b.live) now.add(c); }); was = now; T.done(); };
+    const draw = (b, c, balls = []) => { const bend = Math.hypot(b.u, b.w), z1 = b.h * Math.sqrt(Math.max(0.3, 1 - (bend / b.h) ** 2)); T.set(c, (i) => { const f = i / S, q = f * f, coil = g ? 0 : 0.22 * b.r * Math.sin(f * 40); return clear([b.x + (b.lx + b.u) * q, b.y + (b.ly + b.w) * q, t.floor + z1 * f, g ? b.r * (1 - 0.85 * f) : b.r * (f > 0.99 ? 0.4 : 1) + coil], balls, 3); }, [0, 1, 0]); };
+    t.posts.forEach((b, c) => draw(b, c)); T.done(); let was = new Set(); update = (sp, dt, sz, go, balls = []) => { const now = new Set(), top = t.floor + (g ? 34 : 70), B = balls.filter(([q, r]) => q[2] - r < top); t.posts.forEach((b, c) => { const near = B.filter(([q, r]) => Math.abs(q[0] - b.x) < r + 24 && Math.abs(q[1] - b.y) < r + 24); if (b.live || near.length || was.has(c)) draw(b, c, near); if (b.live || near.length) now.add(c); }); was = now; T.done(); };
   }
   return { group: G, update };
 }

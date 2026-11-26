@@ -1,6 +1,6 @@
 // Solid things with a height: cubes, hills, soft balls. Which heights the fingertip can have there, and how it catches at the edges.
 // Pure functions, no DOM, no three.js. mm; z out of the screen.
-import { RF, clamp, solve } from './finger.js?v=17';
+import { RF, clamp, solve } from './finger.js?v=18';
 
 export const REACH = 4.5; // the things stand this much higher than the lowest point of the resting fingertip
 let seed = 1; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
@@ -27,15 +27,15 @@ export function makeWorld(kind, W, H, low, depth) {
 }
 export function fieldZ(o, x, y) { let z = o.base; for (const b of o.f) { const d = ((x - b.x) ** 2 + (y - b.y) ** 2) / (b.R * b.R); if (d < 4) z += b.s * o.amp * Math.exp(-d * 2.2); } return z; }
 const OFF = (() => { const q = [[0, 0]]; for (const r of [0.4, 0.75]) for (let i = 0; i < 8; i++) q.push([r * Math.cos(i * Math.PI / 4), r * Math.sin(i * Math.PI / 4)]); return q.map(([x, y]) => [x * RF, y * RF, Math.sqrt(1 - x * x - y * y) * RF]); })();
-// lowest height the centre of a ball of radius RF can have at (x, y) over one thing (-Infinity: not above it)
-function over(o, x, y) {
+// lowest height the centre of a ball of radius B can have at (x, y) over one thing (-Infinity: not above it)
+function over(o, x, y, B = RF) {
   x -= o.x + o.ox; y -= o.y + o.oy;
-  if (o.type === 'field') { let z = -Infinity; for (const [a, b, c] of OFF) z = Math.max(z, fieldZ(o, x + a, y + b) + c); return z; }
-  if (o.type === 'ball') { const R = o.r + RF - o.soft, e2 = x * x + y * y; return e2 < R * R ? o.z - o.sink + Math.sqrt(R * R - e2) : -Infinity; }
-  const i = o.a - o.r, dx = Math.max(0, Math.abs(x) - i), dy = Math.max(0, Math.abs(y) - i), R = RF + o.r, e2 = dx * dx + dy * dy; // rounded edges
+  if (o.type === 'field') { let z = -Infinity; const k = B / RF; for (const [a, b, c] of OFF) z = Math.max(z, fieldZ(o, x + a * k, y + b * k) + c * k); return z; }
+  if (o.type === 'ball') { const R = o.r + B - o.soft, e2 = x * x + y * y; return e2 < R * R ? o.z - o.sink + Math.sqrt(R * R - e2) : -Infinity; }
+  const i = o.a - o.r, dx = Math.max(0, Math.abs(x) - i), dy = Math.max(0, Math.abs(y) - i), R = B + o.r, e2 = dx * dx + dy * dy; // rounded edges
   return e2 < R * R ? o.top - o.sink - o.r + Math.sqrt(R * R - e2) : -Infinity;
 }
-export function ground(w, x, y) { let z = -1e4, obj = null; for (const o of w.objs) { const q = over(o, x, y); if (q > z) { z = q; obj = o; } } return { z, obj }; }
+export function ground(w, x, y, B) { let z = -1e4, obj = null; for (const o of w.objs) { const q = over(o, x, y, B); if (q > z) { z = q; obj = o; } } return { z, obj }; }
 
 // The fingertip follows its resting place. A slope holds it back until the finger has bent enough to slide up, and lets it run down.
 export class TipOver {
@@ -60,12 +60,12 @@ export function swing(w, tips, dt, go) {
     for (const [k, v, i] of [['ox', 'vx', 0], ['oy', 'vy', 1]]) { let t = 0; for (const q of on) t += clamp((q.push[i] * 0.5 - q.lag[i]) * m, -lim, lim); o[v] += ((t - o[k]) * o.k - o[v] * 11) * h; o[k] = clamp(o[k] + o[v] * h, -8, 8); }
     if (o.type === 'box') o.sink += ((on.length ? 1.6 * go : 0) - o.sink) * Math.min(1, dt * 14); }
 }
-// The finger for this lag, raised until neither the fingertip nor the part behind it is inside anything. o: what solve() needs
+// The finger for this lag, raised until neither the fingertip nor the part behind it is inside anything. o: what solve() needs; o.more: raised this much more (what the drawn finger, thicker than the fingertip, still needs)
 export function settle(w, o) {
-  let f = null, lo = -1e4;
+  let f = null, lo = -1e4; const more = o.more || 0;
   for (let i = 0; i < 12; i++) {
-    f = solve({ ...o, lo }); let up = ground(w, f.tip[0], f.tip[1]).z - f.tip[2];
-    if (o.kind !== 'stick' && o.kind !== 'cursor') for (const q of [0.25, 0.5, 0.75]) { const z = f.tip.map((v, j) => v + (f.dip[j] - v) * q); up = Math.max(up, (ground(w, z[0], z[1]).z - z[2]) / (1 - q)); }
+    f = solve({ ...o, lo }); let up = ground(w, f.tip[0], f.tip[1]).z - f.tip[2] + more;
+    if (o.kind !== 'stick' && o.kind !== 'cursor') for (const q of [0.25, 0.5, 0.75]) { const z = f.tip.map((v, j) => v + (f.dip[j] - v) * q); up = Math.max(up, (ground(w, z[0], z[1]).z - z[2] + more) / (1 - q)); }
     if (up < 0.03) break; lo = Math.min(o.root[2] - 12, f.tip[2] + up * 1.1);
   }
   return f;
