@@ -1,7 +1,7 @@
 // The iPad's side of "the fist comes closer, the finger goes in": finds the iPhone, shows it where the screen is (bright dots), takes the place and
 // height of the hand from it. Touching teaches what cannot be known beforehand. The page that draws asks sample() once per picture.
-import { Link, newRoom } from './link.js?v=3';
-import { Fit, Track, Slow, POINT } from './geom.js?v=3';
+import { Link, newRoom } from './link.js?v=4';
+import { Fit, Track, Slow, Mid, POINT } from './geom.js?v=4';
 const KEY = 'hover.pad', now = () => performance.now(), el = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content.firstChild; };
 const CSS = `#hvChip { position:fixed; left:96px; top:14px; z-index:4; min-height:44px; padding:0 16px; border-radius:22px; border:0; font:600 15px/1 system-ui,"Hiragino Sans",sans-serif; background:rgba(20,22,26,.82); color:#f4f2ef; display:flex; align-items:center; gap:8px; } #hvChip i { width:10px; height:10px; border-radius:50%; background:#f0b264; } #hvChip.ok i { background:#4fd58a; } #hvChip.ng i { background:#ff6b5e; }
 #hvPanel { position:fixed; left:14px; top:68px; z-index:5; width:min(400px,calc(100% - 28px)); max-height:calc(100% - 90px); overflow:auto; background:rgba(20,22,26,.94); color:#f4f2ef; border-radius:18px; padding:16px; font:16px/1.6 system-ui,"Hiragino Sans",sans-serif; touch-action:pan-y; } #hvPanel b { font-size:19px; } #hvPanel ol { margin:8px 0; padding-left:22px; } #hvPanel li::before { content:none; } #hvPanel p { margin:6px 0; color:#b9c0c8; font-size:14px; }
@@ -12,22 +12,22 @@ export class Hover {
   // MM: mm per CSS px. camera: () => Promise (asks for the camera; the direct way is only tried after that)
   constructor({ MM, camera }) {
     let s = {}; try { s = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch {} const q = new URLSearchParams(location.search);
-    Object.assign(this, { MM, camera, room: q.get('room') || s.room || newRoom(), gain: s.gain ?? 100, lead: s.lead ?? 60, link: null, phone: { at: -1e9 }, pose: null, cal: null, fails: 0, calAt: 0, why: '', last: null, hist: [], down: null, rel: null, lm: 6, sent: 0, got: 0, started: false });
-    this.fit = new Fit(); if (s.c > 0.4 && s.c < 2.5) { this.fit.c = s.c; this.known = true; } // the size of this hand, from the last time
-    this.track = new Track(); this.slow = new Slow(0.1); this.slowP = new Slow(0.25); this.ui(); this.save();
+    Object.assign(this, { MM, camera, room: q.get('room') || s.room || newRoom(), range: s.range ?? 110, full: s.full ?? 30, lead: s.lead ?? 60, link: null, phone: { at: -1e9 }, pose: null, cal: null, fails: 0, calAt: 0, why: '', last: null, hist: [], down: null, rel: null, lm: 6, sent: 0, got: 0, started: false });
+    this.fit = new Fit(); if (s.c2 > 0.4 && s.c2 < 2.5) { this.fit.c = s.c2; this.known = true; } // the size of this hand, from the last time
+    this.track = new Track(); this.mid = new Mid(); this.slow = new Slow(0.1); this.slowP = new Slow(0.25); this.ui(); this.save();
     addEventListener('resize', () => { if (this.pose || this.cal) { if (this.cal) this.fail('画面の大きさが変わりました'); this.pose = null; this.fails = 0; this.calAt = now() + 800; } }); // the middle of the page is elsewhere on the glass now
   }
-  save() { try { localStorage.setItem(KEY, JSON.stringify({ room: this.room, gain: this.gain, lead: this.lead, c: this.fit?.n ? +this.fit.c.toFixed(3) : this.known ? this.fit.c : undefined })); } catch {} }
+  save() { try { localStorage.setItem(KEY, JSON.stringify({ room: this.room, range: this.range, full: this.full, lead: this.lead, c2: this.fit?.n ? +this.fit.c.toFixed(3) : this.known ? this.fit.c : undefined })); } catch {} }
   // ---------- what is on the screen ----------
   ui() {
     document.head.append(el(`<style>${CSS}</style>`));
     this.chip = el('<button id="hvChip" class="ui"><i></i><span></span></button>'); this.calib = el('<div id="hvCalib" hidden><i></i><span>合わせています。手をどけてください</span></div>');
     this.panel = el(`<div id="hvPanel" class="ui" hidden><b>iPhoneをつなぐ</b><ol><li>iPhoneのカメラで読み取る</li><li>iPhoneをスタンドに置く。iPadの画面全体と、手が写るように</li><li>白い点が出る間は、手をどける</li><li>画面に一度さわる</li></ol><div id="hvQr"></div><p id="hvState"></p><div><button id="hvCal">合わせ直す</button><button id="hvNew">新しい番号</button><button id="hvClose">閉じる</button></div>
-      <label>高さの倍率<span></span></label><input type="range" id="hvGain" min="40" max="250" step="10"><label>先読み<span></span></label><input type="range" id="hvLead" min="0" max="160" step="10"><pre id="hvLog"></pre></div>`);
+      <label>指が入りはじめる高さ<span></span></label><input type="range" id="hvRange" min="20" max="200" step="10"><label>指が全部入る高さ<span></span></label><input type="range" id="hvFull" min="0" max="100" step="5"><label>先読み<span></span></label><input type="range" id="hvLead" min="0" max="160" step="10"><pre id="hvLog"></pre></div>`);
     document.body.append(this.chip, this.panel, this.calib); const $ = (s) => this.panel.querySelector(s);
     this.chip.onclick = () => { this.panel.hidden = !this.panel.hidden; this.seen = true; }; $('#hvClose').onclick = () => { this.panel.hidden = true; this.seen = true; };
     $('#hvCal').onclick = () => { this.fails = 0; this.calAt = 0; this.pose = null; this.why = ''; this.panel.hidden = true; }; $('#hvNew').onclick = () => { this.room = newRoom(); this.save(); this.connect(); };
-    const bind = (id, k, u) => { const e = $(id), show = () => { e.previousElementSibling.querySelector('span').textContent = `${e.value}${u}`; }; e.value = this[k]; show(); e.oninput = () => { this[k] = +e.value; show(); this.save(); }; }; bind('#hvGain', 'gain', '%'); bind('#hvLead', 'lead', ' ms');
+    const bind = (id, k, u) => { const e = $(id), show = () => { e.previousElementSibling.querySelector('span').textContent = `${e.value}${u}`; }; e.value = this[k]; show(); e.oninput = () => { this[k] = +e.value; show(); this.save(); }; }; bind('#hvRange', 'range', ' mm'); bind('#hvFull', 'full', ' mm'); bind('#hvLead', 'lead', ' ms');
     for (const e of [this.chip, this.panel]) for (const n of ['touchstart', 'pointerdown']) e.addEventListener(n, (x) => x.stopPropagation());
   }
   url() { const u = new URL('../hover/phone.html', location.href), q = new URLSearchParams(location.search); u.searchParams.set('room', this.room); for (const k of ['relay', 'sim', 'cpu']) if (q.has(k)) u.searchParams.set(k, q.get(k) || '1'); return u.href; }
@@ -43,7 +43,7 @@ export class Hover {
   }
   take(d, way) {
     const t = now();
-    if (d.k === 's') { if (d.still === true && this.phone.still === false) this.fails = 0; this.phone = { ...d, at: t }; if (this.pose && d.pose !== this.pose.id) { this.pose = null; this.fails = 0; this.calAt = t + 600; this.why = 'iPhoneが動きました'; } }
+    if (d.k === 's') { if (t - this.phone.at > 2500) this.panel.hidden = true; if (d.still === true && this.phone.still === false) this.fails = 0; this.phone = { ...d, at: t }; if (this.pose && d.pose !== this.pose.id) { this.pose = null; this.fails = 0; this.calAt = t + 600; this.why = 'iPhoneが動きました'; } }
     else if (d.k === 'a') { const c = this.cal; if (!c || d.id !== c.id || d.i !== c.i || c.i >= c.pts.length) return; c.i++; c.t = t; this.dot(); }
     else if (d.k === 'p') { const c = this.cal; if (!c || d.id !== c.id || c.i < c.pts.length) return; if (d.ok) { this.pose = { id: d.id, C: d.C, err: d.err, f: d.f, guessed: d.guessed }; this.cal = null; this.calib.hidden = true; this.fails = 0; this.why = ''; this.fit.off = [0, 0]; this.fit.n = Math.min(this.fit.n, 1); this.track.reset(); if (!this.seen) this.panel.hidden = true; } else this.fail(d.why || 'うまく合いませんでした'); }
     else if (d.k === 'h') this.hand(d, way, t);
@@ -76,7 +76,7 @@ export class Hover {
   hand(d, way, t) {
     this.got++; if (d.none || !this.pose || d.pid !== this.pose.id) { this.last = { none: true, at: t }; return; }
     const off = this.link.m[way]?.off, tc = off == null ? t - 50 : Math.max(t - 500, Math.min(t, d.t - off)), m = { g: d.g, dz: d.dz, Z: d.Z }, C = this.pose.C, touch = this.touchAt(tc);
-    if (touch) { this.fit.learn(m, C, touch); if (this.fit.n % 30 === 1) this.save(); } const raw = this.fit.height(m, C), lift = this.slow.add(raw, tc), p = this.fit.place(m, C, touch ? 0 : this.slowP.add(raw, tc)); this.track.add(p, tc); this.last = { at: t, tc, raw, lift, p, age: t - tc };
+    if (touch) { this.fit.learn(m, C, touch); if (this.fit.n % 30 === 1) this.save(); } const raw = this.mid.add(this.fit.height(m, C)), lift = this.slow.add(raw, tc), p = this.fit.place(m, C, touch ? 0 : this.slowP.add(raw, tc)); this.track.add(p, tc); this.last = { at: t, tc, raw, lift, p, age: t - tc };
   }
   // the page that draws tells where the contact is (null: nothing touches), every picture
   touch(p, t) {
@@ -89,6 +89,6 @@ export class Hover {
   sample(t) {
     const l = this.last; if (!this.pose || !l || l.none || t - l.at > 300 || !this.fit.n && !this.known) return null; const p = this.track.at(t + this.lead); if (!p) return null;
     const r = this.rel; if (r) { if (t - r.t > 500) this.rel = null; else { r.d ||= [r.p[0] - p[0], r.p[1] - p[1]]; const k = Math.exp(-(t - r.t) / 90); p[0] += r.d[0] * k; p[1] += r.d[1] * k; } } // let go: from where the contact was, without a jump
-    return { p, lift: Math.max(0, l.lift - 2) * this.gain / 100, raw: l.raw };
+    const lift = Math.max(0, l.lift - 2); return { p, lift, in: Math.min(1, (this.range - lift) / Math.max(10, this.range - this.full)), raw: l.raw }; // in: 0 the finger begins to come in, 1 all of it is in (already some way above the glass: things can be touched without touching the glass)
   }
 }

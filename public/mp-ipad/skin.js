@@ -1,7 +1,7 @@
 // The virtual finger: one shape, drawn in several ways (the ways earlier studies on virtual hands drew them). The skin was made by Sol and
 // wrapped around by scripts/bake-finger.py. Rest coordinate s (mm): MP 0, PIP 42, DIP 67, fingertip centre 89, end 97.
 import * as THREE from 'three';
-import { surface } from './tex.js?v=22';
+import { surface } from './tex.js?v=23';
 
 export const NODES = { tip: [0, 42, 67, 89], joint: [42, 67, 89] };
 // id, name
@@ -39,7 +39,7 @@ export class SkinFinger {
   constructor(scene, clip, ready, share = null) {
     this.scene = scene; this.width = 1; this.slice = null;
     this.clip = clip[0]; this.look = 'real'; this.cut = { taper: 0.7, over: 9, depth: 0, shade: 0.15, fade: 0, blob: 0.5 };
-    const pic = (name, srgb) => { const t = new THREE.TextureLoader().load(new URL(`./${name}?v=22`, import.meta.url).href, ready); t.flipY = false; t.wrapS = THREE.RepeatWrapping; t.anisotropy = 8; if (srgb) t.colorSpace = THREE.SRGBColorSpace; return t; };
+    const pic = (name, srgb) => { const t = new THREE.TextureLoader().load(new URL(`./${name}?v=23`, import.meta.url).href, ready); t.flipY = false; t.wrapS = THREE.RepeatWrapping; t.anisotropy = 8; if (srgb) t.colorSpace = THREE.SRGBColorSpace; return t; };
     const [color, normalMap, roughnessMap] = this.pics = share?.pics || [pic('finger-color.jpg', true), pic('finger-normal.jpg'), pic('finger-rough.jpg')], NS = (k) => new THREE.Vector2(k, k), base = { clippingPlanes: clip, clipShadows: true, transparent: true };
     this.u = { uTop: { value: 0 }, uShade: { value: 0.15 }, uFade: { value: 0 }, uGel: { value: 1e4 }, uBlood: { value: 1e4 } };
     // near the cut: a little darker (the shadow of the knuckle), or dissolving. Skin also gives back some light from inside

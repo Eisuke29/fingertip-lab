@@ -6,7 +6,7 @@ test('meter: round trip, loss, clock difference', () => { const [m] = run(40, 0.
 test('the way: whichever works, direct preferred, stays unless clearly worse', () => { const [d, t] = run(20), [r] = run(60), e = new Meter(); assert.equal(choose(d, r, t), 'direct'); assert.equal(choose(e, r, t), 'relay'); assert.equal(choose(d, e, t), 'direct'); assert.equal(choose(e, e, t), null); const [s] = run(70); assert.equal(choose(s, r, t, 'direct'), 'direct'); const [x] = run(200); assert.equal(choose(x, r, t, 'direct'), 'relay'); assert.equal(choose(d, r, t + 5000), null); });
 
 // ---------- step 2: where the hand is ----------
-import { homography, apply, inv3, poseFrom, riseOf, lifted, findDot, scaleOf, Fit, Track, Slow } from '../public/hover/geom.js';
+import { homography, apply, inv3, poseFrom, riseOf, lifted, findDot, scaleOf, palmOf, Mid, Fit, Track, Slow } from '../public/hover/geom.js';
 // a camera at C that looks at the middle of the screen: a point of the screen frame -> px
 export function cam(C, f = 1000, w = 1280, h = 720, roll = 0) {
   const n = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); }, cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -46,3 +46,9 @@ test('late and trembling places are carried on to now', () => {
   const S = new Slow(0.12); let v = 0; for (let t = 0; t < 1000; t += 33) v = S.add(50, t + 0); assert.ok(Math.abs(v - 50) < 1);
 });
 test('the size of the hand in the picture', () => { const Wd = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].map((i) => ({ x: 0.01 * (i % 5), y: 0.008 * (i % 7), z: 0 })), L = Wd.map((p) => ({ x: 0.4 + p.x * 5000 / 1280, y: 0.5 + p.y * 5000 / 720 })); assert.ok(Math.abs(scaleOf(L, Wd, 1280, 720) - 5000) < 1); });
+
+test('the size of the palm from the picture alone: twice as near, twice as large; one wild number is passed over', () => {
+  const at = (k) => Array.from({ length: 21 }, (_, i) => ({ x: 0.5 + 0.03 * k * Math.cos(i), y: 0.5 + 0.05 * k * Math.sin(i * 1.7) })), a = palmOf(at(1), 1920, 1080), b = palmOf(at(2), 1920, 1080);
+  assert.ok(a > 0 && Math.abs(b / a - 2) < 1e-9, `${a} ${b}`); assert.equal(palmOf(null, 1920, 1080), null);
+  const m = new Mid(); assert.deepEqual([10, 11, 90, 12, 13].map((v) => m.add(v)), [10, 11, 11, 12, 13]);
+});

@@ -1,20 +1,22 @@
 // The iPhone's side of "the fist comes closer, the finger goes in": it stands on a stand and looks down at the iPad and the hand.
 // It finds the bright dots the iPad shows (where the screen is), then the hand, and sends a few numbers per picture. No picture leaves the phone.
-import { Link } from './link.js?v=3';
-import { homography, apply, poseFrom, riseOf, findDot, scaleOf } from './geom.js?v=3';
+import { Link } from './link.js?v=4';
+import { homography, apply, poseFrom, riseOf, findDot, palmOf } from './geom.js?v=4';
 const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3', $ = (s) => document.querySelector(s), q = new URLSearchParams(location.search), room = q.get('room'), SIM = q.has('sim');
-const S = { link: null, lm: null, gpu: null, pad: null, padAt: -1e9, cal: null, pose: null, seen: null, fps: 0, ms: 0, err: '', still: undefined, gv: null, gh: [], tS: 0, last: 0, n: 0, bad: 0 };
+const S = { od: null, at: null, link: null, lm: null, gpu: null, pad: null, padAt: -1e9, cal: null, pose: null, seen: null, fps: 0, ms: 0, err: '', still: undefined, gv: null, gh: [], tS: 0, last: 0, n: 0, bad: 0 };
 const video = $('#v'), view = $('#view'), ctx = view.getContext('2d'), small = document.createElement('canvas'), sctx = small.getContext('2d', { willReadFrequently: true });
 if (!room) { $('#say').textContent = 'iPadに出るQRコードを、カメラで読み取ってください。'; $('#go').hidden = true; }
 
 $('#go').onclick = async () => {
   $('#go').disabled = true; $('#go').textContent = '許可を待っています';
+  const full = () => { try { const e = document.documentElement, f = e.requestFullscreen || e.webkitRequestFullscreen; if (f && !(document.fullscreenElement || document.webkitFullscreenElement)) Promise.resolve(f.call(e)).catch(() => {}); } catch {} };
   try { const M = window.DeviceMotionEvent; if (M?.requestPermission) await M.requestPermission(); } catch {} // only to notice when the phone is moved
-  try { if (!SIM) { video.srcObject = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60 } }, audio: false }); await video.play(); } }
+  try { if (!SIM) { video.srcObject = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } }, audio: false }); await video.play(); } }
   catch (e) { $('#go').disabled = false; $('#go').textContent = 'もう一度'; $('#say').textContent = `カメラを許可してください（${e.name}）`; return; }
   try { navigator.wakeLock?.request('screen').catch(() => {}); } catch {}
   addEventListener('devicemotion', moved);
   S.link = new Link(room, 'b', (k, d) => { if (k === 'data' && d.k === 'pad') { S.pad = d; S.padAt = performance.now(); } else if (k === 'taken') S.err = '別の画面で開かれました'; }); S.link.allowed(); window.phone = S;
+  full(); addEventListener('click', full); // where the browser allows it (not Safari on the iPhone: there the page is added to the home screen)
   $('#start').hidden = true; $('#live').hidden = false; run(); if (SIM) S.lm = 'sim'; else load().catch((e) => { S.err = `手の認識が使えません（${e.message || e}）`; });
 };
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') try { navigator.wakeLock?.request('screen').catch(() => {}); } catch {} });
@@ -66,12 +68,19 @@ function frame(t) {
     if (SIM) [L, Wd] = sim.hand(vw, vh); else try { const r = S.lm.detectForVideo(video, t); L = r.landmarks?.[0] || null; Wd = r.worldLandmarks?.[0] || null; S.bad = 0; } catch (e) { if (++S.bad > 3 && S.gpu && make) { S.gpu = false; S.lm = null; make('CPU').then((m) => { S.lm = m; }).catch((x) => { S.err = `手の認識が使えません（${x.message || x}）`; }); } }
     S.ms += (performance.now() - t0 - S.ms) * 0.1; S.seen = L; const P = S.pose;
     if (P && S.link.way) {
-      const id = pad?.lm ?? 6, s = L && scaleOf(L, Wd, vw, vh);
-      if (L && s) { const u = L[id].x * vw, v = L[id].y * vh, g = apply(P.Hi, [u, v]); S.link.data({ k: 'h', t, pid: P.id, g: [+g[0].toFixed(2), +g[1].toFixed(2)], dz: +riseOf(P.P, u, v).toFixed(5), Z: +(1000 * P.P.f / s).toFixed(1) }); } else S.link.data({ k: 'h', t, pid: P.id, none: 1 });
+      const id = pad?.lm ?? 6, s = L && palmOf(L, vw, vh);
+      if (!L) S.od = null;
+      if (L && s) { const [u, v] = steady(L, id, vw, vh), g = apply(P.Hi, [u, v]); S.link.data({ k: 'h', t, pid: P.id, g: [+g[0].toFixed(2), +g[1].toFixed(2)], dz: +riseOf(P.P, u, v).toFixed(5), Z: +(1000 * P.P.f / s).toFixed(1) }); } else S.link.data({ k: 'h', t, pid: P.id, none: 1 });
     }
   }
   if (t - S.tS > 300 && S.link.way) { S.tS = t; S.link.data({ k: 's', ready: !!S.lm, still: S.still, err: S.err, fps: Math.round(S.fps), ms: Math.round(S.ms), gpu: S.gpu, pose: S.pose?.id || 0 }); }
   if (S.n % 2 === 0) draw(pad, vw, vh);
+}
+// The joint that touches is under the hand: the model guesses it, and the guess jumps. The four knuckles on the back of the hand are seen well.
+// So the place moves with the middle of the knuckles; where the joint lies from there is followed slowly (about half a second).
+function steady(L, id, vw, vh) {
+  const K = [5, 9, 13, 17], mx = K.reduce((a, j) => a + L[j].x, 0) / 4 * vw, my = K.reduce((a, j) => a + L[j].y, 0) / 4 * vh, d = [L[id].x * vw - mx, L[id].y * vh - my];
+  S.od = S.od ? [S.od[0] + (d[0] - S.od[0]) * 0.07, S.od[1] + (d[1] - S.od[1]) * 0.07] : d; return (S.at = [mx + S.od[0], my + S.od[1]]);
 }
 function run() {
   const safe = (t) => { try { frame(t); } catch (e) { S.err = e.message; } };
@@ -79,14 +88,14 @@ function run() {
 }
 // ---------- what the person sees on the phone: the picture, the screen found in it, the hand, one line ----------
 function draw(pad, vw, vh) {
-  const L = S.link, way = L.way, P = S.pose, msg = S.err ? S.err : !way ? (L.peer ? 'iPadとつないでいます' : 'iPadを探しています') : !S.lm ? '手の認識を読み込んでいます' : pad?.cal ? '合わせています（手をどける）' : !P ? 'iPadの画面全体が写るように置く' : !S.seen ? 'OK（手はまだ見えません）' : 'OK（手が見えています）';
+  const L = S.link, way = L.way, P = S.pose, msg = S.err ? S.err : !way ? (L.peer ? 'iPadとつないでいます' : 'iPadを探しています') : !S.lm ? '手の認識を読み込んでいます' : pad?.cal ? '合わせています（手をどける）' : !P ? 'iPadの画面全体が写るように置く（横向き）' : !S.seen ? 'OK（手はまだ見えません）' : 'OK（手が見えています）';
   if ($('#state').textContent !== msg) { $('#state').textContent = msg; document.body.classList.toggle('ok', msg.startsWith('OK')); }
-  $('#sub').textContent = `${way === 'direct' ? '直接' : way === 'relay' ? '中継' : '—'}・${S.fps.toFixed(0)} コマ/秒・手 ${S.ms.toFixed(0)} ms${S.gpu === false ? '（CPU）' : ''}${P ? `・ずれ ${solveErr(P)} mm` : ''}`;
-  if (!vw) return; const w = 480, h = Math.round(w * vh / vw), k = w / vw; if (view.width !== w || view.height !== h) { view.width = w; view.height = h; }
+  $('#sub').textContent = `${way === 'direct' ? '直接' : way === 'relay' ? '中継' : '—'}・${S.fps.toFixed(0)} コマ/秒・手 ${S.ms.toFixed(0)} ms${S.gpu === false ? '（CPU）' : ''}・${vw}×${vh}${P ? `・ずれ ${solveErr(P)} mm` : ''}`;
+  if (!vw) return; const w = Math.min(vw, 1280), h = Math.round(w * vh / vw), k = w / vw, u = w / 480; if (view.width !== w || view.height !== h) { view.width = w; view.height = h; }
   if (SIM) { ctx.fillStyle = '#123'; ctx.fillRect(0, 0, w, h); } else ctx.drawImage(video, 0, 0, w, h);
-  if (P) { const c = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => apply(P.Hs, [a * P.half[0], b * P.half[1]])); ctx.strokeStyle = '#4fd58a'; ctx.lineWidth = 3; ctx.beginPath(); c.forEach((p, i) => ctx[i ? 'lineTo' : 'moveTo'](p[0] * k, p[1] * k)); ctx.closePath(); ctx.stroke(); }
-  if (S.cal) { ctx.fillStyle = '#ffd24a'; for (const p of S.cal.found) if (p) { ctx.beginPath(); ctx.arc(p[0] * k, p[1] * k, 5, 0, 7); ctx.fill(); } }
-  if (S.seen) { const id = pad?.lm ?? 6; S.seen.forEach((p, i) => { ctx.fillStyle = i === id ? '#ff4a3d' : '#ffffff'; ctx.beginPath(); ctx.arc(p.x * w, p.y * h, i === id ? 8 : 3, 0, 7); ctx.fill(); }); }
+  if (P) { const c = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => apply(P.Hs, [a * P.half[0], b * P.half[1]])); ctx.strokeStyle = '#4fd58a'; ctx.lineWidth = 3 * u; ctx.beginPath(); c.forEach((p, i) => ctx[i ? 'lineTo' : 'moveTo'](p[0] * k, p[1] * k)); ctx.closePath(); ctx.stroke(); }
+  if (S.cal) { ctx.fillStyle = '#ffd24a'; for (const p of S.cal.found) if (p) { ctx.beginPath(); ctx.arc(p[0] * k, p[1] * k, 5 * u, 0, 7); ctx.fill(); } }
+  if (S.seen) { const id = pad?.lm ?? 6; if (S.at && S.pose) { ctx.strokeStyle = '#ff4a3d'; ctx.lineWidth = 2 * u; ctx.beginPath(); ctx.arc(S.at[0] * k, S.at[1] * k, 13 * u, 0, 7); ctx.stroke(); } S.seen.forEach((p, i) => { ctx.fillStyle = i === id ? '#ff4a3d' : '#ffffff'; ctx.beginPath(); ctx.arc(p.x * w, p.y * h, (i === id ? 8 : 3) * u, 0, 7); ctx.fill(); }); }
 }
 const solveErr = (P) => (P.err ?? 0).toFixed(1);
 

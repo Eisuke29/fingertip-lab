@@ -67,6 +67,17 @@ export function scaleOf(L, Wd, w, h, ids = PALM) {
   for (const j of ids) { n += ((L[j].x - lx) * w) ** 2 + ((L[j].y - ly) * h) ** 2; d += (Wd[j].x - wx) ** 2 + (Wd[j].y - wy) ** 2; }
   const s = Math.sqrt(n / d); return Number.isFinite(s) && s > 0 ? s : null;
 }
+// The same without the points in metres: they tremble four times as much as the picture does (measured on a film of a fist from above).
+// The palm is stiff: its size in px alone is px per metre, for a palm of the usual size (NOMINAL m from its middle to its points).
+// How much this palm differs from the usual one is learned at the touch anyway.
+export const NOMINAL = 0.035;
+export function palmOf(L, w, h, ids = PALM) {
+  if (!L) return null; const lx = ids.reduce((s, j) => s + L[j].x, 0) / ids.length, ly = ids.reduce((s, j) => s + L[j].y, 0) / ids.length; let n = 0;
+  for (const j of ids) n += ((L[j].x - lx) * w) ** 2 + ((L[j].y - ly) * h) ** 2;
+  const s = Math.sqrt(n / ids.length) / NOMINAL; return Number.isFinite(s) && s > 0 ? s : null;
+}
+// the middle one of the last three: one wild number does no harm
+export class Mid { constructor() { this.a = []; } add(v) { this.a.push(v); if (this.a.length > 3) this.a.shift(); return [...this.a].sort((p, q) => p - q)[this.a.length >> 1]; } reset() { this.a = []; } }
 // which point of the hand touches the glass: the second joint (PIP) or the tip of that finger
 export const POINT = { joint: { index: 6, middle: 10, ring: 14, little: 18 }, tip: { index: 8, middle: 12, ring: 16, little: 20 } };
 
@@ -80,7 +91,7 @@ export class Fit {
   place(m, C, lift) { const p = lifted(m.g, C, Math.max(0, lift) + this.h0); return [p[0] + this.off[0], p[1] + this.off[1]]; }
   learn(m, C, touch) {
     const k = this.n < 1 ? 1 : this.n < 8 ? 0.35 : 0.06, c = (this.h0 - C[2]) / (m.dz * m.Z), p = lifted(m.g, C, this.h0);
-    if (c > 0.4 && c < 2.5) this.c += (c - this.c) * k; const o = [touch[0] - p[0], touch[1] - p[1]]; if (Math.hypot(...o) < 60) this.off = this.off.map((v, i) => v + (o[i] - v) * k); this.n++;
+    if (c > 0.4 && c < 2.5) this.c += (c - this.c) * k; const o = [touch[0] - p[0], touch[1] - p[1]]; if (Math.hypot(...o) < 90) this.off = this.off.map((v, i) => v + (o[i] - v) * k); this.n++;
   }
 }
 
