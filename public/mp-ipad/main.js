@@ -1,17 +1,17 @@
 // Stroking on the iPad itself: the PIP knuckle or the fingertip of one or two fingers is on the glass, a virtual finger goes on from there into the screen. Only the hand slides.
 // touch -> where the contact is, motion sensor -> how the iPad stands, front camera -> where the eyes are. No server, no PC.
-import { Point, Pair, Lead, Ahead, Tilt, Eye, TOP, live, camera, cameraOff, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=16';
-import { MATS, CONTACTS, FINGERS, ORDER, RF, PRESS, Tip, solve, restTip, reach, within, lengths, grain, seenAt, add } from './finger.js?v=16';
-import { settle } from './world.js?v=16';
-import { THINGS, makeThing } from './objects.js?v=16';
-import { Scene, DEPTH } from './scene.js?v=16';
-import { tone, LOOKS } from './skin.js?v=16';
-import { fingerFromPhoto, keepPhoto, lastPhoto } from './photo.js?v=16';
+import { Point, Pair, Lead, Ahead, Tilt, Eye, TOP, live, camera, cameraOff, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=17';
+import { MATS, CONTACTS, FINGERS, ORDER, RF, PRESS, Tip, solve, restTip, reach, within, lengths, grain, seenAt, add } from './finger.js?v=17';
+import { settle } from './world.js?v=17';
+import { THINGS, makeThing } from './objects.js?v=17';
+import { Scene, DEPTH } from './scene.js?v=17';
+import { tone, LOOKS } from './skin.js?v=17';
+import { fingerFromPhoto, keepPhoto, lastPhoto } from './photo.js?v=17';
 import { Color, SRGBColorSpace } from 'three';
 let scene = null;
 
 const $ = (s) => document.querySelector(s), now = () => performance.now(), rad = (d) => d * Math.PI / 180, val = (id) => +$(id).value;
-const MINI = typeof screen !== 'undefined' && Math.min(screen.width, screen.height) === 744, MM = MINI ? 0.1558 : 0.1924, STORE = 'mpIpad.v7', VERSION = 16; // mm per CSS px: iPads have 264 ppi, the iPad mini (744 points wide) 326; the finger must have its real size
+const MINI = typeof screen !== 'undefined' && Math.min(screen.width, screen.height) === 744, MM = MINI ? 0.1558 : 0.1924, STORE = 'mpIpad.v7', VERSION = 17; // mm per CSS px: iPads have 264 ppi, the iPad mini (744 points wide) 326; the finger must have its real size
 // contact: joint / tip, pose: flat / side (thumb up), n: one or two fingers, pair: first finger of the two; effect: where the feeling comes from
 const O = { contact: 'joint', pose: 'flat', n: '1', finger: 'index', pair: '0', effect: 'both', group: 'thing', thing: 'harp', mat: 'sand', kind: 'finger', hand: 'right', eye: 'track', cam: 'top', look: 'real', skin: 'auto', cut: '0' };
 const REMEMBER = ['contact', 'pose', 'n', 'finger', 'pair', 'effect', 'group', 'thing', 'mat', 'hand', 'cam', 'look', 'skin'];
@@ -198,7 +198,7 @@ function finger(dt, t) {
     const o = { ...base, root: q.root, reach: R, kind: O.kind }, rest = restTip(o);
     if (scene.skins[i].slice != null) { q.tip.lag = [0, 0, 0]; q.f = solve(o); q.pull = q.lean = [0, 0]; } // what is left of it feels nothing
     else if (T) {
-      const lag0 = T.step(i, rest, dt, { fit, gain: gf, go }), lag = spring(q, lag0, R, dt); q.tip.lag = lag; q.f = T.w ? settle(T.w, { ...o, lag }) : solve({ ...o, lag, ...(T.touch != null ? { lo: T.touch + RF - PRESS - 2.5 } : {}) }); T.tipZ = q.f.tip[2]; q.pull = [0, 1].map((k) => -lag[k] * M.drag * Math.min(1.4, go)); q.lean = q.pull;
+      const lag0 = T.step(i, rest, dt, { fit, gain: gf, go, back: q.f && [0, 1, 2].map((k) => q.f.dip[k] - q.f.tip[k]) }), lag = spring(q, lag0, R, dt); q.tip.lag = lag; q.again = T.w ? { ...o, lag } : null; q.f = T.w ? settle(T.w, q.again) : solve({ ...o, lag, ...(T.touch != null ? { lo: T.touch + RF - PRESS - 2.5 } : {}) }); T.tipZ = q.f.tip[2]; q.pull = [0, 1].map((k) => -lag[k] * M.drag * Math.min(1.4, go)); q.lean = q.pull;
     } else {
       // over the edge of the island there is nothing to touch
       const p0 = q.tip.p || rest, off = Math.abs(p0[0]) > scene.IW / 2 || Math.abs(p0[1]) > scene.IH / 2, lag = spring(q, q.tip.step(rest, off ? { k: 45, hold: 0 } : M, dt, (l) => fit(l.map((v) => v * gf))), R, dt), h = M.bump && !off ? M.bump * grain(q.tip.p[0], q.tip.p[1], M.f) : 0; q.bob += (h - q.bob) * Math.min(1, dt * 40); q.air = Math.max(0, Math.min(1, q.air + (off ? dt : -dt) * 12));
@@ -207,6 +207,7 @@ function finger(dt, t) {
     q.f.rest = rest;
   });
   T?.world(dt);
+  if (T?.w) for (const q of S.fg) if (q.again) { if (q.root && q.f) { const rest = q.f.rest; q.f = settle(T.w, q.again); q.f.rest = rest; T.tipZ = q.f.tip[2]; } q.again = null; } // what the finger moved has moved: the finger is laid on it again, so that it is never inside
 }
 // when the fingertip gets free it snaps past its place and back, as after plucking
 function spring(q, lag, R, dt) {

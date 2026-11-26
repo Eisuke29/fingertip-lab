@@ -1,8 +1,8 @@
 // Things to touch behind the glass, after what earlier pseudo-haptics studies let people touch. Two ways to feel them, each with its own strength:
 // the fingertip is held back (o.fit: how far this finger gives way, o.gain), and the thing gives way (o.go). One or two fingers.
 // Pure functions, no DOM, no three.js. mm; z out of the screen; forces in mm of finger bending.
-import { RF, PRESS, clamp } from './finger.js?v=16';
-import { makeWorld, TipOver, swing as swingWorld } from './world.js?v=16';
+import { RF, PRESS, clamp } from './finger.js?v=17';
+import { makeWorld, TipOver, swing as swingWorld } from './world.js?v=17';
 
 // id, name
 export const THINGS = [['harp', 'ギターの弦'], ['lyre', 'ハープの弦'], ['grass', '草むら'], ['slime', 'スライムの中'], ['slimetop', 'スライムの上'], ['bumps', '山'], ['cube', '立方体'], ['push', '重い箱'], ['soft', 'やわらかい球'], ['posts', 'ばねの棒']];
@@ -19,8 +19,8 @@ class Thing {
   constructor(kind, W, Hh, low, depth) { Object.assign(this, { kind, W, H: Hh, low, depth }); this.f = [finger(), finger()]; }
   reset(i) { for (const k of i == null ? [0, 1] : [i]) { this.leave?.(this.f[k]); this.f[k] = finger(); } }
   // finger i, its resting place, time. Returns how far the fingertip is displaced
-  step(i, target, dt, { fit = (v) => v, gain = 1, go = 1 } = {}) {
-    const F = this.f[i]; if (!F.p) { F.p = [target[0], target[1]]; this.land?.(F); }
+  step(i, target, dt, { fit = (v) => v, gain = 1, go = 1, back = null } = {}) { // back: from the fingertip to the joint behind it
+    const F = this.f[i]; F.back = back; if (!F.p) { F.p = [target[0], target[1]]; this.land?.(F); }
     const p = F.p, n = Math.max(1, Math.round(dt / H)); F.z = target[2]; F.on = null;
     for (let s = 0; s < n; s++) {
       const f = this.force(F, target, H, gain, go), x = f[0] + target[0] - p[0], y = f[1] + target[1] - p[1], L = Math.hypot(x, y) * Q, c = Math.min(1, 1.5 / Math.max(1e-6, L)); p[0] += x * Q * c; p[1] += y * Q * c;
@@ -66,23 +66,31 @@ class Push extends Thing {
   }
   world(dt) { for (const b of this.boxes) { const t = b.lean || [0, 0]; b.tilt = b.tilt.map((v, i) => v + (t[i] - v) * Math.min(1, dt * 18)); b.lean = null; } }
 }
-// ---------- strings: caught, drawn along, let go, trembling. harp: a guitar, six strings from left to right, plucked up and down. lyre: a harp, nine strings from far to near, plucked sideways ----------
+// ---------- strings: caught, drawn along, let go, trembling. harp: a guitar, six strings from left to right, plucked up and down. lyre: a harp, seven strings from far to near, plucked sideways with the side of the finger ----------
 // a: the axis the strings run along, b: the one they are plucked along; s.y: where a string is on b
 class Harp extends Thing {
   constructor(kind, W, Hh, low, depth) {
-    super(kind, W, Hh, low, depth); this.zs = low + RF * 0.72 + NEAR; this.board = low - 1.5; const V = this.vert = kind === 'lyre', n = V ? 9 : 6, span = V ? W : Hh, d = (span - 12) / n; this.a = V ? 1 : 0; this.b = V ? 0 : 1;
-    this.strings = Array.from({ length: n }, (_, i) => { const m = V ? (n - 1 - i) * 5 / (n - 1) : i; return { y: -span / 2 + 6 + d * (i + 0.5), r: 0.55 + 0.2 * m, k: (0.34 + 0.16 * m) * 1.08, max: 13 + m, u: 0, v: 0, held: [], hz: 12 - m }; }); // the harp: thick to the left, thin to the right
+    super(kind, W, Hh, low, depth); const V = this.vert = kind === 'lyre', n = V ? 7 : 6; this.zs = low + RF * (V ? 1 : 0.72) + NEAR; this.board = low - 1.5; const span = V ? W : Hh, d = (span - 12) / n; this.a = V ? 1 : 0; this.b = V ? 0 : 1;
+    this.strings = Array.from({ length: n }, (_, i) => { const m = V ? (n - 1 - i) * 5 / (n - 1) : i; return { y: -span / 2 + 6 + d * (i + 0.5), r: 0.55 + 0.2 * m, k: (V ? 0.5 + 0.13 * m : 0.34 + 0.16 * m) * 1.08, max: 13 + m, u: 0, v: 0, held: [], hz: 12 - m }; }); // the harp: thick to the left, thin to the right
   }
-  land(F) { F.d.s = this.strings.map((s) => ({ side: F.p[this.b] < s.y ? -1 : 1, free: Math.abs(F.p[this.b] - s.y) < RF })); }
+  // where the finger can catch a string: [along the string, across, how wide the finger is there]. The harp's strings run along the finger: its side behind the fingertip catches too
+  pts(F, s) {
+    const p = F.p, B = F.back; if (!this.vert) return [[p[0], p[1], RF * 0.6 + s.r]]; const R = RF * 0.92 + s.r; if (!B) return [[p[1], p[0], R]];
+    const e = clamp(0.7 * RF / Math.max(B[2], 1e-3), 0, 1), dz = Math.max(0, B[2]) * e; return [[p[1], p[0], R], [p[1] + B[1] * e, p[0] + B[0] * e, Math.sqrt(RF * RF - dz * dz) * 0.92 + s.r]];
+  }
+  // the guitar: a string under the landing finger is let through once. The harp: it is pushed aside (c: the finger grows to its width in a moment)
+  land(F) { const b = this.b; F.d.s = this.strings.map((s) => { const d = Math.abs(F.p[b] - s.y), side = F.p[b] < s.y ? -1 : 1; return this.vert ? { side, free: false, c: clamp(d / (RF + s.r), 0.1, 1) } : { side, free: d < RF, c: 1 }; }); }
   leave(F) { for (const s of this.strings) s.held = s.held.filter((h) => h.F !== F); }
   force(F, target, h, gain, go) {
-    let f = 0; const p = F.p, { a, b } = this; this.strings.forEach((s, i) => {
-      const m = F.d.s[i], R = RF * 0.6 + s.r, d = p[b] - s.y; if (m.free && Math.abs(d) > R + 0.5) { m.free = false; m.side = d < 0 ? -1 : 1; }
-      const u = m.side < 0 ? d + R : d - R, caught = !m.free && (m.side < 0 ? u > 0 : u < 0) && gain + go > 0.04, k = s.held.findIndex((q) => q.F === F);
+    let f = 0; const p = F.p, { b } = this; this.strings.forEach((s, i) => {
+      const m = F.d.s[i], d = p[b] - s.y, drop = () => { if (s.held.some((q) => q.F === F)) s.held = s.held.filter((q) => q.F !== F); };
+      if (Math.abs(d) > 5 * RF) { m.free = false; m.side = d < 0 ? -1 : 1; m.c = 1; drop(); return; } // far from it
+      const Q = this.pts(F, s); m.c = Math.min(1, m.c + h / 0.12); if (m.free && Q.every((q) => Math.abs(q[1] - s.y) > q[2] + 0.5 && (q[1] < s.y) === (d < 0))) { m.free = false; m.side = d < 0 ? -1 : 1; }
+      const U = Q.map((q) => q[1] - s.y - m.side * q[2] * m.c), u = m.side < 0 ? Math.max(...U) : Math.min(...U), caught = !m.free && (m.side < 0 ? u > 0 : u < 0) && gain + go > 0.04;
       if (caught) { // the string gives way by go, the finger by gain
-        f -= s.k * (go > 0.05 ? 1.4 / Math.max(0.5, go) : 5) * u * Math.max(gain, 0.02); if (k < 0) s.held.push({ F, u, x: p[a] }); else Object.assign(s.held[k], { u, x: p[a] }); s.u = u; s.v = 0; F.on = s;
-        if (Math.abs(u) > s.max * (0.12 + 0.88 * Math.min(1.6, go)) || Math.abs(target[b] - p[b]) > 5 + 15 * Math.min(1.6, gain)) { m.free = true; s.held = s.held.filter((q) => q.F !== F); s.u *= Math.max(0.5, go); }
-      } else if (k >= 0) s.held.splice(k, 1);
+        f -= s.k * (go > 0.05 ? 1.4 / Math.max(0.5, go) : 5) * u * Math.max(gain, 0.02); drop(); Q.forEach((q, j) => s.held.push({ F, u: U[j], x: q[0] })); s.u = u; s.v = 0; F.on = s;
+        if (Math.abs(u) > s.max * (0.12 + 0.88 * Math.min(1.6, go)) || Math.abs(target[b] - p[b]) > 5 + 15 * Math.min(1.6, gain)) { m.free = true; drop(); s.u *= Math.max(0.5, go); }
+      } else drop();
     });
     return b ? [0, f] : [f, 0];
   }

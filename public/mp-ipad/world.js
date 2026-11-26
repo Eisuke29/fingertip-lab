@@ -1,6 +1,6 @@
 // Solid things with a height: cubes, hills, soft balls. Which heights the fingertip can have there, and how it catches at the edges.
 // Pure functions, no DOM, no three.js. mm; z out of the screen.
-import { RF, clamp, solve } from './finger.js?v=16';
+import { RF, clamp, solve } from './finger.js?v=17';
 
 export const REACH = 4.5; // the things stand this much higher than the lowest point of the resting fingertip
 let seed = 1; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
@@ -13,9 +13,9 @@ export function makeWorld(kind, W, H, low, depth) {
     const n = Math.max(2, Math.round(W / 50)), m = Math.max(1, Math.round(H / 50)), dx = W / n, dy = H / m, a = Math.min(dx, dy) * 0.33;
     for (let j = 0; j < m; j++) for (let i = 0; i < n; i++) {
       const x = -W / 2 + dx * (i + 0.5), y = -H / 2 + dy * (j + 0.5), k = Math.max(1, Math.round((depth + top) / (2 * a))), e = (depth + top) / k;
-      objs.push({ type: 'box', x, y, a, r: 2, top, base: top - e }); for (let q = 1; q < k; q++) deco.push({ x: x + (rnd() - 0.5) * 2, y: y + (rnd() - 0.5) * 2, a: a * 1.02, top: top - q * e - 0.3, base: top - (q + 1) * e });
+      const o = { type: 'box', x, y, a, r: 2, top, base: top - e }; objs.push(o); for (let q = 1; q < k; q++) deco.push({ x: x + (rnd() - 0.5) * 2, y: y + (rnd() - 0.5) * 2, a: a * 1.02, top: top - q * e - 0.3, base: top - (q + 1) * e, of: o }); // of: the cube it carries; they sink together
     }
-    for (let j = 0; j <= m; j++) for (let i = 0; i <= n; i++) deco.push({ x: -W / 2 + dx * i, y: -H / 2 + dy * j, a: 8 + 4 * rnd(), top: top - 30 - rnd() * (depth + top - 55), base: -depth });
+    for (let j = 0; j <= m; j++) for (let i = 0; i <= n; i++) deco.push({ x: -W / 2 + dx * i, y: -H / 2 + dy * j, a: 8 + 4 * rnd(), top: top - Math.max(30, (depth + top) / Math.max(1, Math.round((depth + top) / (2 * a))) + 2) - rnd() * (depth + top - 55), base: -depth }); // lower than the cubes that can be touched: these slide over them
   } else if (kind === 'bumps') { // hills on one plate: a height field, steep and high
     const f = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => ({ x: ((i % 4) - 1.5) * W * 0.242 + (i < 4 ? -1 : 1) * W * 0.012, y: (i < 4 ? 1 : -1) * H * 0.245, s: [1, 0.72, 1.12, 0.86, 0.8, 1.15, 0.92, 1.05][i], R: Math.min(20, W * 0.125) })); // eight hills, high and low
     objs.push({ type: 'field', x: 0, y: 0, f, base: low - 5, amp: 23 });
@@ -57,7 +57,7 @@ export class TipOver {
 // the things are dragged along a little and swing back. tips: the fingers on them, go: how much the things give way
 export function swing(w, tips, dt, go) {
   const h = Math.min(0.033, dt); for (const o of w.objs) { const on = tips.filter((t) => t.obj === o), m = o.type === 'ball' && o.soft < 1 ? 0 : o.move * go, lim = o.type === 'box' ? 5 : 6;
-    for (const [k, v, i] of [['ox', 'vx', 0], ['oy', 'vy', 1]]) { let t = 0; for (const q of on) t += clamp((q.push[i] * 0.5 - q.lag[i]) * m, -lim, lim); o[v] += ((t - o[k]) * o.k - o[v] * 11) * h; o[k] = clamp(o[k] + o[v] * h, -9, 9); }
+    for (const [k, v, i] of [['ox', 'vx', 0], ['oy', 'vy', 1]]) { let t = 0; for (const q of on) t += clamp((q.push[i] * 0.5 - q.lag[i]) * m, -lim, lim); o[v] += ((t - o[k]) * o.k - o[v] * 11) * h; o[k] = clamp(o[k] + o[v] * h, -8, 8); }
     if (o.type === 'box') o.sink += ((on.length ? 1.6 * go : 0) - o.sink) * Math.min(1, dt * 14); }
 }
 // The finger for this lag, raised until neither the fingertip nor the part behind it is inside anything. o: what solve() needs

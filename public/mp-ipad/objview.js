@@ -1,8 +1,8 @@
 // How the things of objects.js look. view(thing, scene) puts the meshes into a group and returns { group, update(spheres, dt) }.
 import * as THREE from 'three';
-import { RF } from './finger.js?v=16';
-import { fieldZ } from './world.js?v=16';
-import { surface, copyOf, roundBox, TILE } from './tex.js?v=16';
+import { RF } from './finger.js?v=17';
+import { fieldZ } from './world.js?v=17';
+import { surface, copyOf, roundBox, TILE } from './tex.js?v=17';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v)), tinted = (key, c) => { const m = copyOf(key); m.color = new THREE.Color(c); return m; };
 // steps that get wider downward: every step an edge, its top light, its side dark toward the foot
@@ -43,7 +43,7 @@ export function view(t) {
   const slab = (z, key, c, thick = 9) => { const w = t.W, h = t.H, g = new THREE.BoxGeometry(w, h, thick), u = g.attributes.uv, p = g.attributes.position; for (let i = 0; i < u.count; i++) u.setXY(i, p.getX(i) / TILE[key], (p.getY(i) + p.getZ(i)) / TILE[key]); G.add(terraces(w / 2, h / 2, z - 0.2, t.depth, 'wood')); return put(g, c ? tinted(key, c) : surface(key), 0, 0, z - thick / 2); };
   let update = () => {};
   if (t.kind === 'cube') {
-    const C = [0xf3d9b0, 0xe9a08a, 0x9fc3d8, 0xc9d79a], M = C.map((c) => tinted('block', c)); const B = t.w.objs.map((o, i) => put(roundBox(o.a, o.top - o.base, o.r, TILE.block), M[(i + (i >> 2)) % 4], o.x, o.y, o.base)); update = () => t.w.objs.forEach((o, i) => B[i].position.set(o.x + o.ox, o.y + o.oy, o.base - o.sink)); t.w.deco.forEach((d, i) => put(roundBox(d.a, d.top - d.base, 1.4, TILE.block), M[(i * 7 + 1) % 4], d.x, d.y, d.base));
+    const C = [0xf3d9b0, 0xe9a08a, 0x9fc3d8, 0xc9d79a], M = C.map((c) => tinted('block', c)); const B = t.w.objs.map((o, i) => put(roundBox(o.a, o.top - o.base, o.r, TILE.block), M[(i + (i >> 2)) % 4], o.x, o.y, o.base)); update = () => t.w.objs.forEach((o, i) => B[i].position.set(o.x + o.ox, o.y + o.oy, o.base - o.sink)); const D = t.w.deco.map((d, i) => put(roundBox(d.a, d.top - d.base, 1.4, TILE.block), M[(i * 7 + 1) % 4], d.x, d.y, d.base)), up = update; update = () => { up(); t.w.deco.forEach((d, i) => { if (d.of) D[i].position.z = d.base - d.of.sink; }); };
   } else if (t.kind === 'bumps') {
     const o = t.w.objs[0], nx = 150, ny = 104, g = new THREE.PlaneGeometry(t.W, t.H, nx, ny), p = g.attributes.position, u = g.attributes.uv, c = new Float32Array(p.count * 3), step = 1.2;
     // light and dark that make the relief: deep is dark, a slope that looks away from the light too, what stands between hills a little
@@ -81,7 +81,8 @@ export function view(t) {
     box(4, t.H + 4, 7, nx + 2, 0, t.zs - 1, pearl); box(5, t.H * 0.96, 8, t.W / 2 - 6, 0, t.zs - 1, dark);
     }
     const C = [[0.95, 0.95, 0.98], [0.92, 0.92, 0.95], [0.9, 0.82, 0.62], [0.86, 0.68, 0.42], [0.8, 0.58, 0.34], [0.72, 0.5, 0.3]]; t.strings.forEach((s, i) => T.paint(i, () => (V ? (i % 7 === 0 ? [0.86, 0.2, 0.16] : i % 7 === 3 ? [0.16, 0.2, 0.42] : [0.94, 0.9, 0.8]) : C[i % 6]))); // a harp marks every C red and every F dark
-    update = () => { t.strings.forEach((s, c) => { const now = s.held.map((q) => `${q.u.toFixed(2)},${q.x.toFixed(1)}`).join(';') || s.u.toFixed(2); if (s.shown === now) return; s.shown = now; const P = [[-L, 0], ...s.held.map((q) => [clamp(q.x, -L + 8, L - 8), q.u]).sort((a, b) => a[0] - b[0]), [L, 0]]; T.set(c, (i) => { const x = -L + 2 * L * i / S; let u; if (s.held.length) { let k = 0; while (k < P.length - 2 && x > P[k + 1][0]) k++; const f = (x - P[k][0]) / Math.max(1e-3, P[k + 1][0] - P[k][0]); u = P[k][1] + (P[k + 1][1] - P[k][1]) * f; } else u = s.u * Math.sin(Math.PI * i / S); return V ? [s.y + u, x, t.zs, s.r] : [x, s.y + u, t.zs, s.r]; }, [0, 0, 1]); }); T.done(); };
+    // a taut string does not follow a place of the finger that does not reach it
+    update = () => { t.strings.forEach((s, c) => { const now = s.held.map((q) => `${q.u.toFixed(2)},${q.x.toFixed(1)}`).join(';') || s.u.toFixed(2); if (s.shown === now) return; s.shown = now; const P = [[-L, 0], ...s.held.map((q) => [clamp(q.x, -L + 8, L - 8), q.u]).sort((a, b) => a[0] - b[0]), [L, 0]]; for (let k = 1; k < P.length - 1; k++) { const a = P[k - 1], e = P[k + 1], lin = a[1] + (e[1] - a[1]) * (P[k][0] - a[0]) / Math.max(1e-3, e[0] - a[0]), sg = Math.sign(P[k][1]) || 1; if (P[k][1] * sg < lin * sg - 1e-6) { P.splice(k, 1); k = 0; } } T.set(c, (i) => { const x = -L + 2 * L * i / S; let u; if (s.held.length) { let k = 0; while (k < P.length - 2 && x > P[k + 1][0]) k++; const f = (x - P[k][0]) / Math.max(1e-3, P[k + 1][0] - P[k][0]); u = P[k][1] + (P[k + 1][1] - P[k][1]) * f; } else u = s.u * Math.sin(Math.PI * i / S); return V ? [s.y + u, x, t.zs, s.r] : [x, s.y + u, t.zs, s.r]; }, [0, 0, 1]); }); T.done(); };
   } else if (t.pool) {
     // a clear, thick jelly in a white tray: what is inside is seen through it, greener the deeper it lies
     const { nx, ny, dye, h } = t, g = new THREE.PlaneGeometry(t.W, t.H, nx, ny), p = g.attributes.position, nm = g.attributes.normal, c = new THREE.BufferAttribute(new Float32Array(p.count * 3), 3), z = t.surf, w = nx + 1, sx = t.W / nx, sy = t.H / ny; g.setAttribute('color', c);
