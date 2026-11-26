@@ -1,7 +1,7 @@
 // The iPhone's side of "the fist comes closer, the finger goes in": it stands on a stand and looks down at the iPad and the hand.
 // It finds the bright dots the iPad shows (where the screen is), then the hand, and sends a few numbers per picture. No picture leaves the phone.
-import { Link } from './link.js?v=2';
-import { homography, apply, poseFrom, riseOf, findDot, scaleOf } from './geom.js?v=2';
+import { Link } from './link.js?v=3';
+import { homography, apply, poseFrom, riseOf, findDot, scaleOf } from './geom.js?v=3';
 const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3', $ = (s) => document.querySelector(s), q = new URLSearchParams(location.search), room = q.get('room'), SIM = q.has('sim');
 const S = { link: null, lm: null, gpu: null, pad: null, padAt: -1e9, cal: null, pose: null, seen: null, fps: 0, ms: 0, err: '', still: undefined, gv: null, gh: [], tS: 0, last: 0, n: 0, bad: 0 };
 const video = $('#v'), view = $('#view'), ctx = view.getContext('2d'), small = document.createElement('canvas'), sctx = small.getContext('2d', { willReadFrequently: true });
@@ -79,8 +79,8 @@ function run() {
 }
 // ---------- what the person sees on the phone: the picture, the screen found in it, the hand, one line ----------
 function draw(pad, vw, vh) {
-  const L = S.link, way = L.way, P = S.pose, msg = S.err ? S.err : !way ? (L.peer ? 'iPadとつないでいます' : 'iPadを探しています') : !S.lm ? '手の認識を読み込んでいます' : pad?.cal ? '合わせています（手をどける）' : !P ? 'iPadの画面全体が写るように置く' : !S.seen ? '手が見えません' : 'OK';
-  if ($('#state').textContent !== msg) { $('#state').textContent = msg; document.body.classList.toggle('ok', msg === 'OK'); }
+  const L = S.link, way = L.way, P = S.pose, msg = S.err ? S.err : !way ? (L.peer ? 'iPadとつないでいます' : 'iPadを探しています') : !S.lm ? '手の認識を読み込んでいます' : pad?.cal ? '合わせています（手をどける）' : !P ? 'iPadの画面全体が写るように置く' : !S.seen ? 'OK（手はまだ見えません）' : 'OK（手が見えています）';
+  if ($('#state').textContent !== msg) { $('#state').textContent = msg; document.body.classList.toggle('ok', msg.startsWith('OK')); }
   $('#sub').textContent = `${way === 'direct' ? '直接' : way === 'relay' ? '中継' : '—'}・${S.fps.toFixed(0)} コマ/秒・手 ${S.ms.toFixed(0)} ms${S.gpu === false ? '（CPU）' : ''}${P ? `・ずれ ${solveErr(P)} mm` : ''}`;
   if (!vw) return; const w = 480, h = Math.round(w * vh / vw), k = w / vw; if (view.width !== w || view.height !== h) { view.width = w; view.height = h; }
   if (SIM) { ctx.fillStyle = '#123'; ctx.fillRect(0, 0, w, h); } else ctx.drawImage(video, 0, 0, w, h);

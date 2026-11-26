@@ -1,7 +1,7 @@
 // The iPad's side of "the fist comes closer, the finger goes in": finds the iPhone, shows it where the screen is (bright dots), takes the place and
 // height of the hand from it. Touching teaches what cannot be known beforehand. The page that draws asks sample() once per picture.
-import { Link, newRoom } from './link.js?v=2';
-import { Fit, Track, Slow, POINT } from './geom.js?v=2';
+import { Link, newRoom } from './link.js?v=3';
+import { Fit, Track, Slow, POINT } from './geom.js?v=3';
 const KEY = 'hover.pad', now = () => performance.now(), el = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content.firstChild; };
 const CSS = `#hvChip { position:fixed; left:96px; top:14px; z-index:4; min-height:44px; padding:0 16px; border-radius:22px; border:0; font:600 15px/1 system-ui,"Hiragino Sans",sans-serif; background:rgba(20,22,26,.82); color:#f4f2ef; display:flex; align-items:center; gap:8px; } #hvChip i { width:10px; height:10px; border-radius:50%; background:#f0b264; } #hvChip.ok i { background:#4fd58a; } #hvChip.ng i { background:#ff6b5e; }
 #hvPanel { position:fixed; left:14px; top:68px; z-index:5; width:min(400px,calc(100% - 28px)); max-height:calc(100% - 90px); overflow:auto; background:rgba(20,22,26,.94); color:#f4f2ef; border-radius:18px; padding:16px; font:16px/1.6 system-ui,"Hiragino Sans",sans-serif; touch-action:pan-y; } #hvPanel b { font-size:19px; } #hvPanel ol { margin:8px 0; padding-left:22px; } #hvPanel li::before { content:none; } #hvPanel p { margin:6px 0; color:#b9c0c8; font-size:14px; }
@@ -30,7 +30,7 @@ export class Hover {
     const bind = (id, k, u) => { const e = $(id), show = () => { e.previousElementSibling.querySelector('span').textContent = `${e.value}${u}`; }; e.value = this[k]; show(); e.oninput = () => { this[k] = +e.value; show(); this.save(); }; }; bind('#hvGain', 'gain', '%'); bind('#hvLead', 'lead', ' ms');
     for (const e of [this.chip, this.panel]) for (const n of ['touchstart', 'pointerdown']) e.addEventListener(n, (x) => x.stopPropagation());
   }
-  url() { const u = new URL('../hover/phone.html', location.href), r = new URLSearchParams(location.search).get('relay'); u.searchParams.set('room', this.room); if (r) u.searchParams.set('relay', r); if (new URLSearchParams(location.search).has('sim')) u.searchParams.set('sim', '1'); return u.href; }
+  url() { const u = new URL('../hover/phone.html', location.href), q = new URLSearchParams(location.search); u.searchParams.set('room', this.room); for (const k of ['relay', 'sim', 'cpu']) if (q.has(k)) u.searchParams.set(k, q.get(k) || '1'); return u.href; }
   async qr() {
     const box = this.panel.querySelector('#hvQr'); box.textContent = '';
     try { if (!window.qrcode) await new Promise((ok, ng) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js'; s.onload = ok; s.onerror = ng; document.head.append(s); }); const g = window.qrcode(0, 'M'); g.addData(this.url()); g.make(); box.innerHTML = g.createSvgTag({ cellSize: 4, margin: 0, scalable: true }); } catch { box.textContent = this.url(); box.style.cssText += ';color:#000;font-size:12px;word-break:break-all;width:auto'; }

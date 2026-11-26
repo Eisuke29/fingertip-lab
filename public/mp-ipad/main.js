@@ -1,17 +1,17 @@
 // Stroking on the iPad itself: the PIP knuckle or the fingertip of one or two fingers is on the glass, a virtual finger goes on from there into the screen. Only the hand slides.
 // touch -> where the contact is, motion sensor -> how the iPad stands, front camera -> where the eyes are. No server, no PC.
-import { Point, Pair, Lead, Ahead, Tilt, Eye, TOP, live, camera, cameraOff, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=21';
-import { MATS, CONTACTS, FINGERS, ORDER, RF, PRESS, Tip, solve, restTip, reach, within, lengths, grain, seenAt, add } from './finger.js?v=21';
-import { settle } from './world.js?v=21';
-import { THINGS, makeThing } from './objects.js?v=21';
-import { Scene, DEPTH } from './scene.js?v=21';
-import { tone, LOOKS } from './skin.js?v=21';
-import { fingerFromPhoto, keepPhoto, lastPhoto } from './photo.js?v=21';
+import { Point, Pair, Lead, Ahead, Tilt, Eye, TOP, live, camera, cameraOff, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=22';
+import { MATS, CONTACTS, FINGERS, ORDER, RF, PRESS, Tip, solve, restTip, reach, within, lengths, grain, seenAt, add } from './finger.js?v=22';
+import { settle } from './world.js?v=22';
+import { THINGS, makeThing } from './objects.js?v=22';
+import { Scene, DEPTH } from './scene.js?v=22';
+import { tone, LOOKS } from './skin.js?v=22';
+import { fingerFromPhoto, keepPhoto, lastPhoto } from './photo.js?v=22';
 import { Color, SRGBColorSpace } from 'three';
 let scene = null;
 
 const $ = (s) => document.querySelector(s), now = () => performance.now(), rad = (d) => d * Math.PI / 180, val = (id) => +$(id).value;
-const MINI = typeof screen !== 'undefined' && Math.min(screen.width, screen.height) === 744, MM = MINI ? 0.1558 : 0.1924, STORE = 'mpIpad.v7', VERSION = 21; // mm per CSS px: iPads have 264 ppi, the iPad mini (744 points wide) 326; the finger must have its real size
+const MINI = typeof screen !== 'undefined' && Math.min(screen.width, screen.height) === 744, MM = MINI ? 0.1558 : 0.1924, STORE = 'mpIpad.v7', VERSION = 22; // mm per CSS px: iPads have 264 ppi, the iPad mini (744 points wide) 326; the finger must have its real size
 // contact: joint / tip, pose: flat / side (thumb up), n: one or two fingers, pair: first finger of the two; effect: where the feeling comes from
 const O = { contact: 'joint', pose: 'flat', n: '1', finger: 'index', pair: '0', effect: 'both', group: 'thing', thing: 'harp', mat: 'sand', kind: 'finger', hand: 'right', eye: 'track', cam: 'top', look: 'real', skin: 'auto', cut: '0' };
 const REMEMBER = ['contact', 'pose', 'n', 'finger', 'pair', 'effect', 'group', 'thing', 'mat', 'hand', 'cam', 'look', 'skin'];
@@ -236,7 +236,7 @@ function frame() {
   if (S.started) bomb(t, dt); const col = skinColor(dt); for (const q of scene.skins) { q.photoGain = 2 ** (val('#bright') / 50); q.setColor(col); } scene.ghost(GHOST && S.f && O.contact === 'joint' ? [S.root, S.f.base, S.yaw || 0, [val('#l0'), val('#l1'), val('#l2')]] : null); scene.render([eye[0] * val('#peek') / 100 + val('#vx'), eye[1] + val('#vy'), eye[2]]);
   const missing = two() && down && !S.contact.t.every((q) => q.down), msg = scene.lost ? '絵が止まりました。［最新にする］を押してください' : t < flashT ? flashM : !S.started ? '' : S.rec ? `記録中 あと ${Math.max(0, Math.ceil(20 - (t - S.rec.t0) / 1000))} 秒` : t - (S.cancelAt || -1e9) < (S.cancels > 2 ? 8000 : 4000) ? (S.cancels > 2 ? 'iPadの設定で「4本指・5本指のジェスチャ」をオフにしてください' : 'iPadが接触を打ち切りました。いちど手を離してください') : !S.fg.some((q) => q.root) ? (HV ? HV.msg(t) || 'こぶしを画面に近づける' : `${$('#way').textContent}を画面に付けて、すべらせる`) : missing ? 'もう1本も画面に付ける' : O.eye === 'track' && S.eye.src !== 'measured' && t - (S.eye.tLast || 0) > 1500 ? '顔が見えません' : '';
   if ($('#msg').textContent !== msg) $('#msg').textContent = msg;
-  if (S.rec) { const f = S.f; S.rec.rows.push({ t: +(t - S.rec.t0).toFixed(1), c: S.raw.map((c) => [c.id, +c.x.toFixed(2), +c.y.toFixed(2), +c.rx.toFixed(2), +c.ry.toFixed(2)]), p: tracks().map((q) => q.p?.map((v) => +v.toFixed(2))), root: S.fg.map((q) => q.root?.map((v) => +v.toFixed(2))), lag: S.fg.map((q) => q.tip.lag.map((v) => +v.toFixed(2))), bend: f && +f.bendDeg.toFixed(1), miss: +S.fg[0].lead.miss.toFixed(2), tilt: S.tilt.deg && +S.tilt.deg.toFixed(2), eye: eye.map((v) => +v.toFixed(1)), src: S.eye.src, fps: +S.fps.toFixed(0) }); if (t - S.rec.t0 > 20000) sendRec(); }
+  if (S.rec) { const f = S.f; S.rec.rows.push({ t: +(t - S.rec.t0).toFixed(1), c: S.raw.map((c) => [c.id, +c.x.toFixed(2), +c.y.toFixed(2), +c.rx.toFixed(2), +c.ry.toFixed(2)]), p: tracks().map((q) => q.p?.map((v) => +v.toFixed(2))), root: S.fg.map((q) => q.root?.map((v) => +v.toFixed(2))), lag: S.fg.map((q) => q.tip.lag.map((v) => +v.toFixed(2))), bend: f && +f.bendDeg.toFixed(1), miss: +S.fg[0].lead.miss.toFixed(2), tilt: S.tilt.deg && +S.tilt.deg.toFixed(2), eye: eye.map((v) => +v.toFixed(1)), src: S.eye.src, fps: +S.fps.toFixed(0), ...(HV?.last && !HV.last.none ? { hv: [HV.last.p[0], HV.last.p[1], HV.last.raw, HV.last.lift, HV.last.age].map((v) => +v.toFixed(1)) } : {}) }); if (t - S.rec.t0 > 20000) sendRec(); }
   if (!$('#tray').hidden && $('#valBox').open && (S.tickV = (S.tickV || 0) + 1) % 6 === 0) values(m, eye);
   S.ms = (S.ms || 0) + (now() - began - (S.ms || 0)) * 0.05;
 }
@@ -250,5 +250,5 @@ function values(m, eye) {
 }
 try { scene = new Scene($('#scene')); $('#scene').addEventListener('webglcontextlost', () => { scene.lost = true; }); $('#scene').addEventListener('webglcontextrestored', () => { scene.lost = false; }); const lay = () => { scene.layout(MM); cameraPlace(); }; lay(); addEventListener('resize', lay); scene.setMaterial(O.mat); scene.warm(); requestAnimationFrame(loop); lastPhoto().then((p) => { if (p) { S.photo = p; scene.skin.setPhoto(p.texture, p.mean); scene.skin.look = ''; } }); } catch (e) { $('#sMsg').textContent = `描画できません（${e.message}）。再読み込みしてください`; }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { try { TOP.navigator.wakeLock?.request('screen').catch(() => {}); } catch {} if (S.asked && O.eye === 'track') startEyes(); } });
-if (HOVER) { document.title = '近づけて入れる'; document.querySelector('#start h1').textContent = '近づけて入れる'; import('../hover/pad.js?v=2').then((m) => { HV = new m.Hover({ MM, camera }); HV.point(O.contact, who()[0]); $('#how').textContent = 'こぶしを画面に近づけると、指が中に入ります。iPhoneも使います'; if (S.started) HV.start(); }).catch(failed); }
+if (HOVER) { document.title = '近づけて入れる'; document.querySelector('#start h1').textContent = '近づけて入れる'; import('../hover/pad.js?v=3').then((m) => { HV = new m.Hover({ MM, camera }); HV.point(O.contact, who()[0]); $('#how').textContent = 'こぶしを画面に近づけると、指が中に入ります。iPhoneも使います'; if (S.started) HV.start(); }).catch(failed); }
 window.mpIpad = { S, O, get scene() { return scene; }, get hover() { return HV; } };
