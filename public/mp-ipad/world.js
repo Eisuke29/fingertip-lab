@@ -1,6 +1,6 @@
 // Solid things with a height: cubes, hills, soft balls. Which heights the fingertip can have there, and how it catches at the edges.
 // Pure functions, no DOM, no three.js. mm; z out of the screen.
-import { RF, clamp, solve } from './finger.js?v=19';
+import { RF, clamp, solve } from './finger.js?v=20';
 
 export const REACH = 4.5; // the things stand this much higher than the lowest point of the resting fingertip
 let seed = 1; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;

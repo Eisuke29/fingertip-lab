@@ -1,11 +1,11 @@
 // The picture: a box behind the glass, the material, the virtual finger. Drawn for one eye position (off-axis projection).
 import * as THREE from 'three';
-import { MATS, RF, grain, toHand, add } from './finger.js?v=19';
-import { ground } from './world.js?v=19';
-import { Blade } from './blade.js?v=19';
-import { SkinFinger } from './skin.js?v=19';
-import { surface, copyOf, TILE } from './tex.js?v=19';
-import { view, terraces } from './objview.js?v=19';
+import { MATS, RF, grain, toHand, add } from './finger.js?v=20';
+import { ground } from './world.js?v=20';
+import { Blade } from './blade.js?v=20';
+import { SkinFinger } from './skin.js?v=20';
+import { surface, copyOf, TILE } from './tex.js?v=20';
+import { view, terraces } from './objview.js?v=20';
 
 const V = (a) => new THREE.Vector3(a[0], a[1], a[2]), UP = new THREE.Vector3(0, 1, 0);
 export const DEPTH = 165; // mm, the room behind the glass

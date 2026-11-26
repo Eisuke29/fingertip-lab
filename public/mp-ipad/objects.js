@@ -1,8 +1,8 @@
 // Things to touch behind the glass, after what earlier pseudo-haptics studies let people touch. Two ways to feel them, each with its own strength:
 // the fingertip is held back (o.fit: how far this finger gives way, o.gain), and the thing gives way (o.go). One or two fingers.
 // Pure functions, no DOM, no three.js. mm; z out of the screen; forces in mm of finger bending.
-import { RF, PRESS, clamp } from './finger.js?v=19';
-import { makeWorld, TipOver, ground, swing as swingWorld } from './world.js?v=19';
+import { RF, PRESS, clamp } from './finger.js?v=20';
+import { makeWorld, TipOver, ground, swing as swingWorld } from './world.js?v=20';
 
 // id, name
 export const THINGS = [['harp', 'ギターの弦'], ['lyre', 'ハープの弦'], ['grass', '草むら'], ['slime', 'スライムの中'], ['slimetop', 'スライムの上'], ['bumps', '山'], ['cube', '立方体'], ['push', '重い箱'], ['soft', 'やわらかい球'], ['posts', 'ばねの棒']];
@@ -61,10 +61,10 @@ class Push extends Thing {
     }
   }
   shift(b, dx, dy) { const lim = [this.W / 2 - b.a, this.H / 2 - b.a], ox = b.x, oy = b.y; b.x = clamp(b.x + dx, -lim[0], lim[0]); b.y = clamp(b.y + dy, -lim[1], lim[1]); for (const q of this.boxes) if (q !== b) { const ex = b.a + q.a - Math.abs(b.x - q.x), ey = b.a + q.a - Math.abs(b.y - q.y); if (ex > 0 && ey > 0) { b.x = ox; b.y = oy; } } }
-  yield(F) { // the finger bends no farther: the box gives way
-    const r = RF * 1.15, p = F.p; for (const b of this.boxes) {
+  yield(F) { // the finger bends no farther: the box gives way, as far as the wall and the other boxes let it
+    const r = RF * 1.15, p = F.p; if (F.z + (this.more || 0) - RF > this.top - 0.5) return; for (const b of this.boxes) {
       const cx = clamp(p[0], b.x - b.a, b.x + b.a), cy = clamp(p[1], b.y - b.a, b.y + b.a), dx = p[0] - cx, dy = p[1] - cy, d = Math.hypot(dx, dy); if (d >= r) continue;
-      if (d > 1e-6) { b.x -= dx / d * (r - d); b.y -= dy / d * (r - d); } else { const e = [b.x + b.a - p[0], p[0] - b.x + b.a, b.y + b.a - p[1], p[1] - b.y + b.a], i = e.indexOf(Math.min(...e)), s = e[i] + r; b.x -= [1, -1, 0, 0][i] * s; b.y -= [0, 0, 1, -1][i] * s; }
+      if (d > 1e-6) this.shift(b, -dx / d * (r - d), -dy / d * (r - d)); else { const e = [b.x + b.a - p[0], p[0] - b.x + b.a, b.y + b.a - p[1], p[1] - b.y + b.a], i = e.indexOf(Math.min(...e)), s = e[i] + r; this.shift(b, -[1, -1, 0, 0][i] * s, -[0, 0, 1, -1][i] * s); }
     }
   }
   // balls: the finger as it is drawn. A box never stays inside it: the finger that leans over a box pushes it on. A box that can go no farther (the wall, another box) raises the finger over it (more)
@@ -87,8 +87,8 @@ class Harp extends Thing {
   }
   // where the finger can catch a string: [along the string, across, how wide the finger is there]. The harp's strings run along the finger: its side behind the fingertip catches too
   pts(F, s) {
-    const p = F.p, B = F.back; if (!this.vert) return [[p[0], p[1], RF * 0.6 + s.r]]; const R = RF + s.r; if (!B) return [[p[1], p[0], R]];
-    const e = clamp(0.7 * RF / Math.max(B[2], 1e-3), 0, 1), dz = Math.max(0, B[2]) * e; return [[p[1], p[0], R], [p[1] + B[1] * e, p[0] + B[0] * e, Math.sqrt(RF * RF - dz * dz) + s.r]];
+    const p = F.p, B = F.back; if (!this.vert) return [[p[0], p[1], RF * 0.6 + s.r]]; const R = RF * 0.92 + s.r; if (!B) return [[p[1], p[0], R]];
+    const e = clamp(0.7 * RF / Math.max(B[2], 1e-3), 0, 1), dz = Math.max(0, B[2]) * e; return [[p[1], p[0], R], [p[1] + B[1] * e, p[0] + B[0] * e, Math.sqrt(RF * RF - dz * dz) * 0.92 + s.r]];
   }
   // the guitar: a string under the landing finger is let through once. The harp: it is pushed aside (c: the finger grows to its width in a moment)
   land(F) { const b = this.b; F.d.s = this.strings.map((s) => { const d = Math.abs(F.p[b] - s.y), side = F.p[b] < s.y ? -1 : 1; return this.vert ? { side, free: false, c: clamp(d / (RF + s.r), 0.1, 1) } : { side, free: d < RF, c: 1 }; }); }
