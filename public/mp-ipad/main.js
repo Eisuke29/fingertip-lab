@@ -1,17 +1,17 @@
 // Stroking on the iPad itself: the PIP knuckle or the fingertip of one or two fingers is on the glass, a virtual finger goes on from there into the screen. Only the hand slides.
 // touch -> where the contact is, motion sensor -> how the iPad stands, front camera -> where the eyes are. No server, no PC.
-import { Point, Pair, Lead, Ahead, Tilt, Eye, TOP, live, camera, cameraOff, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=18';
-import { MATS, CONTACTS, FINGERS, ORDER, RF, PRESS, Tip, solve, restTip, reach, within, lengths, grain, seenAt, add } from './finger.js?v=18';
-import { settle } from './world.js?v=18';
-import { THINGS, makeThing } from './objects.js?v=18';
-import { Scene, DEPTH } from './scene.js?v=18';
-import { tone, LOOKS } from './skin.js?v=18';
-import { fingerFromPhoto, keepPhoto, lastPhoto } from './photo.js?v=18';
+import { Point, Pair, Lead, Ahead, Tilt, Eye, TOP, live, camera, cameraOff, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=19';
+import { MATS, CONTACTS, FINGERS, ORDER, RF, PRESS, Tip, solve, restTip, reach, within, lengths, grain, seenAt, add } from './finger.js?v=19';
+import { settle } from './world.js?v=19';
+import { THINGS, makeThing } from './objects.js?v=19';
+import { Scene, DEPTH } from './scene.js?v=19';
+import { tone, LOOKS } from './skin.js?v=19';
+import { fingerFromPhoto, keepPhoto, lastPhoto } from './photo.js?v=19';
 import { Color, SRGBColorSpace } from 'three';
 let scene = null;
 
 const $ = (s) => document.querySelector(s), now = () => performance.now(), rad = (d) => d * Math.PI / 180, val = (id) => +$(id).value;
-const MINI = typeof screen !== 'undefined' && Math.min(screen.width, screen.height) === 744, MM = MINI ? 0.1558 : 0.1924, STORE = 'mpIpad.v7', VERSION = 18; // mm per CSS px: iPads have 264 ppi, the iPad mini (744 points wide) 326; the finger must have its real size
+const MINI = typeof screen !== 'undefined' && Math.min(screen.width, screen.height) === 744, MM = MINI ? 0.1558 : 0.1924, STORE = 'mpIpad.v7', VERSION = 19; // mm per CSS px: iPads have 264 ppi, the iPad mini (744 points wide) 326; the finger must have its real size
 // contact: joint / tip, pose: flat / side (thumb up), n: one or two fingers, pair: first finger of the two; effect: where the feeling comes from
 const O = { contact: 'joint', pose: 'flat', n: '1', finger: 'index', pair: '0', effect: 'both', group: 'thing', thing: 'harp', mat: 'sand', kind: 'finger', hand: 'right', eye: 'track', cam: 'top', look: 'real', skin: 'auto', cut: '0' };
 const REMEMBER = ['contact', 'pose', 'n', 'finger', 'pair', 'effect', 'group', 'thing', 'mat', 'hand', 'cam', 'look', 'skin'];

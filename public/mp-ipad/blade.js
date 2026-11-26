@@ -1,7 +1,7 @@
 // A small kitchen knife that falls through the virtual finger in the middle between the contact and the fingertip; the fingertip flies off and it bleeds.
 // Only when the person has switched it on.
 import * as THREE from 'three';
-import { copyOf } from './tex.js?v=18';
+import { copyOf } from './tex.js?v=19';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z), rnd = (a, b) => a + Math.random() * (b - a), DROPS = 620, SPLATS = 260, Z = V(0, 0, 1);
 function knife() {

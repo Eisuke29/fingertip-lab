@@ -1,8 +1,8 @@
 // How the things of objects.js look. view(thing, scene) puts the meshes into a group and returns { group, update(spheres, dt) }.
 import * as THREE from 'three';
-import { RF } from './finger.js?v=18';
-import { fieldZ } from './world.js?v=18';
-import { surface, copyOf, roundBox, TILE } from './tex.js?v=18';
+import { RF } from './finger.js?v=19';
+import { fieldZ } from './world.js?v=19';
+import { surface, copyOf, roundBox, TILE } from './tex.js?v=19';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v)), tinted = (key, c) => { const m = copyOf(key); m.color = new THREE.Color(c); return m; };
 // steps that get wider downward: every step an edge, its top light, its side dark toward the foot
@@ -38,13 +38,13 @@ class Tubes {
   paint(c, f) { const a = this.geo.attributes.color.array; for (let i = 0; i <= this.seg; i++) { const q = f(i / this.seg); for (let j = 0; j < this.sides; j++) a.set(q, ((c * (this.seg + 1) + i) * this.sides + j) * 3); } this.geo.attributes.color.needsUpdate = true; }
   done() { if (!this.dirty) return; this.dirty = false; this.geo.attributes.position.needsUpdate = this.geo.attributes.normal.needsUpdate = true; }
 }
-// Nothing is drawn inside the finger. pt: [x, y, z, r] is moved out of the balls of the finger: ax 0 / 1: sideways along x / y, 2: down under it, 3: away from it, level
-function clear(pt, balls, ax) {
-  for (const [c, R] of balls) {
+// Nothing is drawn inside the finger. pt: [x, y, z, r] is moved out of the balls of the finger: ax 0 / 1: sideways along x / y to the side sg, 2: down under it, 3: away from it, level
+function clear(pt, balls, ax, sg = 1) {
+  for (let pass = 0; pass < (ax === 3 ? 2 : 1); pass++) for (const [c, R] of balls) {
     const D = R + pt[3] + 0.15, dx = pt[0] - c[0], dy = pt[1] - c[1], dz = pt[2] - c[2]; if (dx * dx + dy * dy + dz * dz >= D * D) continue;
-    if (ax === 2) pt[2] = c[2] - Math.sqrt(D * D - dx * dx - dy * dy);
+    if (ax === 2) pt[2] = Math.min(pt[2], c[2] - Math.sqrt(D * D - dx * dx - dy * dy));
     else if (ax === 3) { const h = Math.sqrt(D * D - dz * dz), l = Math.hypot(dx, dy); if (l > 1e-3) { pt[0] = c[0] + dx / l * h; pt[1] = c[1] + dy / l * h; } else pt[0] = c[0] + h; }
-    else { const o = ax ? dx : dy, w = Math.sqrt(Math.max(0, D * D - o * o - dz * dz)); pt[ax] = c[ax] + (pt[ax] >= c[ax] ? w : -w); }
+    else { const o = ax ? dx : dy, w = Math.sqrt(Math.max(0, D * D - o * o - dz * dz)); pt[ax] = sg > 0 ? Math.max(pt[ax], c[ax] + w) : Math.min(pt[ax], c[ax] - w); }
   }
   return pt;
 }
@@ -93,7 +93,7 @@ export function view(t) {
     const C = [[0.95, 0.95, 0.98], [0.92, 0.92, 0.95], [0.9, 0.82, 0.62], [0.86, 0.68, 0.42], [0.8, 0.58, 0.34], [0.72, 0.5, 0.3]]; t.strings.forEach((s, i) => T.paint(i, () => (V ? (i % 7 === 0 ? [0.86, 0.2, 0.16] : i % 7 === 3 ? [0.16, 0.2, 0.42] : [0.94, 0.9, 0.8]) : C[i % 6]))); // a harp marks every C red and every F dark
     // a taut string does not follow a place of the finger that does not reach it
     // a string that is held lies against the side of the finger, one that slips through goes under it
-    let tick = 0; update = (sp, dt, sz, go, balls = []) => { tick++; const B = balls.filter(([c, r]) => c[2] - r < t.zs + 2); t.strings.forEach((s, c) => { const near = B.filter(([q, r]) => Math.abs(q[t.b] - s.y) < r + 22), now = near.length ? tick : s.held.map((q) => `${q.u.toFixed(2)},${q.x.toFixed(1)}`).join(';') || s.u.toFixed(2); if (s.shown === now) return; s.shown = now; const ax = s.held.length ? t.b : 2; const P = [[-L, 0], ...s.held.map((q) => [clamp(q.x, -L + 8, L - 8), q.u]).sort((a, b) => a[0] - b[0]), [L, 0]]; for (let k = 1; k < P.length - 1; k++) { const a = P[k - 1], e = P[k + 1], lin = a[1] + (e[1] - a[1]) * (P[k][0] - a[0]) / Math.max(1e-3, e[0] - a[0]), sg = Math.sign(P[k][1]) || 1; if (P[k][1] * sg < lin * sg - 1e-6) { P.splice(k, 1); k = 0; } } T.set(c, (i) => { const x = -L + 2 * L * i / S; let u; if (s.held.length) { let k = 0; while (k < P.length - 2 && x > P[k + 1][0]) k++; const f = (x - P[k][0]) / Math.max(1e-3, P[k + 1][0] - P[k][0]); u = P[k][1] + (P[k + 1][1] - P[k][1]) * f; } else u = s.u * Math.sin(Math.PI * i / S); return clear(V ? [s.y + u, x, t.zs, s.r] : [x, s.y + u, t.zs, s.r], near, ax); }, V ? [1, 0, 0] : [0, 1, 0]); }); T.done(); };
+    let tick = 0; update = (sp, dt, sz, go, balls = []) => { tick++; const B = balls.filter(([c, r]) => c[2] - r < t.zs + 2); t.strings.forEach((s, c) => { const near = B.filter(([q, r]) => Math.abs(q[t.b] - s.y) < r + 22), now = near.length ? tick : s.held.map((q) => `${q.u.toFixed(2)},${q.x.toFixed(1)}`).join(';') || s.u.toFixed(2); if (s.shown === now) return; s.shown = now; const ax = s.held.length ? t.b : 2, sg = s.held.reduce((a, q) => (Math.abs(q.u) > Math.abs(a) ? q.u : a), 0); const P = [[-L, 0], ...s.held.map((q) => [clamp(q.x, -L + 8, L - 8), q.u]).sort((a, b) => a[0] - b[0]), [L, 0]]; for (let k = 1; k < P.length - 1; k++) { const a = P[k - 1], e = P[k + 1], lin = a[1] + (e[1] - a[1]) * (P[k][0] - a[0]) / Math.max(1e-3, e[0] - a[0]), sg = Math.sign(P[k][1]) || 1; if (P[k][1] * sg < lin * sg - 1e-6) { P.splice(k, 1); k = 0; } } T.set(c, (i) => { const x = -L + 2 * L * i / S; let u; if (s.held.length) { let k = 0; while (k < P.length - 2 && x > P[k + 1][0]) k++; const f = (x - P[k][0]) / Math.max(1e-3, P[k + 1][0] - P[k][0]); u = P[k][1] + (P[k + 1][1] - P[k][1]) * f; } else u = s.u * Math.sin(Math.PI * i / S); return clear(V ? [s.y + u, x, t.zs, s.r] : [x, s.y + u, t.zs, s.r], near, ax, sg); }, V ? [1, 0, 0] : [0, 1, 0]); }); T.done(); };
   } else if (t.pool) {
     // a clear, thick jelly in a white tray: what is inside is seen through it, greener the deeper it lies
     const { nx, ny, dye, h } = t, g = new THREE.PlaneGeometry(t.W, t.H, nx, ny), p = g.attributes.position, nm = g.attributes.normal, c = new THREE.BufferAttribute(new Float32Array(p.count * 3), 3), z = t.surf, w = nx + 1, sx = t.W / nx, sy = t.H / ny; g.setAttribute('color', c);
