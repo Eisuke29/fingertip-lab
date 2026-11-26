@@ -1,17 +1,17 @@
 // Stroking on the iPad itself: the PIP knuckle or the fingertip of one or two fingers is on the glass, a virtual finger goes on from there into the screen. Only the hand slides.
 // touch -> where the contact is, motion sensor -> how the iPad stands, front camera -> where the eyes are. No server, no PC.
-import { Point, Pair, Lead, Ahead, Tilt, Eye, TOP, live, camera, cameraOff, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=20';
-import { MATS, CONTACTS, FINGERS, ORDER, RF, PRESS, Tip, solve, restTip, reach, within, lengths, grain, seenAt, add } from './finger.js?v=20';
-import { settle } from './world.js?v=20';
-import { THINGS, makeThing } from './objects.js?v=20';
-import { Scene, DEPTH } from './scene.js?v=20';
-import { tone, LOOKS } from './skin.js?v=20';
-import { fingerFromPhoto, keepPhoto, lastPhoto } from './photo.js?v=20';
+import { Point, Pair, Lead, Ahead, Tilt, Eye, TOP, live, camera, cameraOff, makeEyes, eyeFrom, eyeToWorld, upOf } from './sensors.js?v=21';
+import { MATS, CONTACTS, FINGERS, ORDER, RF, PRESS, Tip, solve, restTip, reach, within, lengths, grain, seenAt, add } from './finger.js?v=21';
+import { settle } from './world.js?v=21';
+import { THINGS, makeThing } from './objects.js?v=21';
+import { Scene, DEPTH } from './scene.js?v=21';
+import { tone, LOOKS } from './skin.js?v=21';
+import { fingerFromPhoto, keepPhoto, lastPhoto } from './photo.js?v=21';
 import { Color, SRGBColorSpace } from 'three';
 let scene = null;
 
 const $ = (s) => document.querySelector(s), now = () => performance.now(), rad = (d) => d * Math.PI / 180, val = (id) => +$(id).value;
-const MINI = typeof screen !== 'undefined' && Math.min(screen.width, screen.height) === 744, MM = MINI ? 0.1558 : 0.1924, STORE = 'mpIpad.v7', VERSION = 20; // mm per CSS px: iPads have 264 ppi, the iPad mini (744 points wide) 326; the finger must have its real size
+const MINI = typeof screen !== 'undefined' && Math.min(screen.width, screen.height) === 744, MM = MINI ? 0.1558 : 0.1924, STORE = 'mpIpad.v7', VERSION = 21; // mm per CSS px: iPads have 264 ppi, the iPad mini (744 points wide) 326; the finger must have its real size
 // contact: joint / tip, pose: flat / side (thumb up), n: one or two fingers, pair: first finger of the two; effect: where the feeling comes from
 const O = { contact: 'joint', pose: 'flat', n: '1', finger: 'index', pair: '0', effect: 'both', group: 'thing', thing: 'harp', mat: 'sand', kind: 'finger', hand: 'right', eye: 'track', cam: 'top', look: 'real', skin: 'auto', cut: '0' };
 const REMEMBER = ['contact', 'pose', 'n', 'finger', 'pair', 'effect', 'group', 'thing', 'mat', 'hand', 'cam', 'look', 'skin'];
@@ -20,6 +20,7 @@ const newFinger = () => ({ lead: new Lead(), ahead: new Ahead(), tip: new Tip(),
 const S = { started: false, ready: false, raw: [], cancels: 0, contact: new Point(), fg: [newFinger(), newFinger()], tilt: new Tilt(), eye: new Eye(), eyes: null, xShift: saved.xShift || 0, zScale: saved.zScale || 1, thing: null, skin: null, fps: 0, rec: null, err: '', get root() { return this.fg[0].root; }, get f() { return this.fg[0].f; }, get tip() { return this.fg[0].tip; } };
 const two = () => O.n === '2', who = () => (two() ? [ORDER[+O.pair], ORDER[+O.pair + 1]] : [O.finger]), tracker = () => (two() ? new Pair(O.hand, +O.pair, O.pose) : new Point(O.hand, ORDER.indexOf(O.finger), O.pose)), tracks = () => (two() ? S.contact.t : [S.contact]);
 const clean = () => { for (const q of S.fg) { q.x = q.dx = null; q.root = q.f = null; q.tip.reset(); q.lead.reset(); q.ahead.reset(); q.bob = 0; } S.thing?.reset(); };
+const HOVER = new URLSearchParams(location.search).has('hover'); let HV = null; // the other proposal, under its own link: the fist comes closer without touching, the finger goes in (public/hover)
 const GHOST = new URLSearchParams(location.search).has('ghost'); // draws the real finger too (to check on a PC how the two join)
 const landscape = () => innerWidth > innerHeight;
 
@@ -56,7 +57,7 @@ const doc = TOP.document, full = () => !!(doc.fullscreenElement || doc.webkitFul
 const goFull = async () => { try { const e = doc.documentElement; await (e.requestFullscreen || e.webkitRequestFullscreen).call(e); } catch {} };
 const listen = () => TOP.addEventListener('devicemotion', (S.motion = (e) => { const g = e.accelerationIncludingGravity; if (g && g.z != null) S.tilt.add(g, landscape(), now()); }));
 addEventListener('pagehide', () => { try { TOP.removeEventListener('devicemotion', S.motion); } catch {} });
-function begin() { $('#start').hidden = true; S.started = true; TOP.shell ||= {}; TOP.shell.started = true; try { TOP.navigator.wakeLock?.request('screen').catch(() => {}); } catch {} }
+function begin() { $('#start').hidden = true; S.started = true; HV?.start(); TOP.shell ||= {}; TOP.shell.started = true; try { TOP.navigator.wakeLock?.request('screen').catch(() => {}); } catch {} }
 $('#go').onclick = async () => {
   if (S.ready) { if (canFull() && !full()) goFull(); begin(); return; }
   $('#go').disabled = true; TOP.shell ||= {};
@@ -70,7 +71,7 @@ $('#go').onclick = async () => {
 };
 const renew = () => { const q = new URLSearchParams(location.search); q.set('t', Date.now()); location.replace(`${location.pathname}?${q}`); };
 $('#fs').onclick = goFull; $('#renew').onclick = renew;
-$('#noeye').onclick = () => { O.eye = 'fixed'; S.eyes?.stop(); cameraOff(); syncSeg('#eyes', 'eye'); };
+$('#noeye').onclick = () => { O.eye = 'fixed'; S.eyes?.stop(); if (!HOVER) cameraOff(); syncSeg('#eyes', 'eye'); }; // (with the iPhone the camera stays allowed: only then the two find each other directly)
 $('#again').onclick = renew;
 async function startEyes() {
   S.eyeErr = '';
@@ -83,6 +84,7 @@ function cameraPlace() {
 }
 function startScreen() { // one tap; it goes on by itself when tilt and eyes are measured
   const tl = S.tilt, m = measured(), tOk = tl.deg != null && tl.still, eOk = O.eye !== 'track' || !!m, wait = S.asked ? now() - S.asked : 0;
+  if (HOVER && O.eye === 'track' && !m && tOk && tl.deg < 12 && wait > 1500) { O.eye = 'fixed'; S.eyes?.stop(); syncSeg('#eyes', 'eye'); } // lying flat on the desk the camera cannot see the face
   item('#cTilt', tOk, '', S.tiltErr); item('#cEye', eOk, '', S.eyeErr); if (!S.asked) return;
   $('#go').textContent = !(tOk || S.tiltErr) && tl.moving ? 'iPadを動かさないで' : eOk ? '測っています' : S.eyeErr ? 'カメラが使えません' : '画面を見てください';
   $('#sMsg').textContent = S.tiltErr ? `${S.tiltErr}（26°として進みます）` : S.eyeErr && !eOk ? S.eyeErr : ''; $('#noeye').hidden = eOk || wait < 2500;
@@ -129,7 +131,7 @@ let shown = null; const key = () => `${O.contact}.${O.pose}`;
 const HOW = (tip) => `<svg viewBox="0 0 280 150" fill="none" stroke-linecap="round" stroke-linejoin="round" font-size="12" font-weight="600"><path d="${tip ? 'M117 88L78 132' : 'M120 88v46'}" stroke="#ffb56b" stroke-width="20"/><path d="M10 80h260" stroke="#9fb4c4" stroke-width="3"/><path d="${tip ? 'M186 6L126 67' : 'M184 12L120 66L160 59'}" stroke="#e9bc9c" stroke-width="20"/><path d="M34 30h52M42 22l-8 8 8 8M78 22l8 8-8 8" stroke="#f4f2ef" stroke-width="2.5"/><g stroke="none"><text x="60" y="56" text-anchor="middle" fill="#f4f2ef">すべらせる</text><text x="206" y="46" fill="#e9bc9c">自分の指</text><text x="268" y="98" text-anchor="end" fill="#9fb4c4">画面</text><text x="140" y="126" fill="#ffb56b">画面の中の指</text></g></svg>`;
 $('#label').onclick = (e) => { tray(true); tab(e.target.id === 'way' ? 'hand' : 'touch'); };
 function way() {
-  shown = key(); for (const id of ADJ) $(`#${id}`).value = own[shown][id]; $('#fingers').hidden = two(); $('#pairs').hidden = !two(); S.contact = tracker(); clean(); mend(); labels(); label(); store(); $('#how').textContent = `${$('#way').textContent}を画面に付けて、すべらせます`; $('#pose').innerHTML = HOW(O.contact === 'tip');
+  shown = key(); for (const id of ADJ) $(`#${id}`).value = own[shown][id]; $('#fingers').hidden = two(); $('#pairs').hidden = !two(); S.contact = tracker(); clean(); mend(); labels(); label(); store(); $('#how').textContent = HOVER ? `こぶしを画面に近づけると、${two() ? '指' : FINGERS[O.finger].name}が中に入ります。iPhoneも使います` : `${$('#way').textContent}を画面に付けて、すべらせます`; HV?.point(O.contact, who()[0]); $('#pose').innerHTML = HOW(O.contact === 'tip');
 }
 const labels = () => { for (const i of document.querySelectorAll('#tray input[type=range]')) i.previousElementSibling.textContent = `${i.value}${i.dataset.u}`; };
 const moved = () => { labels(); if (shown) for (const id of ADJ) own[shown][id] = val(`#${id}`); store(); }; for (const i of document.querySelectorAll('#tray input[type=range]')) i.oninput = moved;
@@ -140,7 +142,7 @@ seg('#contacts', [['joint', pic('joint', '第2関節')], ['tip', pic('tip', '指
 seg('#fingers', ORDER.map((k) => [k, FINGERS[k].name]), 'finger', way); seg('#pairs', [0, 1, 2].map((i) => [`${i}`, `${FINGERS[ORDER[i]].name}＋${FINGERS[ORDER[i + 1]].name}`]), 'pair', way);
 seg('#hands', [['left', '左手'], ['right', '右手']], 'hand', () => { document.body.classList.toggle('left', O.hand === 'left'); way(); }); document.body.classList.toggle('left', O.hand === 'left');
 seg('#looks', LOOKS.map(([k, n]) => [k, card(`<i class="l-${k}"></i>`, n)]), 'look', () => { mend(); store(); if (O.look === 'photo' && !S.photo) $('#photo').click(); }); seg('#skins', [['auto', '顔から自動'], ['hand', '手で選ぶ']], 'skin', () => store()); seg('#kinds', [['finger', '指'], ['stick', '棒'], ['cursor', 'カーソル']], 'kind', mend);
-seg('#eyes', [['track', '視線追従'], ['fixed', '追従しない']], 'eye', () => { if (O.eye === 'track') startEyes(); else { S.eyes?.stop(); cameraOff(); } }); seg('#cams', [['top', '上'], ['left', '左'], ['right', '右']], 'cam', () => { cameraPlace(); store(); });
+seg('#eyes', [['track', '視線追従'], ['fixed', '追従しない']], 'eye', () => { if (O.eye === 'track') startEyes(); else { S.eyes?.stop(); if (!HOVER) cameraOff(); } }); seg('#cams', [['top', '上'], ['left', '左'], ['right', '右']], 'cam', () => { cameraPlace(); store(); });
 // the blade: falls once, so many seconds after it was switched on
 function mend() { if (!scene) return; scene.blade.mend(); $('#mend').hidden = true; }
 seg('#cuts', [['0', 'なし'], ['10', '10秒後'], ['30', '30秒後']], 'cut', () => { mend(); S.cutAt = +O.cut ? now() + 1000 * O.cut : null; }); $('#mend').onclick = mend;
@@ -191,12 +193,13 @@ function finger(dt, t) {
   scene.shade(val('#shade') / 100); for (const q of scene.skins) { q.setThick(val('#thick') / 100); q.setCut({ taper: val('#taper') / 100, over: val('#over'), depth: val('#deep'), shade: val('#cshade') / 100, fade: val('#fade'), blob: val('#blob') / 100 }); }
   thing(O.group === 'thing' ? low : null); for (const q of scene.skins) q.setGel(S.thing?.deep ? -S.thing.surf : null); const T = S.thing, mkey = T ? 'slime' : O.mat, M = MATS[mkey], fit = (l) => within(R, l, gf > 0 ? 1 : 0); scene.setDepth(low + PRESS + (T ? 0 : val('#near') * 0.4)); scene.setMaterial(mkey);
   tracks().forEach((c, i) => {
-    const q = S.fg[i], p = c.p; if (!p) { if (q.root) { q.x = q.dx = null; q.root = q.f = null; q.tip.reset(); T?.reset(i); q.lead.reset(); q.ahead.reset(); } return; }
-    const at = c.down && q.lead.at(t, val('#lead')) || p, [x, y] = c.down || !q.root ? at : q.at; q.at = [x, y]; const A = q.ahead.step(c.down ? q.lead.vel : [0, 0], val('#ahead'), dt);
-    q.root = [x + A[0] + val('#offx'), y + A[1] + val('#off'), C.h];
+    if (HV && i === 0) HV.touch(c.down ? c.p : null, t); const hv0 = HV && i === 0 && !c.down ? HV.sample(t) : null, hv = hv0 && hv0.lift < -low - 2 ? hv0 : null; // not touching: the iPhone says where the knuckle is and how high
+    const q = S.fg[i], p = hv ? hv.p : c.p; q.hov = !!hv; if (!p) { if (q.root) { q.x = q.dx = null; q.root = q.f = null; q.tip.reset(); T?.reset(i); q.lead.reset(); q.ahead.reset(); } return; }
+    const at = !hv && c.down && q.lead.at(t, val('#lead')) || p, [x, y] = hv || c.down || !q.root ? at : q.at; q.at = [x, y]; const A = q.ahead.step(c.down ? q.lead.vel : [0, 0], val('#ahead'), dt);
+    q.root = [x + A[0] + val('#offx'), y + A[1] + val('#off'), C.h + (hv ? hv.lift : 0)];
     { const v = q.lead.vel, sp = Math.hypot(...v), n = c.down && sp > 5 ? Math.min(val('#smear'), 1.2 * q.lead.miss + sp * 0.004) / sp : 0; q.smear = [0, 1].map((k) => q.smear[k] + (v[k] * n - q.smear[k]) * Math.min(1, dt * 20)); }
     const o = { ...base, root: q.root, reach: R, kind: O.kind }, rest = restTip(o);
-    if (scene.skins[i].slice != null) { q.tip.lag = [0, 0, 0]; q.f = solve(o); q.pull = q.lean = [0, 0]; } // what is left of it feels nothing
+    if (scene.skins[i].slice != null || hv && hv.lift > 4) { if (hv && (q.x || q.tip.p)) { q.x = q.dx = null; q.tip.reset(); T?.reset(i); } q.tip.lag = [0, 0, 0]; q.f = solve(o); q.pull = q.lean = [0, 0]; } // what is left of it feels nothing; nor does a finger that has not come down yet
     else if (T) {
       const lag0 = T.step(i, rest, dt, { fit, gain: gf, go, back: q.f && [0, 1, 2].map((k) => q.f.dip[k] - q.f.tip[k]) }), lag = spring(q, lag0, R, dt); q.tip.lag = lag; q.pose = { ...o, lag }; q.rz = rest[2]; q.again = T.w ? { ...o, lag, more: T.more } : null; q.f = T.w ? settle(T.w, q.again) : solve({ ...o, lag, ...(T.touch != null ? { lo: T.touch + RF - PRESS - 2.5 } : T.more > 0 ? { lo: rest[2] + T.more } : {}) }); T.tipZ = q.f.tip[2]; q.pull = [0, 1].map((k) => -lag[k] * M.drag * Math.min(1.4, go)); q.lean = q.pull;
     } else {
@@ -221,17 +224,17 @@ function failed(x) { S.fails = (S.fails || 0) + 1; S.err = `${x?.message || x}`;
 function loop() { requestAnimationFrame(loop); try { frame(); } catch (x) { failed(x); $('#msg').textContent = `エラー：${S.err}`; for (const q of S.fg) q.root = q.f = null; } }
 function frame() {
   const began = now(), t = began, dt = Math.min(0.05, (t - last) / 1000); last = t; S.fps += ((1 / Math.max(dt, 1e-3)) - S.fps) * 0.05;
-  noTouch(); const m = measured(), eye = S.eye.update(m, fallback(), t, O.eye === 'track');
+  noTouch(); HV?.step(t); const m = measured(), eye = S.eye.update(m, fallback(), t, O.eye === 'track');
   if (!S.started) startScreen(); { const h = !canFull() || full(); if ($('#fs').hidden !== h) $('#fs').hidden = h; }
   { const on = S.started && S.contact.down && S.fit == null; if (on !== S.was) { S.was = on; document.body.classList.toggle('touching', on); if (on) tray(false); } }
   scene.light(upOf(tiltDeg()));
   const down = S.contact.down; if (S.eyes) S.eyes.busy = S.started && down && S.fg.some((q) => (q.lead.speed || 0) > 10);
   if (S.started) finger(dt, t); else { if (t - (S.tEvent || 0) > 40) sense(); for (const q of S.fg) q.f = null; } lines();
   if (S.started && dt < 0.05 && t - (S.tSlow ||= t) > 3000) { S.tSlow = t; if (S.fps < 50) scene.lighter(); }
-  const lay = () => scene.finger(tracks().map((c, i) => ({ ...S.fg[i], alpha: c.down ? 1 : 0.5, width: FINGERS[who()[i]].w * 1.07 })), O.kind, O.contact, O.look, S.yaw || 0, gains().go); lay();
+  const lay = () => scene.finger(tracks().map((c, i) => ({ ...S.fg[i], alpha: c.down || S.fg[i].hov ? 1 : 0.5, width: FINGERS[who()[i]].w * 1.07 })), O.kind, O.contact, O.look, S.yaw || 0, gains().go); lay();
   for (let k = 0, T = S.thing; k < 4 && T && T.need > 0.05; k++) { T.need = 0; for (const q of S.fg) if (q.root && q.f && q.pose) { const r = q.f.rest; q.f = T.w ? settle(T.w, { ...q.pose, more: T.more }) : solve({ ...q.pose, lo: q.rz + T.more }); q.f.rest = r; } lay(); } // the finger as drawn is still inside a box: raised at once, drawn again
   if (S.started) bomb(t, dt); const col = skinColor(dt); for (const q of scene.skins) { q.photoGain = 2 ** (val('#bright') / 50); q.setColor(col); } scene.ghost(GHOST && S.f && O.contact === 'joint' ? [S.root, S.f.base, S.yaw || 0, [val('#l0'), val('#l1'), val('#l2')]] : null); scene.render([eye[0] * val('#peek') / 100 + val('#vx'), eye[1] + val('#vy'), eye[2]]);
-  const missing = two() && down && !S.contact.t.every((q) => q.down), msg = scene.lost ? '絵が止まりました。［最新にする］を押してください' : t < flashT ? flashM : !S.started ? '' : S.rec ? `記録中 あと ${Math.max(0, Math.ceil(20 - (t - S.rec.t0) / 1000))} 秒` : t - (S.cancelAt || -1e9) < (S.cancels > 2 ? 8000 : 4000) ? (S.cancels > 2 ? 'iPadの設定で「4本指・5本指のジェスチャ」をオフにしてください' : 'iPadが接触を打ち切りました。いちど手を離してください') : !S.fg.some((q) => q.root) ? `${$('#way').textContent}を画面に付けて、すべらせる` : missing ? 'もう1本も画面に付ける' : O.eye === 'track' && S.eye.src !== 'measured' && t - (S.eye.tLast || 0) > 1500 ? '顔が見えません' : '';
+  const missing = two() && down && !S.contact.t.every((q) => q.down), msg = scene.lost ? '絵が止まりました。［最新にする］を押してください' : t < flashT ? flashM : !S.started ? '' : S.rec ? `記録中 あと ${Math.max(0, Math.ceil(20 - (t - S.rec.t0) / 1000))} 秒` : t - (S.cancelAt || -1e9) < (S.cancels > 2 ? 8000 : 4000) ? (S.cancels > 2 ? 'iPadの設定で「4本指・5本指のジェスチャ」をオフにしてください' : 'iPadが接触を打ち切りました。いちど手を離してください') : !S.fg.some((q) => q.root) ? (HV ? HV.msg(t) || 'こぶしを画面に近づける' : `${$('#way').textContent}を画面に付けて、すべらせる`) : missing ? 'もう1本も画面に付ける' : O.eye === 'track' && S.eye.src !== 'measured' && t - (S.eye.tLast || 0) > 1500 ? '顔が見えません' : '';
   if ($('#msg').textContent !== msg) $('#msg').textContent = msg;
   if (S.rec) { const f = S.f; S.rec.rows.push({ t: +(t - S.rec.t0).toFixed(1), c: S.raw.map((c) => [c.id, +c.x.toFixed(2), +c.y.toFixed(2), +c.rx.toFixed(2), +c.ry.toFixed(2)]), p: tracks().map((q) => q.p?.map((v) => +v.toFixed(2))), root: S.fg.map((q) => q.root?.map((v) => +v.toFixed(2))), lag: S.fg.map((q) => q.tip.lag.map((v) => +v.toFixed(2))), bend: f && +f.bendDeg.toFixed(1), miss: +S.fg[0].lead.miss.toFixed(2), tilt: S.tilt.deg && +S.tilt.deg.toFixed(2), eye: eye.map((v) => +v.toFixed(1)), src: S.eye.src, fps: +S.fps.toFixed(0) }); if (t - S.rec.t0 > 20000) sendRec(); }
   if (!$('#tray').hidden && $('#valBox').open && (S.tickV = (S.tickV || 0) + 1) % 6 === 0) values(m, eye);
@@ -243,8 +246,9 @@ function values(m, eye) {
   $('#vals').innerHTML = row('iPadの傾き', S.tilt.deg == null ? '測れない（26°）' : `${S.tilt.deg.toFixed(1)}°`)
     + row('目', { measured: '測っている', held: '見失った（保持）', default: '既定の位置' }[S.eye.src]) + row('目までの距離', cm(Math.hypot(...eye))) + row('目の左右／手前／高さ', `${cm(w.side)}／${cm(w.back)}／${cm(w.height)}`)
     + row('仮想の指先が見える所', s ? `${Math.abs(dx).toFixed(0)} mm ${dx < 0 ? '左' : '右'}・${Math.abs(dy).toFixed(0)} mm ${dy < 0 ? '手前' : '奥'}` : '—') + row('遅れ／しなり', S.f ? `${Math.hypot(...S.tip.lag).toFixed(0)} mm／${S.f.bendDeg.toFixed(0)}°` : '—')
-    + row('予測のはずれ', `${S.fg[0].lead.miss.toFixed(1)} mm`) + row('肌の色', O.skin === 'auto' ? (S.skin ? '顔から測っている' : '顔を待っています（手で選んだ色）') : '手で選んだ色') + row('接触の数／つなぎ直し', `${S.raw.length}／${S.contact.jumps}`) + row('打ち切られた接触', S.cancels) + row('指の受け取り', `タッチ ${IN.touch}・ポインタ ${IN.pointer}（${IN.by || 'まだ'}）`) + row('エラー', S.err ? `${S.err}（${S.fails}回）` : 'なし') + row('版／画面', `${VERSION}／${MINI ? 'mini（326）' : '264'}`) + row('顔の認識', S.eyes?.cost ? `${S.eyes.cost.toFixed(0)} ms（${S.eyes.mode === 'worker' ? '別スレッド' : '同じスレッド'}）` : '—') + row('速さ／1コマの計算', `${S.fps.toFixed(0)} fps／${(S.ms || 0).toFixed(1)} ms`);
+    + row('予測のはずれ', `${S.fg[0].lead.miss.toFixed(1)} mm`) + row('肌の色', O.skin === 'auto' ? (S.skin ? '顔から測っている' : '顔を待っています（手で選んだ色）') : '手で選んだ色') + row('接触の数／つなぎ直し', `${S.raw.length}／${S.contact.jumps}`) + row('打ち切られた接触', S.cancels) + row('指の受け取り', `タッチ ${IN.touch}・ポインタ ${IN.pointer}（${IN.by || 'まだ'}）`) + row('エラー', S.err ? `${S.err}（${S.fails}回）` : 'なし') + (HV ? row('iPhone', HV.info().slice(0, 5).join('<br>')) : '') + row('版／画面', `${VERSION}／${MINI ? 'mini（326）' : '264'}`) + row('顔の認識', S.eyes?.cost ? `${S.eyes.cost.toFixed(0)} ms（${S.eyes.mode === 'worker' ? '別スレッド' : '同じスレッド'}）` : '—') + row('速さ／1コマの計算', `${S.fps.toFixed(0)} fps／${(S.ms || 0).toFixed(1)} ms`);
 }
 try { scene = new Scene($('#scene')); $('#scene').addEventListener('webglcontextlost', () => { scene.lost = true; }); $('#scene').addEventListener('webglcontextrestored', () => { scene.lost = false; }); const lay = () => { scene.layout(MM); cameraPlace(); }; lay(); addEventListener('resize', lay); scene.setMaterial(O.mat); scene.warm(); requestAnimationFrame(loop); lastPhoto().then((p) => { if (p) { S.photo = p; scene.skin.setPhoto(p.texture, p.mean); scene.skin.look = ''; } }); } catch (e) { $('#sMsg').textContent = `描画できません（${e.message}）。再読み込みしてください`; }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { try { TOP.navigator.wakeLock?.request('screen').catch(() => {}); } catch {} if (S.asked && O.eye === 'track') startEyes(); } });
-window.mpIpad = { S, O, get scene() { return scene; } };
+if (HOVER) { document.title = '近づけて入れる'; document.querySelector('#start h1').textContent = '近づけて入れる'; import('../hover/pad.js?v=2').then((m) => { HV = new m.Hover({ MM, camera }); HV.point(O.contact, who()[0]); $('#how').textContent = 'こぶしを画面に近づけると、指が中に入ります。iPhoneも使います'; if (S.started) HV.start(); }).catch(failed); }
+window.mpIpad = { S, O, get scene() { return scene; }, get hover() { return HV; } };

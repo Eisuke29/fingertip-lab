@@ -1,4 +1,4 @@
-// Step 1 of "the fist comes closer, the finger goes in": do the iPhone and the iPad find each other, and how long does it take?
+// (check.html) Step 1 of "the fist comes closer, the finger goes in": do the iPhone and the iPad find each other, and how long does it take?
 import { Link, newRoom } from './link.js?v=1';
 const $ = (s) => document.querySelector(s), q = new URLSearchParams(location.search), phone = !!q.get('room'), room = q.get('room') || newRoom(), KEY = 'hover.results';
 let link = null, cam = null, place = null, runs = (() => { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch { return []; } })(), t0 = 0, first = {};
